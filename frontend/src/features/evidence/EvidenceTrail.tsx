@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, FileText, Search } from "lucide-react";
 import { useState } from "react";
 import { moveLabel, protocolLabel } from "../pedagogy/pedagogyLabels";
-import { buildCitations, summarizeWebCalls } from "./evidenceHelpers";
+import { buildCitations, evidenceSummary, normalizeEvidence, summarizeWebCalls } from "./evidenceHelpers";
 import type { TurnEvidence } from "../../types";
 
 export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
@@ -12,6 +12,8 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
     ? summarizeWebCalls((rag.web_tools?.calls as never) ?? [])
     : { searches: [], reads: [] };
   const citations = rag ? buildCitations(rag) : [];
+  const evidenceRefs = normalizeEvidence(evidence);
+  const summary = evidenceSummary(evidenceRefs);
   const successfulReads = web.reads.filter((read) => read.ok).length;
   const webUsed = web.searches.length > 0 || web.reads.length > 0;
   const webError = rag?.web_tools?.error;
@@ -31,6 +33,11 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
         {successfulReads ? <span className="web-flag">阅读 {successfulReads}</span> : null}
         {recoveredResearchUsed ? <span className="web-flag">恢复研究来源</span> : null}
         {citations.length ? <span className="cite-flag">本地引用 {citations.length}</span> : null}
+        {summary.total ? (
+          <span className="evidence-summary-flag">
+            统一证据 {summary.total}（本地 {summary.local} · 联网 {summary.web}）
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div className="evidence-detail">
