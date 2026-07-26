@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -107,10 +107,15 @@ def _source_records() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return selected, rejected
 
 
-def _run(*, status: str = "completed", source_block: str = "SOURCE BLOCK"):
+def _run(
+    *,
+    run_id: str = "research-1",
+    status: str = "completed",
+    source_block: str = "SOURCE BLOCK",
+):
     selected, rejected = _source_records()
     return SimpleNamespace(
-        id="research-1",
+        id=run_id,
         status=status,
         source_block=source_block,
         provider_status="partial",
@@ -139,6 +144,33 @@ def _service(tmp_path: Path) -> ExternalDataPolicyChatService:
         build_role_prompt=lambda *_args, **_kwargs: "ROLE",
     )
     return ExternalDataPolicyChatService(repository, dependencies)
+
+
+def _command_for_run(
+    run: Any,
+    *,
+    session_id: str,
+    continuation_of_turn_id: str | None = None,
+    retry_of_turn_id: str | None = None,
+    turn_id: str | None = None,
+    partial_reply: str = "",
+) -> PolicyChatCommand:
+    return _chat_command(
+        ChatRequest(
+            user_input="Use the recovered research",
+            session_id=session_id,
+            task_intent="quick_answer",
+            web_context=run.source_block,
+            web_context_run_id=run.id,
+            web_policy="auto",
+            cloud_context_policy="allow_local_evidence",
+            continuation_of_turn_id=continuation_of_turn_id,
+            retry_of_turn_id=retry_of_turn_id,
+            turn_id=turn_id,
+            partial_reply=partial_reply,
+        ),
+        _ResearchService(run),
+    )
 
 
 def test_chat_command_copies_only_sanitized_research_source_truth():
@@ -190,18 +222,7 @@ def test_policy_service_persists_research_lifecycle_truth_for_live_and_restore(
     tmp_path: Path,
 ):
     run = _run()
-    command = _chat_command(
-        ChatRequest(
-            user_input="Use the recovered research",
-            session_id="chat-research-truth",
-            task_intent="quick_answer",
-            web_context=run.source_block,
-            web_context_run_id=run.id,
-            web_policy="auto",
-            cloud_context_policy="allow_local_evidence",
-        ),
-        _ResearchService(run),
-    )
+    command = _command_for_run(run, session_id="chat-research-truth")
     service = _service(tmp_path)
 
     prepared = service.start_turn(command)
@@ -240,3 +261,66 @@ def test_web_policy_block_does_not_persist_research_source_details(tmp_path: Pat
     assert stored is not None
     assert "research_sources" not in stored.rag_snapshot
     assert stored.evidence_snapshot["refs"] == []
+
+
+def test_continuation_cannot_switch_to_a_different_research_run(tmp_path: Path):
+    service = _service(tmp_path)
+    first_run = _run()
+    first = service.start_turn(
+        _command_for_run(first_run, session_id="chat-research-continuation")
+    )
+    service.interrupt_turn(first, "partial")
+
+    second_run = _run(
+        run_id="research-2",
+        source_block="SECOND SOURCE BLOCK",
+    )
+    switched = _command_for_run(
+        second_run,
+        session_id="chat-research-continuation",
+        continuation_of_turn_id=first.turn.id,
+        turn_id=first.turn.id,
+        partial_reply="partial",
+    )
+
+    with pytest.raises(ValueError, match="cannot switch ResearchRun evidence"):
+        service.start_turn(switched)
+
+
+def test_same_run_continuation_uses_frozen_turn_sources_not_client_payload(
+    tmp_path: Path,
+):
+    service = _service(tmp_path)
+    run = _run()
+    first = service.start_turn(
+        _command_for_run(run, session_id="chat-research-frozen")
+    )
+    original_sources = first.rag["research_sources"]
+    service.interrupt_turn(first, "partial")
+
+    continuation = _command_for_run(
+        run,
+        session_id="chat-research-frozen",
+        continuation_of_turn_id=first.turn.id,
+        turn_id=first.turn.id,
+        partial_reply="partial",
+    )
+    tampered = replace(
+        continuation,
+        research_sources={
+            "run_id": run.id,
+            "provider_status": "found",
+            "stop_reason": "tampered",
+            "selected_sources": [],
+            "rejected_sources": [],
+        },
+    )
+
+    resumed = service.start_turn(tampered)
+
+    assert resumed.rag["research_sources"] == original_sources
+    assert resumed.rag["research_sources"]["stop_reason"] == "budget_exhausted"
+    assert [
+        ref["lifecycle_status"]
+        for ref in resumed.rag["evidence_snapshot"]["refs"]
+    ] == ["selected", "rejected"]
