@@ -382,7 +382,7 @@ class ExternalDataPolicyChatService(ChatService):
             turn=streaming,
             messages=messages,
             route=route,
-            rag=rag,
+            rag=streaming.rag_snapshot,
             runtime_modes=runtime_modes,
             memory_enabled=bool(memory_bundle),
             web_context_used=bool(web_context),
