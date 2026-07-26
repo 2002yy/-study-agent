@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.domain.evidence import (
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION,
+    ClaimEvidenceLinkV1,
     build_evidence_snapshot,
 )
 
@@ -143,7 +144,7 @@ def test_research_run_preserves_selected_and_rejected_assessments():
     assert snapshot.refs[1].rejection_reason == "duplicate"
 
 
-def test_claim_links_require_explicit_known_pedagogy_evidence_ids():
+def test_pedagogy_evidence_ids_remain_distinct_from_claim_links():
     rag = {
         "status": "found",
         "results": [
@@ -164,12 +165,54 @@ def test_claim_links_require_explicit_known_pedagogy_evidence_ids():
         pedagogy_evidence_ids=("chunk-1", "unknown-evidence"),
     )
 
+    assert snapshot.pedagogy_evidence_ids == ("chunk-1",)
+    assert snapshot.claim_links == ()
+
+
+def test_claim_links_require_real_claim_ids_and_known_evidence():
+    snapshot = build_evidence_snapshot(
+        rag={
+            "status": "found",
+            "results": [
+                {
+                    "chunk": {
+                        "chunk_id": "chunk-1",
+                        "title": "Evidence",
+                        "source_path": "evidence.md",
+                        "text": "supported",
+                    },
+                    "score": 0.9,
+                }
+            ],
+        },
+        claim_links=(
+            ClaimEvidenceLinkV1(
+                claim_id="claim-1",
+                evidence_id="chunk-1",
+                support_type="direct_support",
+                confidence=0.95,
+            ),
+            ClaimEvidenceLinkV1(
+                claim_id="claim-2",
+                evidence_id="unknown-evidence",
+                support_type="direct_support",
+                confidence=0.8,
+            ),
+            ClaimEvidenceLinkV1(
+                claim_id="",
+                evidence_id="chunk-1",
+                support_type="direct_support",
+                confidence=0.8,
+            ),
+        ),
+    )
+
     assert [link.to_dict() for link in snapshot.claim_links] == [
         {
-            "claim_id": "pedagogy-plan",
+            "claim_id": "claim-1",
             "evidence_id": "chunk-1",
-            "support_type": "explicit_pedagogy_reference",
-            "confidence": 1.0,
+            "support_type": "direct_support",
+            "confidence": 0.95,
         }
     ]
 
