@@ -61,6 +61,37 @@ def _source_policy(route: dict[str, Any]) -> SourcePolicy:
     return cast(SourcePolicy, value)
 
 
+def _restore_persisted_research_truth(
+    command: PolicyChatCommand,
+    persisted_turn: ChatTurn | None,
+) -> PolicyChatCommand:
+    """Prevent continuation/retry from switching ResearchRun evidence owners."""
+
+    if persisted_turn is None:
+        return command
+    web_context = persisted_turn.rag_snapshot.get("web_context")
+    persisted_run_id = ""
+    if isinstance(web_context, dict):
+        persisted_run_id = str(web_context.get("run_id", "") or "").strip()
+    requested_run_id = str(command.web_context_run_id or "").strip()
+    if requested_run_id:
+        if not persisted_run_id or requested_run_id != persisted_run_id:
+            raise ValueError(
+                "Continuation/retry cannot switch ResearchRun evidence: "
+                f"{requested_run_id}"
+            )
+        persisted_sources = persisted_turn.rag_snapshot.get("research_sources")
+        sources = (
+            deepcopy(persisted_sources)
+            if isinstance(persisted_sources, dict)
+            else deepcopy(command.research_sources)
+            if isinstance(command.research_sources, dict)
+            else None
+        )
+        return replace(command, research_sources=sources)
+    return replace(command, research_sources=None)
+
+
 class ExternalDataPolicyChatService(ChatService):
     """Apply user-controlled source and model-context gates."""
 
@@ -101,6 +132,7 @@ class ExternalDataPolicyChatService(ChatService):
         thread = self.repository.ensure_chat_thread(thread_id)
         learning_state = LearningState.from_dict(thread.learning_state)
         persisted_turn = existing if is_continuation else retry_parent
+        command = _restore_persisted_research_truth(command, persisted_turn)
         task_contract = resolve_turn_task_contract(
             user_input=command.user_input,
             state=learning_state,
