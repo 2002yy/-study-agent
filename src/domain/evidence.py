@@ -102,14 +102,7 @@ class _EvidenceAccumulator:
             self._refs[ref.id] = ref
             self._order.append(ref.id)
             return
-        if _STATUS_PRIORITY[ref.lifecycle_status] < _STATUS_PRIORITY[current.lifecycle_status]:
-            self._refs[ref.id] = _merge_ref(current, ref)
-            return
-        if (
-            _STATUS_PRIORITY[ref.lifecycle_status]
-            == _STATUS_PRIORITY[current.lifecycle_status]
-            and ref.score > current.score
-        ):
+        if _should_replace(current, ref):
             self._refs[ref.id] = _merge_ref(current, ref)
 
     def values(self) -> tuple[EvidenceRefV1, ...]:
@@ -125,13 +118,12 @@ def build_evidence_snapshot(
 ) -> EvidenceSnapshotV1:
     """Project current authoritative evidence into a durable v1 snapshot.
 
-    Lifecycle status is conservative:
-    - local chunks become selected only when the disclosure decision selected
-      the same source_id;
+    Lifecycle status is deliberately conservative:
+    - local chunks become selected only when disclosure selected that chunk ID;
     - WebTool search results are candidates and successful reads are read;
     - ResearchRun selected/rejected records retain their durable assessment;
-    - no answer claim is invented. Claim links are emitted only for explicit
-      pedagogy evidence IDs that resolve to a ref in this snapshot.
+    - ordinal legacy web IDs such as ``web-1`` never become selected URLs;
+    - answer claim links are emitted only for explicit known evidence IDs.
     """
 
     disclosed = tuple(unit for unit in disclosed_units if isinstance(unit, dict))
@@ -141,15 +133,9 @@ def build_evidence_snapshot(
         if _text(unit.get("source_id"))
     }
     refs = _EvidenceAccumulator()
-
     _add_local_refs(refs, rag=rag, selected_ids=selected_ids, policy=disclosure_policy)
     _add_web_tool_refs(refs, rag=rag)
     _add_research_run_refs(refs, rag=rag)
-    _add_selected_unit_fallbacks(
-        refs,
-        disclosed=disclosed,
-        policy=disclosure_policy,
-    )
 
     projected = refs.values()
     known_ids = {ref.id for ref in projected}
@@ -282,7 +268,11 @@ def _add_research_run_refs(
         return
     provider_status = _text(research.get("provider_status"))
     run_id = _text(research.get("run_id"))
-    for status, key in (("selected", "selected_sources"), ("rejected", "rejected_sources")):
+    statuses: tuple[tuple[EvidenceLifecycleStatus, str], ...] = (
+        ("selected", "selected_sources"),
+        ("rejected", "rejected_sources"),
+    )
+    for status, key in statuses:
         for record in research.get(key) or ():
             if not isinstance(record, dict):
                 continue
@@ -303,12 +293,6 @@ def _add_research_run_refs(
             evidence_id = _web_id(url=url, title=title) if (url or title) else source_id
             if not evidence_id:
                 continue
-            selected_reason = ""
-            rejected_reason = ""
-            if status == "selected":
-                selected_reason = f"research_run:{run_id}" if run_id else "research_selected"
-            else:
-                rejected_reason = _text(assessment.get("rejection_reason")) or "research_rejected"
             accumulator.add(
                 EvidenceRefV1(
                     id=evidence_id,
@@ -319,38 +303,33 @@ def _add_research_run_refs(
                     domain=_text(assessment.get("domain")) or _domain(url),
                     published_at=_published_at(item),
                     score=_finite_float(assessment.get("relevance")),
-                    lifecycle_status=status,  # type: ignore[arg-type]
+                    lifecycle_status=status,
                     provider_status=provider_status,
-                    selection_reason=selected_reason,
-                    rejection_reason=rejected_reason,
+                    selection_reason=(
+                        f"research_run:{run_id}"
+                        if status == "selected" and run_id
+                        else "research_selected" if status == "selected" else ""
+                    ),
+                    rejection_reason=(
+                        _text(assessment.get("rejection_reason"))
+                        or "research_rejected"
+                        if status == "rejected"
+                        else ""
+                    ),
                 )
             )
 
 
-def _add_selected_unit_fallbacks(
-    accumulator: _EvidenceAccumulator,
-    *,
-    disclosed: tuple[dict[str, Any], ...],
-    policy: str,
-) -> None:
-    for unit in disclosed:
-        source_id = _text(unit.get("source_id"))
-        if not source_id:
-            continue
-        citation = _text(unit.get("citation"))
-        unit_type = _text(unit.get("type")) or "research"
-        accumulator.add(
-            EvidenceRefV1(
-                id=source_id,
-                type=_unit_ref_type(unit_type),
-                title=citation or source_id,
-                source=citation or source_id,
-                score=_finite_float(unit.get("reliability")),
-                lifecycle_status="selected",
-                provider_status="disclosed",
-                selection_reason=f"disclosure_policy:{policy or 'none'}",
-            )
-        )
+def _should_replace(current: EvidenceRefV1, incoming: EvidenceRefV1) -> bool:
+    current_priority = _STATUS_PRIORITY[current.lifecycle_status]
+    incoming_priority = _STATUS_PRIORITY[incoming.lifecycle_status]
+    if incoming_priority < current_priority:
+        return True
+    if incoming_priority > current_priority:
+        return False
+    if incoming.type == "web_read" and current.type == "web_search":
+        return True
+    return incoming.score > current.score
 
 
 def _merge_ref(current: EvidenceRefV1, incoming: EvidenceRefV1) -> EvidenceRefV1:
@@ -368,16 +347,6 @@ def _merge_ref(current: EvidenceRefV1, incoming: EvidenceRefV1) -> EvidenceRefV1
         selection_reason=incoming.selection_reason or current.selection_reason,
         rejection_reason=incoming.rejection_reason or current.rejection_reason,
     )
-
-
-def _unit_ref_type(unit_type: str) -> str:
-    if unit_type == "document_chunk":
-        return "local"
-    if unit_type == "search_excerpt":
-        return "web_search"
-    if unit_type == "article_excerpt":
-        return "web_read"
-    return "research"
 
 
 def _web_id(*, url: str, title: str) -> str:
