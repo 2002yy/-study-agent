@@ -58,11 +58,15 @@ class ChatTurn:
         # ChatTurn owns one versioned server projection derived from its already
         # persisted raw snapshots. New turns persist it inside rag_snapshot;
         # legacy rows gain the same projection in memory without a migration.
-        self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot()
+        if self.rag_snapshot or self.pedagogy_snapshot:
+            self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot()
 
     @property
     def evidence_snapshot(self) -> dict[str, Any]:
-        return dict(self.rag_snapshot.get("evidence_snapshot") or {})
+        existing = self.rag_snapshot.get("evidence_snapshot")
+        if isinstance(existing, dict):
+            return dict(existing)
+        return self._project_evidence_snapshot()
 
     def _project_evidence_snapshot(self) -> dict[str, Any]:
         raw_units = self.pedagogy_snapshot.get("evidence_units") or ()
