@@ -151,15 +151,19 @@ def main() -> None:
             print("ERROR: runtime output in zip:", path, file=sys.stderr)
             sys.exit(1)
 
+    # These are the current React + FastAPI distribution entry points and core
+    # runtime files. Legacy Streamlit files are intentionally not package gates.
     required = [
-        "app.py",
         "requirements.txt",
         ".env.example",
+        "frontend/package.json",
+        "frontend/src/main.tsx",
+        "src/api/app.py",
         "src/wechat.py",
-        "src/ui/wechat_panel.py",
         "src/safe_writer.py",
         "src/mode_manager.py",
         "src/llm_client.py",
+        "tools/start-study-agent.ps1",
         "tools/package_project.ps1",
         "tools/package_project_helper.py",
     ]
