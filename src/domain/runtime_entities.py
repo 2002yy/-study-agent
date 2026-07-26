@@ -46,6 +46,7 @@ class ChatTurn:
     route_snapshot: dict[str, Any] = field(default_factory=dict)
     rag_snapshot: dict[str, Any] = field(default_factory=dict)
     pedagogy_snapshot: dict[str, Any] = field(default_factory=dict)
+    evidence_snapshot: dict[str, Any] = field(default_factory=dict)
     parent_turn_id: str | None = None
     operation_id: str | None = None
     conversation_instruction: str = ""
