@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from src.domain.evidence import build_evidence_snapshot
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
@@ -51,6 +53,42 @@ class ChatTurn:
     conversation_instruction: str = ""
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        # ChatTurn owns one versioned server projection derived from its already
+        # persisted raw snapshots. New turns persist it inside rag_snapshot;
+        # legacy rows gain the same projection in memory without a migration.
+        if self.rag_snapshot or self.pedagogy_snapshot:
+            self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot()
+
+    @property
+    def evidence_snapshot(self) -> dict[str, Any]:
+        existing = self.rag_snapshot.get("evidence_snapshot")
+        if isinstance(existing, dict):
+            return dict(existing)
+        return self._project_evidence_snapshot()
+
+    def _project_evidence_snapshot(self) -> dict[str, Any]:
+        raw_units = self.pedagogy_snapshot.get("evidence_units") or ()
+        units = (
+            tuple(unit for unit in raw_units if isinstance(unit, dict))
+            if isinstance(raw_units, (list, tuple))
+            else ()
+        )
+        raw_ids = self.pedagogy_snapshot.get("evidence_ids") or ()
+        evidence_ids = (
+            tuple(str(value) for value in raw_ids)
+            if isinstance(raw_ids, (list, tuple))
+            else ()
+        )
+        return build_evidence_snapshot(
+            rag=self.rag_snapshot,
+            disclosed_units=units,
+            disclosure_policy=str(
+                self.pedagogy_snapshot.get("evidence_disclosure") or "none"
+            ),
+            pedagogy_evidence_ids=evidence_ids,
+        ).to_dict()
 
 
 @dataclass(frozen=True)

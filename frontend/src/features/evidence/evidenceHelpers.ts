@@ -7,6 +7,8 @@ export type WebSearchSummary = {
 export type WebReadSummary = { url: string; ok: boolean; preview: string; error?: string };
 export type WebCallsSummary = { searches: WebSearchSummary[]; reads: WebReadSummary[] };
 
+const SERVER_EVIDENCE_SCHEMA = "evidence-snapshot-v1";
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
@@ -79,6 +81,10 @@ export type EvidenceRef = {
   url: string;
   score: number;
   status: "candidate" | "read" | "selected" | "rejected";
+  publishedAt?: string;
+  providerStatus?: string;
+  selectionReason?: string;
+  rejectionReason?: string;
 };
 
 const STATUS_PRIORITY: Record<EvidenceRef["status"], number> = {
@@ -96,14 +102,58 @@ function domainOf(url: string): string {
   }
 }
 
-/** Normalize a TurnEvidence into a unified, deduped, filtered EvidenceRef list (G13). */
+function serverEvidenceRefs(rag: ChatResponse["rag"] | undefined): EvidenceRef[] | null {
+  if (!rag) return null;
+  const ragRecord = rag as unknown as Record<string, unknown>;
+  const snapshot = asRecord(ragRecord.evidence_snapshot);
+  if (snapshot.schema_version !== SERVER_EVIDENCE_SCHEMA) return null;
+  const rawRefs = Array.isArray(snapshot.refs) ? snapshot.refs : [];
+  return rawRefs.flatMap((value) => {
+    const ref = asRecord(value);
+    const id = String(ref.id ?? "").trim();
+    const title = String(ref.title ?? "").trim();
+    const source = String(ref.source ?? "").trim();
+    const url = String(ref.url ?? "").trim();
+    const rawType = String(ref.type ?? "research");
+    const type: EvidenceRef["type"] =
+      rawType === "local" || rawType === "web_search" || rawType === "web_read"
+        ? rawType
+        : "research";
+    const rawStatus = String(ref.lifecycle_status ?? "candidate");
+    const status: EvidenceRef["status"] =
+      rawStatus === "read" || rawStatus === "selected" || rawStatus === "rejected"
+        ? rawStatus
+        : "candidate";
+    const score = Number(ref.score ?? 0);
+    if (!id || (!title && !source && !url)) return [];
+    return [{
+      id,
+      type,
+      title,
+      source,
+      domain: String(ref.domain ?? "").trim() || domainOf(url),
+      url,
+      score: Number.isFinite(score) ? score : 0,
+      status,
+      publishedAt: String(ref.published_at ?? "").trim() || undefined,
+      providerStatus: String(ref.provider_status ?? "").trim() || undefined,
+      selectionReason: String(ref.selection_reason ?? "").trim() || undefined,
+      rejectionReason: String(ref.rejection_reason ?? "").trim() || undefined,
+    }];
+  });
+}
+
+/** Normalize a TurnEvidence into a unified evidence list (G13). */
 export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
   const rag = evidence.rag;
+  const authoritative = serverEvidenceRefs(rag);
+  if (authoritative !== null) return authoritative;
+
+  // Compatibility path for pre-evidence-snapshot turns. It must not invent
+  // selected/rejected lifecycle state; only the server contract owns that truth.
   const refs: EvidenceRef[] = [];
 
   for (const item of (rag?.results ?? []) as Array<Record<string, unknown>>) {
-    // Current RagResult keeps source identity inside `chunk`. Top-level fields are
-    // retained only as a compatibility fallback for historical snapshots.
     const chunk = asRecord(item.chunk);
     const chunkId = String(chunk.chunk_id ?? item.chunk_id ?? "").trim();
     const source = String(
@@ -142,16 +192,12 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
     }
   }
 
-  // filter placeholders
   const filtered = refs.filter((r) => {
     if (!r.id || (!r.title && !r.url && !r.source)) return false;
     if (r.type === "local" && (!Number.isFinite(r.score) || r.score <= 0)) return false;
     return true;
   });
 
-  // Keep stable evidence-unit identity when available. This prevents two chunks
-  // from the same source from collapsing into the wrong pedagogy evidence id.
-  // Historical local snapshots without chunk ids still fall back to source/title.
   const best = new Map<string, EvidenceRef>();
   for (const ref of filtered) {
     const key = ref.url
