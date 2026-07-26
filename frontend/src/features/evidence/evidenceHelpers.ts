@@ -123,10 +123,10 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
     });
   }
 
-  for (const call of ((rag?.web_tools?.calls as never) ?? []) as Array<Record<string, unknown>>) {
+  for (const call of rag?.web_tools?.calls ?? []) {
     const name = String(call.name ?? "");
-    const arguments_ = (call.arguments as Record<string, unknown>) ?? {};
-    const result = (call.result as Record<string, unknown>) ?? {};
+    const arguments_ = asRecord(call.arguments);
+    const result = asRecord(call.result);
     if (name === "web_search") {
       const results = Array.isArray(result.results) ? (result.results as Array<Record<string, unknown>>) : [];
       for (const r of results) {
@@ -149,10 +149,18 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
     return true;
   });
 
-  // dedupe by url (or type+source), keep best status then highest score
+  // Keep stable evidence-unit identity when available. This prevents two chunks
+  // from the same source from collapsing into the wrong pedagogy evidence id.
+  // Historical local snapshots without chunk ids still fall back to source/title.
   const best = new Map<string, EvidenceRef>();
   for (const ref of filtered) {
-    const key = ref.url ? `url:${ref.url}` : ref.source ? `src:${ref.type}:${ref.source}` : `title:${ref.type}:${ref.title}`;
+    const key = ref.url
+      ? `url:${ref.url}`
+      : ref.id
+        ? `id:${ref.type}:${ref.id}`
+        : ref.source
+          ? `src:${ref.type}:${ref.source}`
+          : `title:${ref.type}:${ref.title}`;
     const existing = best.get(key);
     if (!existing) {
       best.set(key, ref);
