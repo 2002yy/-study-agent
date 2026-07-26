@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildCitations,
   evidenceFromResponse,
+  evidenceSummary,
   evidenceFromSessionTurns,
+  normalizeEvidence,
   summarizeWebCalls,
 } from "./evidenceHelpers";
 import type { ChatResponse } from "../../types";
@@ -97,5 +99,72 @@ describe("evidenceHelpers", () => {
     expect(map.get("t1")?.rag?.results).toEqual([{ title: "Doc" }]);
     expect(map.get("t2")?.rag).toBeUndefined();
     expect(map.get("t2")?.pedagogy?.move).toBe("diagnose");
+  });
+
+  it("normalizeEvidence unifies local + web refs with dedupe and filter", () => {
+    const refs = normalizeEvidence({
+      rag: {
+        ...baseRag,
+        results: [
+          { title: "Doc A", source_path: "a.md", score: 0.8 },
+          { title: "", source_path: "", score: 0.0 },
+        ] as never,
+        web_tools: {
+          enabled: true,
+          used: true,
+          calls: [
+            {
+              name: "web_search",
+              arguments: { query: "q" },
+              result: {
+                results: [
+                  { title: "Web A", url: "https://a.com" },
+                  { title: "Web A", url: "https://a.com" },
+                  { title: "", url: "" },
+                ],
+              },
+            },
+            {
+              name: "web_read",
+              arguments: { url: "https://b.com" },
+              result: { ok: "true", content: "page" },
+            },
+          ] as never,
+          error: "",
+        },
+      },
+    });
+    const types = refs.map((r) => r.type);
+    expect(types).toContain("local");
+    expect(types).toContain("web_search");
+    expect(types).toContain("web_read");
+    // deduped: only one https://a.com
+    const aRefs = refs.filter((r) => r.url === "https://a.com");
+    expect(aRefs).toHaveLength(1);
+    // empty local + empty web filtered out
+    expect(refs).toHaveLength(3);
+  });
+
+  it("evidenceSummary counts by type and status", () => {
+    const refs = normalizeEvidence({
+      rag: {
+        ...baseRag,
+        results: [{ title: "Doc", source_path: "d.md", score: 0.5 }] as never,
+        web_tools: {
+          enabled: true,
+          used: true,
+          calls: [
+            { name: "web_search", arguments: { query: "q" }, result: { results: [{ title: "W", url: "https://w.com" }] } },
+            { name: "web_read", arguments: { url: "https://r.com" }, result: { ok: "true" } },
+          ] as never,
+          error: "",
+        },
+      },
+    });
+    const summary = evidenceSummary(refs);
+    expect(summary.local).toBe(1);
+    expect(summary.web).toBe(2);
+    expect(summary.total).toBe(3);
+    expect(summary.selected).toBe(0);
   });
 });

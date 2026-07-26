@@ -70,6 +70,114 @@ export function evidenceFromResponse(resp: ChatResponse): TurnEvidence {
   return { pedagogy: resp.pedagogy, rag: resp.rag, route: resp.route };
 }
 
+export type EvidenceRef = {
+  id: string;
+  type: "local" | "web_search" | "web_read" | "research";
+  title: string;
+  source: string;
+  domain: string;
+  url: string;
+  score: number;
+  status: "candidate" | "read" | "selected" | "rejected";
+};
+
+const STATUS_PRIORITY: Record<EvidenceRef["status"], number> = {
+  selected: 0,
+  read: 1,
+  rejected: 2,
+  candidate: 3,
+};
+
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Normalize a TurnEvidence into a unified, deduped, filtered EvidenceRef list (G13). */
+export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
+  const rag = evidence.rag;
+  const refs: EvidenceRef[] = [];
+
+  for (const item of (rag?.results ?? []) as Array<Record<string, unknown>>) {
+    const title = String(item.title ?? item.source_path ?? "");
+    const source = String(item.source_path ?? item.source ?? "");
+    refs.push({
+      id: source || title,
+      type: "local",
+      title,
+      source,
+      domain: "",
+      url: "",
+      score: Number(item.score ?? 0),
+      status: "candidate",
+    });
+  }
+
+  for (const call of ((rag?.web_tools?.calls as never) ?? []) as Array<Record<string, unknown>>) {
+    const name = String(call.name ?? "");
+    const arguments_ = (call.arguments as Record<string, unknown>) ?? {};
+    const result = (call.result as Record<string, unknown>) ?? {};
+    if (name === "web_search") {
+      const results = Array.isArray(result.results) ? (result.results as Array<Record<string, unknown>>) : [];
+      for (const r of results) {
+        const title = String(r.title ?? "");
+        const url = String(r.url ?? "");
+        if (!title && !url) continue;
+        refs.push({ id: url || title, type: "web_search", title, source: "", domain: domainOf(url), url, score: 0, status: "candidate" });
+      }
+    } else if (name === "web_read") {
+      const url = String(arguments_.url ?? result.url ?? "");
+      if (!url) continue;
+      refs.push({ id: url, type: "web_read", title: url, source: "", domain: domainOf(url), url, score: 0, status: "read" });
+    }
+  }
+
+  // filter placeholders
+  const filtered = refs.filter((r) => {
+    if (!r.title && !r.url && !r.source) return false;
+    if (r.type === "local" && r.score <= 0) return false;
+    return true;
+  });
+
+  // dedupe by url (or type+source), keep best status then highest score
+  const best = new Map<string, EvidenceRef>();
+  for (const ref of filtered) {
+    const key = ref.url ? `url:${ref.url}` : ref.source ? `src:${ref.type}:${ref.source}` : `title:${ref.type}:${ref.title}`;
+    const existing = best.get(key);
+    if (!existing) {
+      best.set(key, ref);
+      continue;
+    }
+    if (STATUS_PRIORITY[ref.status] < STATUS_PRIORITY[existing.status]) {
+      best.set(key, ref);
+    } else if (STATUS_PRIORITY[ref.status] === STATUS_PRIORITY[existing.status] && ref.score > existing.score) {
+      best.set(key, ref);
+    }
+  }
+  return Array.from(best.values());
+}
+
+export type EvidenceSummary = {
+  local: number;
+  web: number;
+  selected: number;
+  rejected: number;
+  total: number;
+};
+
+export function evidenceSummary(refs: EvidenceRef[]): EvidenceSummary {
+  return {
+    local: refs.filter((r) => r.type === "local").length,
+    web: refs.filter((r) => r.type === "web_search" || r.type === "web_read").length,
+    selected: refs.filter((r) => r.status === "selected").length,
+    rejected: refs.filter((r) => r.status === "rejected").length,
+    total: refs.length,
+  };
+}
+
 export function pedagogySummaryFromSnapshot(snap: unknown): PedagogySummary | undefined {
   if (!snap || typeof snap !== "object") return undefined;
   const o = snap as Record<string, unknown>;
