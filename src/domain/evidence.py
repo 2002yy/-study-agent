@@ -76,6 +76,7 @@ class ClaimEvidenceLinkV1:
 @dataclass(frozen=True)
 class EvidenceSnapshotV1:
     refs: tuple[EvidenceRefV1, ...] = ()
+    pedagogy_evidence_ids: tuple[str, ...] = ()
     claim_links: tuple[ClaimEvidenceLinkV1, ...] = ()
     disclosure_policy: str = "none"
     schema_version: str = EVIDENCE_SNAPSHOT_SCHEMA_VERSION
@@ -85,6 +86,7 @@ class EvidenceSnapshotV1:
             "schema_version": self.schema_version,
             "disclosure_policy": self.disclosure_policy,
             "refs": [ref.to_dict() for ref in self.refs],
+            "pedagogy_evidence_ids": list(self.pedagogy_evidence_ids),
             "claim_links": [link.to_dict() for link in self.claim_links],
         }
 
@@ -115,6 +117,7 @@ def build_evidence_snapshot(
     disclosed_units: Iterable[dict[str, Any]] = (),
     disclosure_policy: str = "none",
     pedagogy_evidence_ids: Iterable[str] = (),
+    claim_links: Iterable[ClaimEvidenceLinkV1] = (),
 ) -> EvidenceSnapshotV1:
     """Project current authoritative evidence into a durable v1 snapshot.
 
@@ -123,7 +126,8 @@ def build_evidence_snapshot(
     - WebTool search results are candidates and successful reads are read;
     - ResearchRun selected/rejected records retain their durable assessment;
     - ordinal legacy web IDs such as ``web-1`` never become selected URLs;
-    - answer claim links are emitted only for explicit known evidence IDs.
+    - pedagogy evidence references remain distinct from answer claim links;
+    - claim links are accepted only from an upstream owner with a real claim ID.
     """
 
     disclosed = tuple(unit for unit in disclosed_units if isinstance(unit, dict))
@@ -139,19 +143,20 @@ def build_evidence_snapshot(
 
     projected = refs.values()
     known_ids = {ref.id for ref in projected}
-    links = tuple(
-        ClaimEvidenceLinkV1(
-            claim_id="pedagogy-plan",
-            evidence_id=evidence_id,
-            support_type="explicit_pedagogy_reference",
-            confidence=1.0,
-        )
+    pedagogy_refs = tuple(
+        evidence_id
         for evidence_id in _dedupe_text(pedagogy_evidence_ids)
         if evidence_id in known_ids
     )
+    validated_links = tuple(
+        link
+        for link in claim_links
+        if _text(link.claim_id) and link.evidence_id in known_ids
+    )
     return EvidenceSnapshotV1(
         refs=projected,
-        claim_links=links,
+        pedagogy_evidence_ids=pedagogy_refs,
+        claim_links=validated_links,
         disclosure_policy=disclosure_policy or "none",
     )
 
@@ -311,8 +316,7 @@ def _add_research_run_refs(
                         else "research_selected" if status == "selected" else ""
                     ),
                     rejection_reason=(
-                        _text(assessment.get("rejection_reason"))
-                        or "research_rejected"
+                        (_text(assessment.get("rejection_reason")) or "research_rejected")
                         if status == "rejected"
                         else ""
                     ),
