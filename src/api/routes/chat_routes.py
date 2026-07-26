@@ -18,6 +18,7 @@ from src.api.models.chat import (
 from src.application.chat_service import ChatService
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
+from src.application.research_evidence import research_sources_snapshot
 from src.application.runtime_repository import get_chat_service, get_web_lookup_service
 from src.application.web_lookup_service import WebLookupService
 
@@ -322,6 +323,7 @@ def _chat_command(
 ) -> PolicyChatCommand:
     web_context = request.web_context
     web_context_run_id = request.web_context_run_id
+    research_sources: dict[str, Any] | None = None
     if web_context_run_id:
         if research_service is None:
             raise ValueError("ResearchRun validation service is required")
@@ -332,6 +334,7 @@ def _chat_command(
             raise ValueError(f"ResearchRun source block does not match: {run.id}")
         web_context = run.source_block
         web_context_run_id = run.id
+        research_sources = research_sources_snapshot(run)
     return PolicyChatCommand(
         user_input=request.user_input,
         selected_role=request.selected_role,
@@ -358,6 +361,7 @@ def _chat_command(
         web_consent=request.web_consent,
         cloud_context_policy=request.cloud_context_policy,
         task_intent=request.task_intent,
+        research_sources=research_sources,
         continuation_of_turn_id=request.continuation_of_turn_id,
         retry_of_turn_id=request.retry_of_turn_id,
         partial_reply=request.partial_reply,
