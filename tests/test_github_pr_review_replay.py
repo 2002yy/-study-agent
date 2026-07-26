@@ -21,20 +21,20 @@ def test_manifest_loads_immutable_seed_and_real_provider_cases():
     manifest = load_github_replay_manifest(_MANIFEST)
 
     assert manifest.corpus_id == "study-agent-g10-c3a-replay-v2"
-    assert len(manifest.cases) == 15
+    assert len(manifest.cases) == 17
     assert all(
         len(case.base_sha) == 40 and len(case.head_sha) == 40 for case in manifest.cases
     )
     assert sum(case.provenance == "curated_unit_seed" for case in manifest.cases) == 2
-    assert sum(case.provider_replay for case in manifest.cases) == 13
+    assert sum(case.provider_replay for case in manifest.cases) == 15
 
 
 def test_manifest_summary_reports_quality_coverage_and_provider_limits():
     summary = evaluate_github_replay_manifest(_MANIFEST)
 
     assert summary["coverage"] == {
-        "cases": 15,
-        "repositories": 13,
+        "cases": 17,
+        "repositories": 15,
         "repository_names": [
             "2002yy/study-agent",
             "Corfucinas/devtask-manager",
@@ -46,11 +46,20 @@ def test_manifest_summary_reports_quality_coverage_and_provider_limits():
             "junit-team/junit5",
             "pallets/click",
             "pallets/flask",
+            "psf/requests",
             "pydantic/pydantic",
             "pytest-dev/pytest",
+            "sindresorhus/p-limit",
             "vitejs/vite",
         ],
-        "languages": ["java", "markdown", "python", "rust", "typescript"],
+        "languages": [
+            "java",
+            "javascript",
+            "markdown",
+            "python",
+            "rust",
+            "typescript",
+        ],
         "scenarios": [
             "ambiguous-mapping",
             "build-failure",
@@ -64,6 +73,7 @@ def test_manifest_summary_reports_quality_coverage_and_provider_limits():
             "failed-ci-positive-control",
             "failed-ci-test",
             "historical-non-code-reviews",
+            "historical-review-line",
             "historical-review-line-missing",
             "lint-failure",
             "mapping-false-positive",
@@ -79,28 +89,30 @@ def test_manifest_summary_reports_quality_coverage_and_provider_limits():
             "removed-symbol-candidates",
             "request-budget-exhausted",
             "resolved-non-code-review",
+            "review-location-negative-control",
             "review-symbol",
             "test-matrix-failure",
+            "typescript-declaration",
             "unresolved-non-code-review",
             "unresolved-review-thread",
             "unsupported-language-symbol",
             "warm-replay",
         ],
-        "provider_replay_cases": 13,
+        "provider_replay_cases": 15,
         "curated_seed_cases": 2,
     }
     assert summary["provider"] == {
-        "status_counts": {"complete": 2, "curated": 2, "partial": 11},
-        "partial_rate": 0.7333,
-        "mean_requests": 9.6,
-        "mean_elapsed_ms": 152362.216,
-        "cache_hit_rate": 0.0667,
+        "status_counts": {"complete": 2, "curated": 2, "partial": 13},
+        "partial_rate": 0.7647,
+        "mean_requests": 9.647,
+        "mean_elapsed_ms": 151396.626,
+        "cache_hit_rate": 0.0588,
     }
     assert summary["metrics"]["macro"] == {
-        "precision": 0.3765,
-        "recall": 0.625,
-        "f1": 0.4147,
-        "mean_case_f1": 0.845,
+        "precision": 0.4889,
+        "recall": 0.7272,
+        "f1": 0.524,
+        "mean_case_f1": 0.863,
     }
 
 
@@ -243,6 +255,44 @@ def test_cross_fork_impact_and_docs_only_replays_keep_distinct_evidence():
     assert starlette["truncated"] is True
 
 
+def test_real_review_symbol_positives_span_python_and_javascript():
+    requests = json.loads(
+        (_FIXTURE_DIR / "contexts" / "requests-pr5643.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    p_limit = json.loads(
+        (_FIXTURE_DIR / "contexts" / "p-limit-pr79.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    requests_symbols = {
+        item["mapping"].get("symbol", {}).get("identity", {}).get("id")
+        for item in requests["review_items"]
+        if item["mapping"]["status"] == "mapped"
+    }
+    p_limit_symbols = {
+        item["mapping"].get("symbol", {}).get("identity", {}).get("id")
+        for item in p_limit["review_items"]
+        if item["mapping"]["status"] == "mapped"
+    }
+
+    assert requests_symbols == {"symbol_c09f36e2a12bbc9c875447c6"}
+    assert p_limit_symbols == {
+        "symbol_425e1b18d8755c65ade2d54e",
+        "symbol_89c4a58dc326625e298f4f93",
+    }
+    assert any(
+        item["mapping"]["status"] == "unmapped" and item["path"] == ".gitignore"
+        for item in requests["review_items"]
+    )
+    assert {candidate["path"] for candidate in p_limit["label_candidates"]} >= {
+        "index.d.ts",
+        "index.js",
+    }
+
+
 def test_manifest_rejects_mutable_ref_and_context_path_escape(tmp_path: Path):
     context = tmp_path / "context.json"
     context.write_text("{}", encoding="utf-8")
@@ -280,7 +330,7 @@ def test_replay_cli_writes_deterministic_json(tmp_path: Path):
 
     assert completed.returncode == 0, completed.stderr
     first = output.read_text(encoding="utf-8")
-    assert json.loads(first)["coverage"]["provider_replay_cases"] == 13
+    assert json.loads(first)["coverage"]["provider_replay_cases"] == 15
     subprocess.run(
         [
             sys.executable,

@@ -332,6 +332,55 @@
         "review_symbol_ids": [],
         "ci_test_paths": []
       }
+    },
+    {
+      "case_id": "requests-pr5643-netrc-review-symbol",
+      "repository": "psf/requests",
+      "pull_request": 5643,
+      "base_sha": "143150233162d609330941ec2aacde5ed4caa510",
+      "head_sha": "ba543713d35067866d68b09f644042c0c021a8ba",
+      "language": "python",
+      "scenarios": [
+        "provider-replay",
+        "cross-fork",
+        "historical-review-line",
+        "review-symbol",
+        "review-location-negative-control",
+        "no-failed-ci"
+      ],
+      "context_path": "contexts/requests-pr5643.json",
+      "provenance": "github_provider_recording",
+      "provider_replay": true,
+      "labels": {
+        "review_symbol_ids": ["symbol_c09f36e2a12bbc9c875447c6"],
+        "ci_test_paths": []
+      }
+    },
+    {
+      "case_id": "p-limit-pr79-concurrency-review-symbol",
+      "repository": "sindresorhus/p-limit",
+      "pull_request": 79,
+      "base_sha": "850768f5655dc46547802789e13af3cf35c3d7b0",
+      "head_sha": "49311e50d855f35f412517f53fd73cae97954fb9",
+      "language": "javascript",
+      "scenarios": [
+        "provider-replay",
+        "cross-fork",
+        "review-symbol",
+        "typescript-declaration",
+        "change-impact-test",
+        "no-failed-ci"
+      ],
+      "context_path": "contexts/p-limit-pr79.json",
+      "provenance": "github_provider_recording",
+      "provider_replay": true,
+      "labels": {
+        "review_symbol_ids": [
+          "symbol_425e1b18d8755c65ade2d54e",
+          "symbol_89c4a58dc326625e298f4f93"
+        ],
+        "ci_test_paths": []
+      }
     }
   ]
 }
