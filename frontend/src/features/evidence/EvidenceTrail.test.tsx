@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { EvidenceTrail } from "./EvidenceTrail";
+
+afterEach(cleanup);
 
 describe("EvidenceTrail", () => {
   it("keeps recovered ResearchRun provenance without exposing the id in the label", () => {
