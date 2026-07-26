@@ -54,10 +54,17 @@ class ChatTurn:
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
+    def __post_init__(self) -> None:
+        # ChatTurn owns one versioned server projection derived from its already
+        # persisted raw snapshots. New turns persist it inside rag_snapshot;
+        # legacy rows gain the same projection in memory without a migration.
+        self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot()
+
     @property
     def evidence_snapshot(self) -> dict[str, Any]:
-        """Return the versioned evidence projection for this persisted turn truth."""
+        return dict(self.rag_snapshot.get("evidence_snapshot") or {})
 
+    def _project_evidence_snapshot(self) -> dict[str, Any]:
         raw_units = self.pedagogy_snapshot.get("evidence_units") or ()
         units = (
             tuple(unit for unit in raw_units if isinstance(unit, dict))
