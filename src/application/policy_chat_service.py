@@ -6,6 +6,7 @@ interruption, retry and atomic completion reuse the established lifecycle.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -47,6 +48,7 @@ class PolicyChatCommand(ChatCommand):
     web_consent: bool = False
     cloud_context_policy: str | None = None
     task_intent: TaskIntent | None = None
+    research_sources: dict[str, Any] | None = None
 
 
 def _source_policy(route: dict[str, Any]) -> SourcePolicy:
@@ -231,6 +233,8 @@ class ExternalDataPolicyChatService(ChatService):
                 manual_web_context if decision.web_allowed else "",
                 command.web_context_run_id,
             )
+            if decision.web_allowed and command.research_sources:
+                rag["research_sources"] = deepcopy(command.research_sources)
             evidence_rag = (
                 rag
                 if decision.local_evidence_to_model_allowed
