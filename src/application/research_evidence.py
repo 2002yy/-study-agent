@@ -61,12 +61,8 @@ def _safe_records(records: Iterable[Any]) -> list[dict[str, Any]]:
 def _safe_record(record: Any) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
-    item = record.get("item") if isinstance(record.get("item"), dict) else {}
-    assessment = (
-        record.get("assessment")
-        if isinstance(record.get("assessment"), dict)
-        else {}
-    )
+    item = _object(record.get("item"))
+    assessment = _object(record.get("assessment"))
     safe_item = {
         key: item[key]
         for key in _ITEM_FIELDS
@@ -80,6 +76,10 @@ def _safe_record(record: Any) -> dict[str, Any] | None:
     if not safe_item and not safe_assessment:
         return None
     return {"item": safe_item, "assessment": safe_assessment}
+
+
+def _object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _is_scalar(value: Any) -> bool:
