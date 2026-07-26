@@ -60,14 +60,8 @@ def test_chat_turn_attaches_server_evidence_snapshot_before_persistence():
     assert turn.evidence_snapshot["schema_version"] == "evidence-snapshot-v1"
     assert turn.evidence_snapshot["refs"][0]["id"] == "chunk-1"
     assert turn.evidence_snapshot["refs"][0]["lifecycle_status"] == "selected"
-    assert turn.evidence_snapshot["claim_links"] == [
-        {
-            "claim_id": "pedagogy-plan",
-            "evidence_id": "chunk-1",
-            "support_type": "explicit_pedagogy_reference",
-            "confidence": 1.0,
-        }
-    ]
+    assert turn.evidence_snapshot["pedagogy_evidence_ids"] == ["chunk-1"]
+    assert turn.evidence_snapshot["claim_links"] == []
 
 
 def test_repository_round_trip_preserves_server_evidence_snapshot(tmp_path):
@@ -128,6 +122,7 @@ def test_legacy_row_without_snapshot_is_projected_on_read_without_migration(tmp_
     assert stored is not None
     assert stored.evidence_snapshot["schema_version"] == "evidence-snapshot-v1"
     assert stored.evidence_snapshot["refs"][0]["id"] == "chunk-1"
+    assert stored.evidence_snapshot["pedagogy_evidence_ids"] == ["chunk-1"]
 
     with database.connect() as connection:
         raw = connection.execute(
@@ -144,5 +139,6 @@ def test_truly_empty_legacy_turn_remains_unchanged():
         "schema_version": "evidence-snapshot-v1",
         "disclosure_policy": "none",
         "refs": [],
+        "pedagogy_evidence_ids": [],
         "claim_links": [],
     }
