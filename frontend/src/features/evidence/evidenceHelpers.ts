@@ -102,10 +102,17 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
   const refs: EvidenceRef[] = [];
 
   for (const item of (rag?.results ?? []) as Array<Record<string, unknown>>) {
-    const title = String(item.title ?? item.source_path ?? "");
-    const source = String(item.source_path ?? item.source ?? "");
+    // Current RagResult keeps source identity inside `chunk`. Top-level fields are
+    // retained only as a compatibility fallback for historical snapshots.
+    const chunk = asRecord(item.chunk);
+    const chunkId = String(chunk.chunk_id ?? item.chunk_id ?? "").trim();
+    const source = String(
+      chunk.source_path ?? item.source_path ?? item.source ?? ""
+    ).trim();
+    const rawTitle = String(chunk.title ?? item.title ?? "").trim();
+    const title = rawTitle || (source ? basename(source) : "");
     refs.push({
-      id: source || title,
+      id: chunkId || source || title,
       type: "local",
       title,
       source,
@@ -137,8 +144,8 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
 
   // filter placeholders
   const filtered = refs.filter((r) => {
-    if (!r.title && !r.url && !r.source) return false;
-    if (r.type === "local" && r.score <= 0) return false;
+    if (!r.id || (!r.title && !r.url && !r.source)) return false;
+    if (r.type === "local" && (!Number.isFinite(r.score) || r.score <= 0)) return false;
     return true;
   });
 
@@ -182,11 +189,15 @@ export function pedagogySummaryFromSnapshot(snap: unknown): PedagogySummary | un
   if (!snap || typeof snap !== "object") return undefined;
   const o = snap as Record<string, unknown>;
   if (typeof o.mode !== "string" && typeof o.move !== "string") return undefined;
+  const evidenceIds = Array.isArray(o.evidence_ids)
+    ? o.evidence_ids.map((value) => String(value).trim()).filter(Boolean)
+    : [];
   return {
     mode: String(o.mode ?? ""),
     phase: String(o.phase ?? ""),
     move: String(o.move ?? ""),
     disclosure_level: Number(o.disclosure_level ?? 0),
+    ...(evidenceIds.length ? { evidence_ids: evidenceIds } : {}),
   };
 }
 
