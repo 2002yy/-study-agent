@@ -35,11 +35,13 @@ class _ClientDisconnected(Exception):
 
 def pedagogy_summary_from_plan(plan: Any) -> dict[str, Any]:
     """Compact pedagogy snapshot for the chat response (decision point a)."""
+    raw_ids = getattr(plan, "evidence_ids", ()) or ()
     return {
         "mode": str(getattr(plan, "mode", "") or ""),
         "phase": str(getattr(plan, "phase", "") or ""),
         "move": str(getattr(plan, "move", "") or ""),
         "disclosure_level": int(getattr(plan, "disclosure_level", 0) or 0),
+        "evidence_ids": [str(eid) for eid in raw_ids],
     }
 
 

@@ -63,6 +63,7 @@ export type PedagogySummary = {
   phase: string;
   move: string;
   disclosure_level: number;
+  evidence_ids?: string[];
 };
 
 export type LearningState = {

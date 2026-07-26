@@ -30,9 +30,15 @@ def test_pedagogy_summary_picks_compact_fields():
         "phase": "scaffold",
         "move": "give_hint",
         "disclosure_level": 2,
+        "evidence_ids": [],
     }
 
 
 def test_pedagogy_summary_handles_missing_attributes():
     summary = pedagogy_summary_from_plan(SimpleNamespace())
-    assert summary == {"mode": "", "phase": "", "move": "", "disclosure_level": 0}
+    assert summary == {"mode": "", "phase": "", "move": "", "disclosure_level": 0, "evidence_ids": []}
+
+
+def test_pedagogy_summary_includes_evidence_ids():
+    summary = pedagogy_summary_from_plan(_plan(evidence_ids=("ev-1", "ev-2")))
+    assert summary["evidence_ids"] == ["ev-1", "ev-2"]
