@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from src.domain.evidence import build_evidence_snapshot
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
@@ -46,12 +48,36 @@ class ChatTurn:
     route_snapshot: dict[str, Any] = field(default_factory=dict)
     rag_snapshot: dict[str, Any] = field(default_factory=dict)
     pedagogy_snapshot: dict[str, Any] = field(default_factory=dict)
-    evidence_snapshot: dict[str, Any] = field(default_factory=dict)
     parent_turn_id: str | None = None
     operation_id: str | None = None
     conversation_instruction: str = ""
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+
+    @property
+    def evidence_snapshot(self) -> dict[str, Any]:
+        """Return the versioned evidence projection for this persisted turn truth."""
+
+        raw_units = self.pedagogy_snapshot.get("evidence_units") or ()
+        units = (
+            tuple(unit for unit in raw_units if isinstance(unit, dict))
+            if isinstance(raw_units, (list, tuple))
+            else ()
+        )
+        raw_ids = self.pedagogy_snapshot.get("evidence_ids") or ()
+        evidence_ids = (
+            tuple(str(value) for value in raw_ids)
+            if isinstance(raw_ids, (list, tuple))
+            else ()
+        )
+        return build_evidence_snapshot(
+            rag=self.rag_snapshot,
+            disclosed_units=units,
+            disclosure_policy=str(
+                self.pedagogy_snapshot.get("evidence_disclosure") or "none"
+            ),
+            pedagogy_evidence_ids=evidence_ids,
+        ).to_dict()
 
 
 @dataclass(frozen=True)
