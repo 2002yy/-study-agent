@@ -151,15 +151,21 @@ def main() -> None:
             print("ERROR: runtime output in zip:", path, file=sys.stderr)
             sys.exit(1)
 
+    # Current React + FastAPI entry points are package gates. The residual
+    # Streamlit panel remains required only until the dedicated cleanup PR
+    # removes src/ui and updates its compatibility guards together.
     required = [
-        "app.py",
         "requirements.txt",
         ".env.example",
-        "src/wechat.py",
+        "frontend/package.json",
+        "frontend/src/main.tsx",
+        "src/api/app.py",
         "src/ui/wechat_panel.py",
+        "src/wechat.py",
         "src/safe_writer.py",
         "src/mode_manager.py",
         "src/llm_client.py",
+        "tools/start-study-agent.ps1",
         "tools/package_project.ps1",
         "tools/package_project_helper.py",
     ]

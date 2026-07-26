@@ -102,10 +102,17 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
   const refs: EvidenceRef[] = [];
 
   for (const item of (rag?.results ?? []) as Array<Record<string, unknown>>) {
-    const title = String(item.title ?? item.source_path ?? "");
-    const source = String(item.source_path ?? item.source ?? "");
+    // Current RagResult keeps source identity inside `chunk`. Top-level fields are
+    // retained only as a compatibility fallback for historical snapshots.
+    const chunk = asRecord(item.chunk);
+    const chunkId = String(chunk.chunk_id ?? item.chunk_id ?? "").trim();
+    const source = String(
+      chunk.source_path ?? item.source_path ?? item.source ?? ""
+    ).trim();
+    const rawTitle = String(chunk.title ?? item.title ?? "").trim();
+    const title = rawTitle || (source ? basename(source) : "");
     refs.push({
-      id: source || title,
+      id: chunkId || source || title,
       type: "local",
       title,
       source,
@@ -116,10 +123,10 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
     });
   }
 
-  for (const call of ((rag?.web_tools?.calls as never) ?? []) as Array<Record<string, unknown>>) {
+  for (const call of rag?.web_tools?.calls ?? []) {
     const name = String(call.name ?? "");
-    const arguments_ = (call.arguments as Record<string, unknown>) ?? {};
-    const result = (call.result as Record<string, unknown>) ?? {};
+    const arguments_ = asRecord(call.arguments);
+    const result = asRecord(call.result);
     if (name === "web_search") {
       const results = Array.isArray(result.results) ? (result.results as Array<Record<string, unknown>>) : [];
       for (const r of results) {
@@ -137,15 +144,23 @@ export function normalizeEvidence(evidence: TurnEvidence): EvidenceRef[] {
 
   // filter placeholders
   const filtered = refs.filter((r) => {
-    if (!r.title && !r.url && !r.source) return false;
-    if (r.type === "local" && r.score <= 0) return false;
+    if (!r.id || (!r.title && !r.url && !r.source)) return false;
+    if (r.type === "local" && (!Number.isFinite(r.score) || r.score <= 0)) return false;
     return true;
   });
 
-  // dedupe by url (or type+source), keep best status then highest score
+  // Keep stable evidence-unit identity when available. This prevents two chunks
+  // from the same source from collapsing into the wrong pedagogy evidence id.
+  // Historical local snapshots without chunk ids still fall back to source/title.
   const best = new Map<string, EvidenceRef>();
   for (const ref of filtered) {
-    const key = ref.url ? `url:${ref.url}` : ref.source ? `src:${ref.type}:${ref.source}` : `title:${ref.type}:${ref.title}`;
+    const key = ref.url
+      ? `url:${ref.url}`
+      : ref.id
+        ? `id:${ref.type}:${ref.id}`
+        : ref.source
+          ? `src:${ref.type}:${ref.source}`
+          : `title:${ref.type}:${ref.title}`;
     const existing = best.get(key);
     if (!existing) {
       best.set(key, ref);
@@ -182,11 +197,15 @@ export function pedagogySummaryFromSnapshot(snap: unknown): PedagogySummary | un
   if (!snap || typeof snap !== "object") return undefined;
   const o = snap as Record<string, unknown>;
   if (typeof o.mode !== "string" && typeof o.move !== "string") return undefined;
+  const evidenceIds = Array.isArray(o.evidence_ids)
+    ? o.evidence_ids.map((value) => String(value).trim()).filter(Boolean)
+    : [];
   return {
     mode: String(o.mode ?? ""),
     phase: String(o.phase ?? ""),
     move: String(o.move ?? ""),
     disclosure_level: Number(o.disclosure_level ?? 0),
+    ...(evidenceIds.length ? { evidence_ids: evidenceIds } : {}),
   };
 }
 
