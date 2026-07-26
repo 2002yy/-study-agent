@@ -132,6 +132,29 @@ describe("evidenceHelpers", () => {
     ]);
   });
 
+  it("preserves distinct chunk identities from the same local source", () => {
+    const refs = normalizeEvidence({
+      rag: {
+        ...baseRag,
+        results: [
+          nestedLocalResult,
+          {
+            chunk: {
+              chunk_id: "chunk-2",
+              title: "Doc A",
+              source_path: "docs/a.md",
+              start_line: 30,
+              end_line: 40,
+            },
+            score: 0.7,
+          },
+        ],
+      },
+    });
+
+    expect(refs.map((ref) => ref.id)).toEqual(["chunk-1", "chunk-2"]);
+  });
+
   it("unifies local + web refs with dedupe and filter", () => {
     const refs = normalizeEvidence({
       rag: {
