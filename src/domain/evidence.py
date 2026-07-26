@@ -172,8 +172,8 @@ def _add_local_refs(
     for index, raw_result in enumerate(rag.get("results") or (), start=1):
         if not isinstance(raw_result, dict):
             continue
-        chunk = raw_result.get("chunk")
-        if not isinstance(chunk, dict):
+        chunk = _object(raw_result.get("chunk"))
+        if not chunk:
             continue
         source = _text(chunk.get("source_path"))
         title = _text(chunk.get("title")) or _basename(source)
@@ -212,16 +212,16 @@ def _add_web_tool_refs(
     *,
     rag: dict[str, Any],
 ) -> None:
-    web_tools = rag.get("web_tools")
-    if not isinstance(web_tools, dict):
+    web_tools = _object(rag.get("web_tools"))
+    if not web_tools:
         return
     tool_error = _text(web_tools.get("error"))
     for call in web_tools.get("calls") or ():
         if not isinstance(call, dict):
             continue
         name = _text(call.get("name"))
-        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
-        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        arguments = _object(call.get("arguments"))
+        result = _object(call.get("result"))
         if name == "web_search":
             query = _text(arguments.get("query"))
             for item in result.get("results") or ():
@@ -268,8 +268,8 @@ def _add_research_run_refs(
     *,
     rag: dict[str, Any],
 ) -> None:
-    research = rag.get("research_sources")
-    if not isinstance(research, dict):
+    research = _object(rag.get("research_sources"))
+    if not research:
         return
     provider_status = _text(research.get("provider_status"))
     run_id = _text(research.get("run_id"))
@@ -281,12 +281,8 @@ def _add_research_run_refs(
         for record in research.get(key) or ():
             if not isinstance(record, dict):
                 continue
-            item = record.get("item") if isinstance(record.get("item"), dict) else {}
-            assessment = (
-                record.get("assessment")
-                if isinstance(record.get("assessment"), dict)
-                else {}
-            )
+            item = _object(record.get("item"))
+            assessment = _object(record.get("assessment"))
             url = _text(
                 assessment.get("url")
                 or item.get("url")
@@ -402,6 +398,10 @@ def _finite_float(value: Any) -> float:
     if parsed != parsed or parsed in {float("inf"), float("-inf")}:
         return 0.0
     return parsed
+
+
+def _object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _text(value: Any) -> str:
