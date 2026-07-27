@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   MATERIAL_CANDIDATE_TITLE,
@@ -14,7 +14,6 @@ import {
   SOURCE_SELECTED_TITLE,
   installEvidenceApiFixture,
   makeSourceCodeSession,
-  seedEvidenceWorkspace,
 } from "./evidence-fixture";
 import {
   noHorizontalOverflow,
@@ -23,7 +22,80 @@ import {
   visibleProductSurfaces,
 } from "./journey-metrics";
 
-async function openEvidence(page: Parameters<typeof test>[0] extends never ? never : any) {
+const STORAGE_KEY = "study-agent-react-session";
+
+async function seedWorkspaceOnce(
+  page: Page,
+  options: { sessionId?: string; webLookupRunId?: string } = {},
+) {
+  await page.addInitScript(
+    ({ key, workspace }) => {
+      if (window.localStorage.getItem(key)) return;
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          schemaVersion: 3,
+          savedAt: new Date().toISOString(),
+          workspace,
+        }),
+      );
+    },
+    {
+      key: STORAGE_KEY,
+      workspace: {
+        singleChatSessionId: options.sessionId,
+        lastSessionId: options.sessionId,
+        webLookupRunId: options.webLookupRunId,
+        ragEnabled: true,
+        chatSettings: {
+          selectedRole: "auto",
+          selectedMode: "苏格拉底",
+          selectedModel: "auto",
+          relationshipMode: "standard",
+          contextMode: "light",
+        },
+        ragSettings: {
+          retrievalMode: "hybrid",
+          topK: 5,
+          chatTopK: 3,
+          minScore: 0.01,
+        },
+      },
+    },
+  );
+}
+
+async function installUploadRunRestoreFixture(page: Page) {
+  await page.route("**/rag-runs/rag-upload-browser", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "rag-upload-browser",
+        kind: "upload",
+        status: "completed",
+        request: { file_count: 1 },
+        result: {
+          documents: 1,
+          chunks: 2,
+          index_version: 2,
+          stages: [
+            { name: "parse", status: "completed" },
+            { name: "index", status: "completed" },
+          ],
+        },
+        error: "",
+        index_version: 2,
+        version: 1,
+        created_at: "2026-07-27T10:00:00Z",
+        updated_at: "2026-07-27T10:00:00Z",
+        completed_at: "2026-07-27T10:00:00Z",
+      }),
+    });
+  });
+}
+
+async function openEvidence(page: Page) {
   const toggle = page.getByRole("button", { name: /证据轨迹/ }).last();
   await expect(toggle).toBeVisible();
   await toggle.click();
@@ -32,6 +104,7 @@ async function openEvidence(page: Parameters<typeof test>[0] extends never ? nev
 
 test("uploaded material becomes a learning choice with adopted local evidence", async ({ page }, testInfo) => {
   const fixture = await installEvidenceApiFixture(page);
+  await installUploadRunRestoreFixture(page);
   await page.goto("/");
 
   let requiredClicks = 0;
@@ -91,7 +164,7 @@ test("uploaded material becomes a learning choice with adopted local evidence", 
 
 test("failed web research recovers in chat and grounds the next answer", async ({ page }, testInfo) => {
   const fixture = await installEvidenceApiFixture(page);
-  await seedEvidenceWorkspace(page, { webLookupRunId: RESEARCH_RUN_ID });
+  await seedWorkspaceOnce(page, { webLookupRunId: RESEARCH_RUN_ID });
   await page.goto("/");
 
   await expect(page.getByText("研究失败", { exact: true })).toBeVisible();
@@ -142,14 +215,15 @@ test("failed web research recovers in chat and grounds the next answer", async (
 test("source-code evidence remains inside the learning goal", async ({ page }, testInfo) => {
   const session = makeSourceCodeSession();
   const fixture = await installEvidenceApiFixture(page, { sourceSession: session });
-  await seedEvidenceWorkspace(page, { sessionId: session.row.session_id });
+  await seedWorkspaceOnce(page, { sessionId: session.row.session_id });
   await page.goto("/");
 
+  const restoreCard = page.getByRole("region", { name: "继续当前任务" });
   await expect(
-    page.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }).first(),
+    restoreCard.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("用自己的话解释一次依赖解析调用链", { exact: true }).first(),
+    restoreCard.getByText("用自己的话解释一次依赖解析调用链", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText(SOURCE_REPLY, { exact: true })).toBeVisible();
 
@@ -162,10 +236,10 @@ test("source-code evidence remains inside the learning goal", async ({ page }, t
   await page.getByRole("button", { name: /证据轨迹/ }).last().click();
 
   await expect(
-    page.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }).first(),
+    restoreCard.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("用自己的话解释一次依赖解析调用链", { exact: true }).first(),
+    restoreCard.getByText("用自己的话解释一次依赖解析调用链", { exact: true }),
   ).toBeVisible();
 
   await page.reload();
