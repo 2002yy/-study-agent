@@ -208,9 +208,7 @@ def normalize_answer_claim_snapshot_for_turn(
     """Normalize persisted/supplied claim truth against the current Turn state."""
 
     if turn_status != "completed":
-        return unavailable_answer_claim_snapshot(
-            reason=f"turn_status:{turn_status or 'unknown'}"
-        )
+        return unavailable_answer_claim_snapshot(reason="turn_not_completed")
 
     raw = _object(raw_snapshot)
     if raw.get("schema_version") != ANSWER_CLAIM_SCHEMA_VERSION:
