@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-27  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**学习真值、五类浏览器旅程和核心首屏按需加载均已通过实现门禁；PR #70 状态同步后重跑最终 CI。**  
-> 当前分支：`perf/core-bootstrap-lazy-features`，Draft PR #70。
+> 当前主线：**学习真值、浏览器旅程、核心首屏和资料三层收口均已通过实现门禁；PR #71 状态同步后重跑最终 CI。**  
+> 当前分支：`ux/sources-three-layer-separation`，Draft PR #71。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -29,7 +29,8 @@
 - EvidenceTrail 普通/诊断分层；
 - AnswerClaimSnapshot v1 与 record-only 离线评测；
 - 生产路径学习验证 E2E；
-- Chromium desktop / 390px 五类 Golden Journey 浏览器基线。
+- Chromium desktop / 390px 五类 Golden Journey；
+- 核心首屏按需加载与隐藏功能错误隔离。
 
 已合并：
 
@@ -41,7 +42,8 @@
 - PR #66 `b1ac5a841aab5948b4fee623aeaea1d87e1b8af9`，CI #1407；
 - PR #67 `c19d5070b9bcf73ed46a81731bbeae842b757208`，CI #1416；
 - PR #68 `4da85690043e9144b18dabaf0b4d2359c16eaeb8`，CI #1437；
-- PR #69 `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`，CI #1449。
+- PR #69 `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`，CI #1449；
+- PR #70 `ccdea493d8d0119e9ba0b9c203a06b5f14de1229`，CI #1462。
 
 ## 3. 当前真实指标
 
@@ -73,8 +75,6 @@ G10-D 可执行代理继续冻结。
 
 ## 5. P0-A2 已完成：真实浏览器 Golden Journeys
 
-PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，运行 `1440×900` 与 `390×844`。
-
 | journey | clicks | decisions | surfaces | recovery | keyboard | refresh | overflow |
 |---|---:|---:|---:|---:|---|---|---|
 | first answer | 0 | 0 | 1 | 0 | pass | pass | none |
@@ -86,64 +86,62 @@ PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，�
 
 普通 EvidenceTrail 只显示 server-owned selected/adopted evidence；所有旅程刷新恢复，390px 无横向溢出。
 
-## 6. P0-A3 已完成实现：核心首屏按需加载
+## 6. P0-A3 已完成：核心首屏按需加载
 
-### 结构变化
+- 干净首屏只请求 `/health`、`/sessions`、`/runtime/settings`；
+- RAG、知识库、工具、workflow、memory、wechat 未打开时零请求；
+- 对应抽屉打开后只加载自身数据；
+- 隐藏接口模拟 503 时，desktop 和 390px 普通首屏不显示全局错误；
+- core refresh 不清空 feature data，持久化 active run/session 恢复保留；
+- PR #70 最终 CI #1462 全绿。
 
-- 新增 core loader，普通 bootstrap 只拥有 health、sessions、runtime settings；
-- core refresh 只覆盖核心字段，已经按需加载的 feature data 不会被聊天后的 refresh 清空；
-- feature loader 单独拥有 RAG status、tools、workflow summaries、memory status 和 WeChat；
-- `useUploadController` 不再在挂载时读取知识库文档；
-- 当前抽屉由 controller owner 触发对应 feature loader；
-- 持久化 active session / RagRun / MemoryRun / ResearchRun 等恢复 effect 保留，不因首屏收窄而丢失 durable truth；
-- feature loader 错误不写入 `snapshot.errors`，未打开模块的故障不再进入普通全局告警。
+## 7. P0-A4 已完成实现：资料与来源三层收口
 
-### 真实浏览器请求结果
+单一 Sources 抽屉内部现在分为：
 
-干净首屏从 9 个业务请求收窄为 3 个：
+1. **本次回答依据**：默认层，只读取当前回答的 server-owned EvidenceSnapshot；只显示 lifecycle `selected` 或 pedagogy 明确引用的证据；
+2. **我的资料**：只显示知识库文档、active/superseded/excluded 状态、恢复、删除和重建；
+3. **检索诊断**：显示 candidate/read/rejected/selected 生命周期、排序、相关度、命中词、评分明细、来源片段和模型上下文。
 
-```text
-GET /health
-GET /sessions
-GET /runtime/settings
-```
+已验证边界：
 
-未打开功能时以下请求均为 0：
+- 前端没有根据检索排序自行产生 selected evidence；
+- 手动 `ragSearch` 结果只进入诊断层；
+- 默认层不含 candidate、score、context 或 document management；
+- 没有 selected evidence 时显示明确空状态，不回退展示候选；
+- 资料层不显示检索候选与分数；
+- 诊断层包含完整证据生命周期和检索内部信息；
+- desktop 与 390px 真实 Sources 抽屉 tab 切换、server-owned adopted evidence 和无横向溢出均通过。
 
-```text
-/rag/status
-/knowledge-base/documents
-/tools
-/workflows/runs
-/memory
-/wechat
-```
+### 门禁与修正
 
-显式打开后：
+- CI #1473：后端/RAG/类型全绿；旧资料资格测试仍假设文档管理默认展开，新测试未 cleanup，浏览器未执行；只更新测试操作与隔离；
+- CI #1477：所有组件、类型与构建全绿，原有 16 个浏览器用例通过；新增两项只因测试错误地在聊天页等待证据标题而失败；
+- CI #1479：全部后端、RAG、Ruff、package、secrets、mypy、Vitest、Vite 和 18 个 desktop/mobile Chromium 用例全绿；
+- 实现 head `8d8e25ddf80985a5dedd90d33f1bfc5ef62f1aa3`；
+- 本状态提交后仍需对最新 head 重跑完整 CI，未通过前 PR #71 保持 Draft。
 
-- Sources -> `/rag/status` + `/knowledge-base/documents`；
-- 群聊 -> `/wechat`；
-- 工具 -> `/tools`；
-- 开发者诊断 -> `/workflows/runs`；
-- 学习成果 -> `/memory`。
+## 8. 下一阶段：P0-A5 学习结束 review-first
 
-隐藏六类接口全部模拟 503 时，desktop 和 390px 普通首屏仍不显示“部分功能暂不可用”或“API 未连接”。打开各抽屉时只请求本功能数据。
+分支：`ux/closure-review-first`。
 
-### 门禁
+目标：
 
-- 实现 head `6b9d8e7e108f0f9da0282027d544b3199c93e55d`；
-- CI #1460：全部后端、RAG、类型、Vitest、Vite 和 16 个 desktop/mobile Chromium 用例全绿；
-- 本状态提交后必须对最新 head 重跑完整 CI，未通过前 PR #70 保持 Draft。
+1. 默认结束流程先展示本次确认内容、剩余缺口、下一步和保存影响；
+2. 用户确认后才写入长期学习成果；
+3. 普通流程不要求理解 Memory 文件名、目标类型、append/replace、evidence refs 或 pending observation；
+4. 高级编辑保留在次级展开层；
+5. 继续当前学习、归档并开始新主题的关系明确；
+6. desktop 与 390px 浏览器覆盖 preview -> confirm -> continue/archive 流程；
+7. 不在本切片重构 SessionNavigator、设置或 accessibility。
 
-## 7. 后续顺序
+## 9. 后续顺序
 
-1. P0-A4 `ux/sources-three-layer-separation`：本次回答依据 / 我的资料 / 检索诊断；
-2. P0-A5 `ux/closure-review-first`：默认结束流程只展示确认、缺口、下次入口和保存；
-3. P0-A6 `refactor/session-navigation-single-owner`：唯一 SessionNavigator；
-4. P0-A7 `ux/onboarding-settings-progressive-disclosure`：新手与设置渐进披露；
-5. P0-A8 `a11y/focus-feedback-responsive`：焦点、复制、上传、触控、软键盘和溢出。
+1. P0-A6 `refactor/session-navigation-single-owner`：唯一 SessionNavigator；
+2. P0-A7 `ux/onboarding-settings-progressive-disclosure`：新手与设置渐进披露；
+3. P0-A8 `a11y/focus-feedback-responsive`：焦点、复制、上传、触控、软键盘和溢出。
 
-## 8. 审计完成标准
+## 10. 审计完成标准
 
 - 学习真值门禁成立；五类 Golden Journey 在 desktop 和 390px 全部通过；
 - first answer 无强制配置；学习恢复、资料学习、联网研究不超过两层 surface；
@@ -152,20 +150,20 @@ GET /runtime/settings
 - 默认结束流程不要求理解 Memory 文件；桌面/移动使用同一会话 owner；
 - 键盘、焦点、复制、上传和窄屏问题有自动回归；全量 CI 通过。
 
-## 9. 审计期间冻结
+## 11. 审计期间冻结
 
 真实 Provider claim replay、生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结。
 
-## 10. 当前执行状态
+## 12. 当前执行状态
 
-- 当前分支：`perf/core-bootstrap-lazy-features`，Draft PR #70；
-- 基线：PR #69 merge SHA `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`；
-- 实现 head：`6b9d8e7e108f0f9da0282027d544b3199c93e55d`，CI #1460 全绿；
+- 当前分支：`ux/sources-three-layer-separation`，Draft PR #71；
+- 基线：PR #70 merge SHA `ccdea493d8d0119e9ba0b9c203a06b5f14de1229`；
+- 实现 head：`8d8e25ddf80985a5dedd90d33f1bfc5ef62f1aa3`，CI #1479 全绿；
 - 当前阶段：状态同步后验证最终 head；
-- 下一动作：最终 CI 全绿后 Ready + squash merge，再进入 P0-A4；
+- 下一动作：最终 CI 全绿后 Ready + squash merge，再进入 P0-A5；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
-## 11. 文档规则
+## 13. 文档规则
 
 - 当前状态只更新本文件；status-only 更新留在 active branch；
 - `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；`STATE_MODEL.md` 只维护稳定数据模型；
