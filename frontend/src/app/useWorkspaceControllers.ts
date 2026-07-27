@@ -21,14 +21,21 @@ import type { ApiSnapshot, ChatSettings, RagSettings } from "../types";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
 import { useWorkspace } from "./WorkspaceProvider";
+import type { WorkspaceFeature } from "./workspaceDataLoader";
 
 type ValueSetter<T> = Dispatch<SetStateAction<T>>;
 type DirectSetter<T> = (value: T) => void;
+
+type FeatureLoader = (
+  feature: WorkspaceFeature,
+  options?: { groupThreadId?: string },
+) => Promise<Partial<ApiSnapshot>>;
 
 export function useWorkspaceControllers(options: {
   snapshot: ApiSnapshot;
   setSnapshot: React.Dispatch<React.SetStateAction<ApiSnapshot>>;
   refresh: () => Promise<void>;
+  loadFeature: FeatureLoader;
   input: string;
   setInput: ValueSetter<string>;
   chatSettings: ChatSettings;
@@ -65,7 +72,7 @@ export function useWorkspaceControllers(options: {
     webLookup: DirectSetter<string | undefined>;
   };
 }) {
-  const { dispatch } = useWorkspace();
+  const { state, dispatch } = useWorkspace();
   const roleController = useRoleController(options.chatSettings.selectedRole);
   const workflowController = useWorkflowController();
   const settingsController = useSettingsController({
@@ -207,6 +214,46 @@ export function useWorkspaceControllers(options: {
     options.activeGroupThreadId,
     options.setGroupThreadId,
   ]);
+
+  useEffect(() => {
+    const drawer = state.activeDrawer;
+    if (!drawer) return;
+    let active = true;
+    const load = async () => {
+      try {
+        if (drawer === "sources") {
+          await Promise.all([
+            options.loadFeature("rag"),
+            uploadController.refreshDocuments(),
+          ]);
+        } else if (drawer === "group") {
+          await options.loadFeature("wechat", { groupThreadId });
+        } else if (drawer === "tools") {
+          await options.loadFeature("tools");
+        } else if (drawer === "timeline") {
+          await options.loadFeature("workflows");
+        } else if (drawer === "memory") {
+          await options.loadFeature("memory");
+        }
+      } catch (error) {
+        if (!active) return;
+        const labels: Partial<Record<typeof drawer, string>> = {
+          sources: "资料与来源",
+          group: "群聊",
+          tools: "工具",
+          timeline: "开发者诊断",
+          memory: "学习成果",
+        };
+        options.operationError(
+          `${labels[drawer] ?? "功能"}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
+        );
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [state.activeDrawer, options.loadFeature]);
 
   return {
     activeQuery,

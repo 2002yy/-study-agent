@@ -13,7 +13,7 @@ import type {
 } from "../types";
 
 export default function WorkspaceRuntime() {
-  const { snapshot, setSnapshot, refresh } = useWorkspaceBootstrap();
+  const { snapshot, setSnapshot, refresh, loadFeature } = useWorkspaceBootstrap();
   const { state: workspaceRuntime, dispatch: dispatchWorkspace } = useWorkspace();
   const [input, setInput] = useState("");
   const [ragEnabled, setRagEnabled] = useState(true);
@@ -44,6 +44,7 @@ export default function WorkspaceRuntime() {
     snapshot,
     setSnapshot,
     refresh,
+    loadFeature,
     input,
     setInput,
     chatSettings,
