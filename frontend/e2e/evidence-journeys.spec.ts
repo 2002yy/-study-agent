@@ -220,7 +220,7 @@ test("source-code evidence remains inside the learning goal", async ({ page }, t
 
   const restoreCard = page.getByRole("region", { name: "继续当前任务" });
   await expect(
-    restoreCard.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }),
+    restoreCard.getByRole("heading", { name: "通过 FastAPI 源码理解依赖注入调用链" }),
   ).toBeVisible();
   await expect(
     restoreCard.getByText("用自己的话解释一次依赖解析调用链", { exact: true }),
@@ -236,7 +236,7 @@ test("source-code evidence remains inside the learning goal", async ({ page }, t
   await page.getByRole("button", { name: /证据轨迹/ }).last().click();
 
   await expect(
-    restoreCard.getByText("通过 FastAPI 源码理解依赖注入调用链", { exact: true }),
+    restoreCard.getByRole("heading", { name: "通过 FastAPI 源码理解依赖注入调用链" }),
   ).toBeVisible();
   await expect(
     restoreCard.getByText("用自己的话解释一次依赖解析调用链", { exact: true }),
