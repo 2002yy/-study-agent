@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-27  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**AnswerClaim 离线评测基线已通过完整门禁；合并后立即进入功能与使用体验审计，先证明核心学习闭环真实可用。**  
-> 当前分支：`agent/answer-claim-eval-baseline`，Draft PR #66，等待合并。
+> 当前主线：**进入功能与使用体验审计，当前先证明真实生产学习验证链不会伪造掌握，并且刷新、继续和重试后真值一致。**  
+> 当前分支：`audit/learning-verification-e2e`，P0-A1。
 
 本文件只维护当前事实、真实指标、缺口、执行顺序和门禁。历史细节以 Git 提交和 PR 为准；不得新增并列的长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -40,7 +40,8 @@
 - UI 学习优先层级、窄屏适配和五条 Golden Journey 组件回归；
 - RAG K1a–K1e 确定性基线和真实 Provider replay harness；
 - EvidenceSnapshot、ResearchRun source truth、EvidenceTrail 普通/诊断分层；
-- AnswerClaimSnapshot v1 服务端合同和完整 Turn 生命周期。
+- AnswerClaimSnapshot v1 服务端合同和完整 Turn 生命周期；
+- AnswerClaim record-only 离线评测基线。
 
 ## 3. 已完成的证据与 claim 真值
 
@@ -94,7 +95,7 @@ Merge SHA：`b700da1a2751769959ae1b41966f5da0a854162a`，CI #1389 全绿。
 
 ### PR #66：AnswerClaim 离线评测基线
 
-当前 head：`f95e992ac7577966e2ed010aec13246728d04f5a`；CI #1405 全绿，等待合并。
+Merge SHA：`b1ac5a841aab5948b4fee623aeaea1d87e1b8af9`；合并前 CI #1407 全绿。
 
 - 复用 RAG K1 的 10 个 answer-quality gold case；
 - 版本化 `AnswerClaimEvalCase` 和结构化 producer adapter；
@@ -105,8 +106,6 @@ Merge SHA：`b700da1a2751769959ae1b41966f5da0a854162a`，CI #1389 全绿。
 - 失败、无法解析或 unavailable 不补造完成分数；
 - 不调用生产聊天、不修改 prompt、不写 ChatTurn、不调用真实 Provider、不增加 UI；
 - 满分结果只能表述为 `evaluator_self_test_only`，不得冒充模型质量。
-
-完整门禁：pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 Vitest、TypeScript 与 Vite production build 全部通过。
 
 ## 4. 当前真实指标
 
@@ -136,34 +135,22 @@ Merge SHA：`b700da1a2751769959ae1b41966f5da0a854162a`，CI #1389 全绿。
 
 G10-D 可执行代理继续冻结。
 
-## 5. 下一阶段：功能与使用体验审计
+## 5. 当前任务：P0-A1 学习验证 E2E
 
 核心问题：
 
 > 用户是否能够从第一次提问开始，经过教学、真实理解验证、失败恢复、成果整理和下次恢复，完成可信且低摩擦的学习闭环，而不需要理解 Run、RAG、Provider、Memory 文件和 Workflow 等内部结构？
 
-已确认的生产事实：
+已确认生产事实：
 
-- FastAPI `get_chat_service()` 注入 `TaskAwarePedagogyEvaluationService(LLMSemanticEvaluator())`；
+- FastAPI `get_chat_service()` 注入 `ExternalDataPolicyChatService`；
+- 该服务注入 `TaskAwarePedagogyEngine()`；
+- 该服务注入 `TaskAwarePedagogyEvaluationService(LLMSemanticEvaluator())`；
 - P0-A1 不预设“缺少 semantic evaluator 接线”，而是验证真实成功、误解、无推理、不可用和恢复链路；
-- 审计结果、进度和整改顺序只写入本文件。
+- 只有需要 mastery evidence 的 transfer/complete/deliver 阶段允许 `accept` 推进；
+- 其他决策必须阻止 committed learning state 前进。
 
-已识别高风险：
-
-1. 理解验证生产链尚未经过完整端到端证明；
-2. Golden Journey 仍以组件存在性和人工常量为主；
-3. 首屏仍加载隐藏实验模块；
-4. Sources 抽屉混合回答依据、资料管理和检索诊断；
-5. 默认学习结束流程暴露过多 Memory 工程细节；
-6. SessionSidebar 与 SessionsPanel 存在双实现；
-7. 首次打开和普通设置仍有认知负担；
-8. 焦点、复制反馈、上传约束和窄屏关键内容仍需真实浏览器验证。
-
-## 6. 审计与整改精确顺序
-
-### P0-A1：学习验证 E2E
-
-分支：`audit/learning-verification-e2e`。
+验证链：
 
 ```text
 建立目标
@@ -175,62 +162,50 @@ G10-D 可执行代理继续冻结。
 -> 恢复卡与学习条保持一致
 ```
 
-必须覆盖：
+本切片范围：
 
-- 正确且有推理的解释；
-- 明显误解；
-- 只说“懂了”；
-- semantic evaluator 不可用或超时；
-- evidence ref 不合法；
-- continuation / retry / interrupted；
-- 刷新恢复一致性。
+1. 通过真实 FastAPI route、`ExternalDataPolicyChatService`、TaskContract、SQLite repository 和 SessionService 验证；
+2. 使用可控 semantic evaluator 和可控模型回复，不调用真实 Provider；
+3. 正确且有推理的解释能够进入 `accept` 并提交 confirmed point；
+4. “懂了”等无推理表达不能推进；
+5. 明显误解不能推进并留下可恢复缺口；
+6. semantic evaluator 超时或不可用不能伪造掌握；
+7. 非法 evidence ref 不能推进；
+8. interrupted continuation 和 failed retry 不得重复或越权提交状态；
+9. GET session 模拟刷新后，thread learning state、navigation、latest pedagogy 和 PedagogyEvalRun 保持一致；
+10. 不改普通 UI、不引入第二个学习评估 owner、不增加真实 Provider 调用。
 
-若真实生产链不能产生可信 `accept`，先修真值链，不推进后续体验重构。
+门禁：目标 E2E、后端全量 pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 Vitest、TypeScript 与 Vite production build。
+
+## 6. 后续审计与整改顺序
 
 ### P0-A2：真实浏览器 Golden Journeys
 
-分支：`test/browser-golden-journeys`。
-
-使用 Playwright 或等价 E2E，运行真实 React + 可控 FastAPI，覆盖首次问答、系统学习闭环、上传资料学习、联网研究恢复和 GitHub 源码学习。真实测量必需点击、必需决策、跨 surface 数、恢复点击、失败下一动作，并覆盖 1440px、约 390px、键盘、焦点、刷新和网络失败。
+分支：`test/browser-golden-journeys`。使用 Playwright 或等价 E2E，运行真实 React + 可控 FastAPI，覆盖首次问答、系统学习闭环、上传资料学习、联网研究恢复和 GitHub 源码学习。真实测量必需点击、必需决策、跨 surface 数、恢复点击、失败下一动作，并覆盖 1440px、约 390px、键盘、焦点、刷新和网络失败。
 
 ### P0-A3：核心首屏按需加载
 
-分支：`perf/core-bootstrap-lazy-features`。
-
-- 首屏只加载 health、sessions、runtime settings 和当前学习恢复所需数据；
-- Sources、Memory、群聊、新闻、工具、Workflow 按打开时加载；
-- 隐藏模块失败不进入全局普通用户告警；
-- 保留 last-good cache 和并发刷新防回退。
+分支：`perf/core-bootstrap-lazy-features`。首屏只加载 health、sessions、runtime settings 和当前学习恢复所需数据；Sources、Memory、群聊、新闻、工具、Workflow 按打开时加载；隐藏模块失败不进入全局普通用户告警；保留 last-good cache 和并发刷新防回退。
 
 ### P0-A4：资料与来源三层收口
 
-分支：`ux/sources-three-layer-separation`。
-
-在现有抽屉内分为“本次回答依据 / 我的资料 / 检索诊断”；普通层不得把 candidate/read/rejected 或检索分数包装成回答依据。
+分支：`ux/sources-three-layer-separation`。在现有抽屉内分为“本次回答依据 / 我的资料 / 检索诊断”；普通层不得把 candidate/read/rejected 或检索分数包装成回答依据。
 
 ### P0-A5：学习结束 review-first
 
-分支：`ux/closure-review-first`。
-
-默认只展示本次确认、剩余缺口、下次入口和确认保存；Memory 文件目标、追加/替换、候选编辑和 provenance 进入高级编辑。
+分支：`ux/closure-review-first`。默认只展示本次确认、剩余缺口、下次入口和确认保存；Memory 文件目标、追加/替换、候选编辑和 provenance 进入高级编辑。
 
 ### P0-A6：会话导航单一 owner
 
-分支：`refactor/session-navigation-single-owner`。
-
-提取唯一 `SessionNavigator`，宽屏为侧栏、窄屏装入 SlideOver，共用搜索、分组、重命名、归档、错误和切换保护。
+分支：`refactor/session-navigation-single-owner`。提取唯一 `SessionNavigator`，宽屏为侧栏、窄屏装入 SlideOver，共用搜索、分组、重命名、归档、错误和切换保护。
 
 ### P0-A7：新手与设置渐进披露
 
-分支：`ux/onboarding-settings-progressive-disclosure`。
-
-首次打开以输入框为主，只保留“系统学习 / 上传资料”轻量入口；普通设置只保留学习方式、是否使用资料、外部数据与隐私、互动氛围，其余进入高级设置。
+分支：`ux/onboarding-settings-progressive-disclosure`。首次打开以输入框为主，只保留“系统学习 / 上传资料”轻量入口；普通设置只保留学习方式、是否使用资料、外部数据与隐私、互动氛围，其余进入高级设置。
 
 ### P0-A8：可访问性、反馈与移动端收口
 
-分支：`a11y/focus-feedback-responsive`。
-
-覆盖 SlideOver 焦点循环、Escape、焦点恢复、focus-visible、复制失败反馈、上传格式/大小/accept、关键内容换行、触控目标、软键盘和横向溢出。
+分支：`a11y/focus-feedback-responsive`。覆盖 SlideOver 焦点循环、Escape、焦点恢复、focus-visible、复制失败反馈、上传格式/大小/accept、关键内容换行、触控目标、软键盘和横向溢出。
 
 ## 7. 审计阶段完成标准
 
@@ -282,13 +257,11 @@ G10-D 可执行代理继续冻结。
 
 ## 10. 当前执行状态
 
-- 当前分支：`agent/answer-claim-eval-baseline`；
-- 当前 Draft PR：#66；
-- 当前 head：`f95e992ac7577966e2ed010aec13246728d04f5a`；
-- CI #1405：完整门禁全绿；
-- 下一动作：合并 PR #66；
-- 合并后从最新 `main` 建立 `audit/learning-verification-e2e`；
-- 下一主阶段：P0-A1 -> P0-A2 -> 根据真实审计结果执行 P0-A3–P0-A8；
+- 当前分支：`audit/learning-verification-e2e`；
+- 基线：PR #66 merge SHA `b1ac5a841aab5948b4fee623aeaea1d87e1b8af9`；
+- 当前任务：建立真实生产路径的 P0-A1 学习验证 E2E；
+- 当前阶段：测试设计与最小必要真值修复；
+- 下一动作：增加成功、无推理、误解、semantic failure、evidence failure、continuation/retry 和刷新恢复测试；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿后合并。
 
 ## 11. 文档规则
