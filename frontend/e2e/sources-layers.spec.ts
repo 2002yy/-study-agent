@@ -72,7 +72,7 @@ test("sources drawer separates adopted evidence, documents, and diagnostics", as
   panel = dialog.getByRole("tabpanel");
   await expect(panel.getByRole("heading", { name: "证据生命周期" })).toBeVisible();
   await expect(panel.getByText(SOURCE_CANDIDATE_TITLE, { exact: true })).toBeVisible();
-  await expect(panel.getByText("分数：37%", { exact: true })).toBeVisible();
+  await expect(panel.getByText("分数：0.370", { exact: true })).toBeVisible();
   await expect(panel.getByText("生命周期：候选", { exact: true })).toBeVisible();
   await expect(panel.getByText("FastAPI source notes", { exact: true })).toHaveCount(0);
 
