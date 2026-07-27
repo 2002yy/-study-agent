@@ -18,10 +18,10 @@
     "unanswerable": 2
   },
   "fingerprints": {
-    "case_fixture_sha256": "3320d40fa7e0a5693e813d6d96769921cd5ff659d53c81bf952d4f0d93540e53",
-    "evaluator": "e37993116d2179f6639561b0fcb2187398ca4bc5328a4cd616d765e722757123",
-    "producer": "599a3b0ea36558ac6262e1248971373b78374f3be0395cf299ded6a8b8be6344",
-    "producer_outputs_sha256": "ac12339137d24d418d8596d03bc2574a880a882659114b7afb71415d6cc342bc"
+    "case_fixture_fingerprint_sha256": "3320d40fa7e0a5693e813d6d96769921cd5ff659d53c81bf952d4f0d93540e53",
+    "evaluator_fingerprint_sha256": "e37993116d2179f6639561b0fcb2187398ca4bc5328a4cd616d765e722757123",
+    "producer_fingerprint_sha256": "599a3b0ea36558ac6262e1248971373b78374f3be0395cf299ded6a8b8be6344",
+    "producer_outputs_fingerprint_sha256": "ac12339137d24d418d8596d03bc2574a880a882659114b7afb71415d6cc342bc"
   },
   "gating": "record_only",
   "producer": {
