@@ -1,0 +1,230 @@
+.sources-panel {
+  min-width: 0;
+}
+
+.sources-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sources-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfc;
+  color: var(--muted);
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sources-tabs button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.sources-tabs button.active,
+.sources-tabs button[aria-selected="true"] {
+  border-color: #b8d8d4;
+  background: #eef7f6;
+  color: var(--accent-strong);
+}
+
+.sources-tabs button:focus-visible {
+  outline: 3px solid rgba(19, 124, 118, 0.18);
+  outline-offset: 1px;
+}
+
+.sources-layer-hint {
+  display: block;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sources-tab-panel {
+  min-width: 0;
+}
+
+.sources-evidence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.sources-evidence-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid #dce9e8;
+  border-radius: 8px;
+  background: #f7fbfa;
+  padding: 10px;
+}
+
+.sources-evidence-card.diagnostic {
+  border-color: #e5e9ea;
+  background: #fbfcfc;
+}
+
+.sources-evidence-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sources-evidence-heading > span,
+.sources-evidence-heading > em {
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #e5f2f0;
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.sources-evidence-heading > em {
+  background: #eef1f2;
+  color: #52646c;
+}
+
+.sources-evidence-heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sources-evidence-card > a,
+.sources-evidence-card > small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sources-evidence-card > a {
+  color: var(--accent-strong);
+}
+
+.sources-evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.sources-library {
+  display: grid;
+  gap: 10px;
+}
+
+.sources-library-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #edf1f2;
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 9px 10px;
+}
+
+.sources-library-summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.sources-library-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sources-library .field-hint {
+  margin: 0;
+}
+
+.sources-library .session-row em {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #7b8b92;
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sources-library .inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sources-library .inline-actions .ghost-action,
+.sources-library .session-row > .ghost-action {
+  width: auto;
+  margin: 0;
+}
+
+.sources-diagnostics {
+  display: grid;
+  gap: 14px;
+}
+
+.sources-diagnostics section {
+  display: grid;
+  gap: 8px;
+}
+
+.sources-diagnostics h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.sources-diagnostics .debug-drawer {
+  margin-top: 0;
+}
+
+@media (max-width: 520px) {
+  .sources-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .sources-tabs button {
+    justify-content: flex-start;
+  }
+
+  .sources-evidence-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .sources-evidence-heading > em {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .sources-library-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
