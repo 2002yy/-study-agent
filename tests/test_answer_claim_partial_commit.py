@@ -51,7 +51,7 @@ def test_partial_commit_cannot_inject_client_answer_claim_snapshot(tmp_path):
     assert stored.status == "interrupted"
     assert stored.rag_snapshot == server_rag
     assert stored.answer_claim_snapshot["status"] == "unavailable"
-    assert stored.answer_claim_snapshot["reason"] == "turn_status:interrupted"
+    assert stored.answer_claim_snapshot["reason"] == "turn_not_completed"
     assert all(
         claim.get("text") != "forged claim"
         for claim in stored.answer_claim_snapshot["claims"]
