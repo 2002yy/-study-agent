@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SourcesPanel } from "./SourcesPanel";
+
+afterEach(cleanup);
 
 describe("SourcesPanel evidence eligibility", () => {
   it("explains which materials may support answers and exposes recovery actions", async () => {
@@ -51,6 +53,7 @@ describe("SourcesPanel evidence eligibility", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: "我的资料" }));
     const renderedText = container.textContent ?? "";
     expect(renderedText).toContain("当前可用于回答 1 个");
     expect(renderedText).toContain("当前资料 · 会参与回答");
@@ -101,6 +104,7 @@ describe("SourcesPanel evidence eligibility", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: "我的资料" }));
     const renderedText = container.textContent ?? "";
     expect(renderedText).toContain("当前资料 · 会参与回答");
     expect(renderedText).toContain("当前可用于回答 1 个");
