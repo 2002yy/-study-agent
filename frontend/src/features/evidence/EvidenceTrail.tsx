@@ -1,9 +1,23 @@
-import { CheckCircle2, ChevronDown, ChevronRight, Clipboard, FileText, Search, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clipboard,
+  FileText,
+  Search,
+  Settings2,
+  XCircle,
+} from "lucide-react";
 import { useState } from "react";
-import { moveLabel, protocolLabel } from "../pedagogy/pedagogyLabels";
-import { buildCitations, evidenceSummary, normalizeEvidence, summarizeWebCalls } from "./evidenceHelpers";
 import type { TurnEvidence } from "../../types";
+import { moveLabel, protocolLabel } from "../pedagogy/pedagogyLabels";
+import {
+  buildCitations,
+  normalizeEvidence,
+  summarizeWebCalls,
+} from "./evidenceHelpers";
 import type { EvidenceRef } from "./evidenceHelpers";
+import "./evidenceTrail.css";
 
 const STATUS_LABELS: Record<EvidenceRef["status"], string> = {
   selected: "已采用",
@@ -12,46 +26,131 @@ const STATUS_LABELS: Record<EvidenceRef["status"], string> = {
   rejected: "已排除",
 };
 
-const STATUS_ORDER: EvidenceRef["status"][] = ["selected", "read", "candidate", "rejected"];
+const STATUS_ORDER: EvidenceRef["status"][] = [
+  "selected",
+  "read",
+  "candidate",
+  "rejected",
+];
 
-function formatEvidencePlainText(
+function evidenceTypeLabel(type: EvidenceRef["type"]): string {
+  if (type === "local") return "本地";
+  if (type === "web_search") return "搜索";
+  if (type === "web_read") return "阅读";
+  return "研究";
+}
+
+export function formatEvidencePlainText(
   pedagogy: TurnEvidence["pedagogy"],
   refs: EvidenceRef[],
+  includeDiagnostics = false,
 ): string {
-  const lines: string[] = ["证据轨迹"];
+  const lines: string[] = [includeDiagnostics ? "证据诊断" : "采用证据"];
   if (pedagogy) {
     lines.push(`${protocolLabel(pedagogy.mode)} · ${moveLabel(pedagogy.move)}`);
   }
   lines.push("");
   for (const ref of refs) {
-    const tag = `[${STATUS_LABELS[ref.status]}]`;
-    const typeTag = ref.type === "local" ? "本地" : ref.type === "web_search" ? "搜索" : ref.type === "web_read" ? "阅读" : "研究";
-    const score = ref.score > 0 ? ` score=${ref.score.toFixed(2)}` : "";
     const link = ref.url || ref.source || ref.title;
-    lines.push(`${tag} ${ref.title || link} (${typeTag})${ref.url ? ` ${ref.url}` : ""}${score}`);
+    const title = ref.title || link;
+    if (!includeDiagnostics) {
+      lines.push(`${title}（${evidenceTypeLabel(ref.type)}）${ref.url ? ` ${ref.url}` : ""}`);
+      continue;
+    }
+    const score = ref.score > 0 ? ` score=${ref.score.toFixed(2)}` : "";
+    const provider = ref.providerStatus ? ` provider=${ref.providerStatus}` : "";
+    const reason = ref.rejectionReason || ref.selectionReason;
+    lines.push(
+      `[${STATUS_LABELS[ref.status]}] ${title}（${evidenceTypeLabel(ref.type)}）${
+        ref.url ? ` ${ref.url}` : ""
+      }${score}${provider}${reason ? ` reason=${reason}` : ""}`,
+    );
   }
   return lines.join("\n");
 }
 
+function copyText(text: string): void {
+  void navigator.clipboard?.writeText(text);
+}
+
+function EvidenceRow({
+  ref,
+  supported,
+  diagnostic = false,
+}: {
+  ref: EvidenceRef;
+  supported: boolean;
+  diagnostic?: boolean;
+}) {
+  return (
+    <div className={`evidence-ref-row${diagnostic ? " is-diagnostic" : ""}`}>
+      {supported ? (
+        <span className="evidence-ref-supported" title="教学法引用">
+          引
+        </span>
+      ) : null}
+      <span className="evidence-ref-type">{evidenceTypeLabel(ref.type)}</span>
+      {ref.url ? (
+        <a
+          className="evidence-ref-link"
+          href={ref.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {ref.title || ref.url}
+        </a>
+      ) : (
+        <span className="evidence-ref-title">{ref.title || ref.source}</span>
+      )}
+      {diagnostic && ref.score > 0 ? (
+        <span className="evidence-ref-score">{ref.score.toFixed(2)}</span>
+      ) : null}
+      {diagnostic && (ref.providerStatus || ref.selectionReason || ref.rejectionReason) ? (
+        <span className="evidence-ref-meta">
+          {[ref.providerStatus, ref.selectionReason, ref.rejectionReason]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
   const [open, setOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const pedagogy = evidence.pedagogy;
   const rag = evidence.rag;
   const web = rag
-    ? summarizeWebCalls((rag.web_tools?.calls as never) ?? [])
+    ? summarizeWebCalls(rag.web_tools?.calls ?? [])
     : { searches: [], reads: [] };
   const citations = rag ? buildCitations(rag) : [];
   const evidenceRefs = normalizeEvidence(evidence);
-  const summary = evidenceSummary(evidenceRefs);
   const supportedIds = new Set(pedagogy?.evidence_ids ?? []);
-  const successfulReads = web.reads.filter((read) => read.ok).length;
-  const webUsed = web.searches.length > 0 || web.reads.length > 0;
+  const adoptedRefs = evidenceRefs.filter(
+    (ref) => ref.status === "selected" || supportedIds.has(ref.id),
+  );
   const webError = rag?.web_tools?.error;
   const recoveredResearchUsed = Boolean(rag?.web_context?.used && rag.web_context.run_id);
-  if (!pedagogy && citations.length === 0 && !webUsed && !webError && !recoveredResearchUsed) return null;
+  const hasDiagnostics = Boolean(
+    evidenceRefs.length ||
+      web.searches.length ||
+      web.reads.length ||
+      citations.length ||
+      webError ||
+      recoveredResearchUsed,
+  );
+
+  if (!pedagogy && !hasDiagnostics) return null;
+
   return (
     <div className="evidence-trail">
-      <button className="evidence-toggle" onClick={() => setOpen((v) => !v)} type="button">
+      <button
+        className="evidence-toggle"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+        aria-expanded={open}
+      >
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         证据轨迹
         {pedagogy ? (
@@ -59,97 +158,174 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
             {protocolLabel(pedagogy.mode)} · {moveLabel(pedagogy.move)}
           </span>
         ) : null}
-        {web.searches.length ? <span className="web-flag">查询 {web.searches.length}</span> : null}
-        {successfulReads ? <span className="web-flag">阅读 {successfulReads}</span> : null}
-        {recoveredResearchUsed ? <span className="web-flag">恢复研究来源</span> : null}
-        {citations.length ? <span className="cite-flag">本地引用 {citations.length}</span> : null}
-        {summary.total ? (
-          <span className="evidence-summary-flag">
-            统一证据 {summary.total}（本地 {summary.local} · 联网 {summary.web}）
-          </span>
+        {adoptedRefs.length ? (
+          <span className="evidence-summary-flag">采用证据 {adoptedRefs.length}</span>
         ) : null}
       </button>
+
       {open ? (
         <div className="evidence-detail">
-          {webError ? <div className="evidence-error">联网工具错误：{webError}</div> : null}
-          {recoveredResearchUsed ? (
-            <div className="web-call-card" data-research-run-id={rag?.web_context?.run_id}>
-              本轮回答采用了已恢复的联网研究证据。
-            </div>
-          ) : null}
-          {evidenceRefs.length ? (
-            <div className="evidence-unified">
+          {adoptedRefs.length ? (
+            <section className="evidence-primary" aria-label="回答采用的证据">
               <div className="evidence-unified-header">
-                <span>统一证据（去重后 {evidenceRefs.length} 条）</span>
+                <span>回答采用的证据（{adoptedRefs.length} 条）</span>
                 <button
-                  className="ghost-action compact"
-                  onClick={() => navigator.clipboard.writeText(formatEvidencePlainText(pedagogy, evidenceRefs))}
+                  className="ghost-action compact evidence-copy"
+                  onClick={() =>
+                    copyText(formatEvidencePlainText(pedagogy, adoptedRefs))
+                  }
                   type="button"
-                  title="复制纯正文"
+                  title="复制采用证据"
                 >
                   <Clipboard size={12} /> 复制
                 </button>
               </div>
-              {STATUS_ORDER.filter((s) => evidenceRefs.some((r) => r.status === s)).map((status) => (
-                <div key={status} className="evidence-status-group">
-                  <div className="evidence-status-label">
-                    {status === "selected" ? <CheckCircle2 size={12} /> : status === "rejected" ? <XCircle size={12} /> : null}
-                    {STATUS_LABELS[status]}
-                  </div>
-                  {evidenceRefs
-                    .filter((r) => r.status === status)
-                    .map((ref, i) => (
-                      <div key={`${ref.id}-${i}`} className="evidence-ref-row">
-                        {supportedIds.has(ref.id) ? <span className="evidence-ref-supported" title="教学法引用">引</span> : null}
-                        <span className="evidence-ref-type">
-                          {ref.type === "local" ? "本地" : ref.type === "web_search" ? "搜索" : ref.type === "web_read" ? "阅读" : "研究"}
-                        </span>
-                        {ref.url ? (
-                          <a className="evidence-ref-link" href={ref.url} target="_blank" rel="noreferrer">{ref.title || ref.url}</a>
-                        ) : (
-                          <span className="evidence-ref-title">{ref.title || ref.source}</span>
-                        )}
-                        {ref.score > 0 ? <span className="evidence-ref-score">{ref.score.toFixed(2)}</span> : null}
-                      </div>
-                    ))}
-                </div>
-              ))}
-            </div>
+              <div className="evidence-primary-list">
+                {adoptedRefs.map((ref) => (
+                  <EvidenceRow
+                    key={ref.id}
+                    ref={ref}
+                    supported={supportedIds.has(ref.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : hasDiagnostics ? (
+            <p className="evidence-empty-note">
+              本轮没有标记为已采用的可核对证据。
+            </p>
           ) : null}
-          {web.searches.map((s, i) => (
-            <div key={`s${i}`} className="web-call-card">
-              <div className="web-call-head">
-                <Search size={13} /> 搜索 “{s.query}”
-              </div>
-              {s.results.length ? (
-                s.results.slice(0, 3).map((r, j) => (
-                  <a key={`${r.url ?? r.title ?? j}`} className="web-result" href={r.url} target="_blank" rel="noreferrer">
-                    {r.title || r.url}
-                    {r.url ? <span className="web-url">{r.url}</span> : null}
-                  </a>
-                ))
-              ) : (
-                <p className="web-preview">本次查询没有返回可展示的结果。</p>
-              )}
-            </div>
-          ))}
-          {web.reads.map((r, i) => (
-            <div key={`r${i}`} className="web-call-card">
-              <div className="web-call-head">
-                <FileText size={13} /> 阅读 {r.url}
-              </div>
-              <p className="web-preview">{r.error ? `读取失败：${r.error}` : r.preview}</p>
-            </div>
-          ))}
-          {citations.length ? (
-            <ol className="citation-list">
-              {citations.map((c, i) => (
-                <li key={`${c.source}-${c.title}`}>
-                  <strong>[{i + 1}]</strong> {c.title} <span className="cite-src">{c.source}</span>{" "}
-                  <span className="cite-score">{c.score.toFixed(2)}</span>
-                </li>
-              ))}
-            </ol>
+
+          {hasDiagnostics ? (
+            <section className="evidence-diagnostics">
+              <button
+                className="evidence-diagnostics-toggle"
+                type="button"
+                onClick={() => setDiagnosticsOpen((value) => !value)}
+                aria-expanded={diagnosticsOpen}
+              >
+                <Settings2 size={13} />
+                {diagnosticsOpen ? "收起诊断详情" : "显示诊断详情"}
+              </button>
+
+              {diagnosticsOpen ? (
+                <div className="evidence-diagnostics-body">
+                  <div className="evidence-diagnostics-header">
+                    <strong>完整证据生命周期</strong>
+                    {evidenceRefs.length ? (
+                      <button
+                        className="ghost-action compact evidence-copy"
+                        onClick={() =>
+                          copyText(
+                            formatEvidencePlainText(pedagogy, evidenceRefs, true),
+                          )
+                        }
+                        type="button"
+                        title="复制诊断详情"
+                      >
+                        <Clipboard size={12} /> 复制诊断
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {webError ? (
+                    <div className="evidence-error">联网工具错误：{webError}</div>
+                  ) : null}
+
+                  {recoveredResearchUsed ? (
+                    <div
+                      className="web-call-card"
+                      data-research-run-id={rag?.web_context?.run_id}
+                    >
+                      本轮使用了已恢复的联网研究来源。
+                    </div>
+                  ) : null}
+
+                  {evidenceRefs.length ? (
+                    <div className="evidence-unified">
+                      {STATUS_ORDER.filter((status) =>
+                        evidenceRefs.some((ref) => ref.status === status),
+                      ).map((status) => (
+                        <div key={status} className="evidence-status-group">
+                          <div className="evidence-status-label">
+                            {status === "selected" ? (
+                              <CheckCircle2 size={12} />
+                            ) : status === "rejected" ? (
+                              <XCircle size={12} />
+                            ) : null}
+                            {STATUS_LABELS[status]}
+                          </div>
+                          {evidenceRefs
+                            .filter((ref) => ref.status === status)
+                            .map((ref) => (
+                              <EvidenceRow
+                                key={ref.id}
+                                ref={ref}
+                                supported={supportedIds.has(ref.id)}
+                                diagnostic
+                              />
+                            ))}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {web.searches.map((search, index) => (
+                    <div key={`s${index}`} className="web-call-card">
+                      <div className="web-call-head">
+                        <Search size={13} /> 搜索 “{search.query}”
+                      </div>
+                      {search.results.length ? (
+                        search.results.slice(0, 3).map((result, resultIndex) => (
+                          <a
+                            key={`${result.url ?? result.title ?? resultIndex}`}
+                            className="web-result"
+                            href={result.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {result.title || result.url}
+                            {result.url ? (
+                              <span className="web-url">{result.url}</span>
+                            ) : null}
+                          </a>
+                        ))
+                      ) : (
+                        <p className="web-preview">本次查询没有返回可展示的结果。</p>
+                      )}
+                    </div>
+                  ))}
+
+                  {web.reads.map((read, index) => (
+                    <div key={`r${index}`} className="web-call-card">
+                      <div className="web-call-head">
+                        <FileText size={13} /> 阅读 {read.url}
+                      </div>
+                      <p className="web-preview">
+                        {read.error ? `读取失败：${read.error}` : read.preview}
+                      </p>
+                    </div>
+                  ))}
+
+                  {citations.length ? (
+                    <div className="evidence-legacy-citations">
+                      <strong>旧版本地引用兼容数据</strong>
+                      <ol className="citation-list">
+                        {citations.map((citation, index) => (
+                          <li key={`${citation.source}-${citation.title}`}>
+                            <strong>[{index + 1}]</strong> {citation.title}{" "}
+                            <span className="cite-src">{citation.source}</span>{" "}
+                            <span className="cite-score">
+                              {citation.score.toFixed(2)}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
           ) : null}
         </div>
       ) : null}
