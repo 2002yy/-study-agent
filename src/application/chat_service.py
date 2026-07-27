@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Callable, Iterator
 
@@ -245,6 +246,13 @@ class ChatService:
                     command.partial_reply,
                 )
             now = utc_now()
+            pedagogy_snapshot = {
+                **pedagogy_plan.to_dict(),
+                "learning_state_before": learning_state.to_dict(),
+                "learning_state_after": next_learning_state.to_dict(),
+                "evidence_disclosure": disclosed.policy,
+                "evidence_units": list(disclosed.units),
+            }
             if existing is None:
                 pending = ChatTurn(
                     id=turn_id,
@@ -257,13 +265,7 @@ class ChatService:
                     model=route["model_profile"],
                     route_snapshot=route,
                     rag_snapshot=rag,
-                    pedagogy_snapshot={
-                        **pedagogy_plan.to_dict(),
-                        "learning_state_before": learning_state.to_dict(),
-                        "learning_state_after": next_learning_state.to_dict(),
-                        "evidence_disclosure": disclosed.policy,
-                        "evidence_units": list(disclosed.units),
-                    },
+                    pedagogy_snapshot=pedagogy_snapshot,
                     parent_turn_id=retry_parent.id if retry_parent else None,
                     operation_id=operation_id,
                     conversation_instruction=command.conversation_instruction,
@@ -271,6 +273,23 @@ class ChatService:
                     updated_at=now,
                 )
                 self.repository.add_chat_turn(pending)
+            streaming_truth = _normalized_turn_truth(
+                turn=existing,
+                fallback_turn_id=turn_id,
+                thread_id=thread.id,
+                user_message=command.user_input,
+                assistant_message=base_reply,
+                status="streaming",
+                role=route["role"],
+                mode=route["mode"],
+                model=route["model_profile"],
+                route_snapshot=route,
+                rag_snapshot=rag,
+                pedagogy_snapshot=pedagogy_snapshot,
+                parent_turn_id=retry_parent.id if retry_parent else None,
+                operation_id=operation_id,
+                conversation_instruction=command.conversation_instruction,
+            )
             streaming = self.repository.update_chat_turn(
                 turn_id,
                 assistant_message=base_reply,
@@ -279,14 +298,8 @@ class ChatService:
                 mode=route["mode"],
                 model=route["model_profile"],
                 route_snapshot=route,
-                rag_snapshot=rag,
-                pedagogy_snapshot={
-                    **pedagogy_plan.to_dict(),
-                    "learning_state_before": learning_state.to_dict(),
-                    "learning_state_after": next_learning_state.to_dict(),
-                    "evidence_disclosure": disclosed.policy,
-                    "evidence_units": list(disclosed.units),
-                },
+                rag_snapshot=streaming_truth.rag_snapshot,
+                pedagogy_snapshot=pedagogy_snapshot,
                 operation_id=operation_id,
                 expected_operation_id=(operation_id if existing is None else existing.operation_id),
                 enforce_operation_owner=True,
@@ -302,7 +315,7 @@ class ChatService:
             turn=streaming,
             messages=messages,
             route=route,
-            rag=rag,
+            rag=streaming.rag_snapshot,
             runtime_modes=runtime_modes,
             memory_enabled=bool(memory_bundle),
             web_context_used=bool(command.web_context.strip()) or web_tools.used,
@@ -385,6 +398,23 @@ class ChatService:
             },
             "committed_learning_state": committed_state.to_dict(),
         }
+        completed_truth = _normalized_turn_truth(
+            turn=prepared.turn,
+            fallback_turn_id=prepared.turn.id,
+            thread_id=prepared.thread.id,
+            user_message=prepared.turn.user_message,
+            assistant_message=reply,
+            status="completed",
+            role=prepared.route["role"],
+            mode=prepared.route["mode"],
+            model=prepared.route["model_profile"],
+            route_snapshot=prepared.route,
+            rag_snapshot=prepared.rag,
+            pedagogy_snapshot=pedagogy_snapshot,
+            parent_turn_id=prepared.turn.parent_turn_id,
+            operation_id=prepared.turn.operation_id,
+            conversation_instruction=prepared.turn.conversation_instruction,
+        )
         updated = self.repository.complete_chat_turn_with_pedagogy(
             prepared.turn.id,
             assistant_message=reply,
@@ -396,22 +426,40 @@ class ChatService:
                 "is_continuation": prepared.is_continuation,
                 "is_continuation_resolved": prepared.is_continuation,
             },
-            rag_snapshot=prepared.rag,
+            rag_snapshot=completed_truth.rag_snapshot,
             operation_id=prepared.turn.operation_id or "",
             pedagogy_snapshot=pedagogy_snapshot,
             supersede_parent_turn_id=prepared.retry_parent_turn_id,
             pedagogy_eval_run=prepared.learner_evaluation,
         )
         return updated
+
     def interrupt_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
+        interrupted_truth = _normalized_turn_truth(
+            turn=prepared.turn,
+            fallback_turn_id=prepared.turn.id,
+            thread_id=prepared.thread.id,
+            user_message=prepared.turn.user_message,
+            assistant_message=reply,
+            status="interrupted",
+            role=prepared.route["role"],
+            mode=prepared.route["mode"],
+            model=prepared.route["model_profile"],
+            route_snapshot={**prepared.route, "interrupted": True},
+            rag_snapshot=prepared.rag,
+            pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
+            parent_turn_id=prepared.turn.parent_turn_id,
+            operation_id=prepared.turn.operation_id,
+            conversation_instruction=prepared.turn.conversation_instruction,
+        )
         updated = self.repository.update_chat_turn(
             prepared.turn.id,
             assistant_message=reply,
             status="interrupted",
-            route_snapshot={**prepared.route, "interrupted": True},
-            rag_snapshot=prepared.rag,
-            pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
+            route_snapshot=interrupted_truth.route_snapshot,
+            rag_snapshot=interrupted_truth.rag_snapshot,
+            pedagogy_snapshot=interrupted_truth.pedagogy_snapshot,
             operation_id=prepared.turn.operation_id,
             expected_operation_id=prepared.turn.operation_id,
             enforce_operation_owner=True,
@@ -424,13 +472,30 @@ class ChatService:
 
     def fail_turn(self, prepared: PreparedChatTurn, suffix: str = "") -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
+        failed_truth = _normalized_turn_truth(
+            turn=prepared.turn,
+            fallback_turn_id=prepared.turn.id,
+            thread_id=prepared.thread.id,
+            user_message=prepared.turn.user_message,
+            assistant_message=reply,
+            status="failed",
+            role=prepared.route["role"],
+            mode=prepared.route["mode"],
+            model=prepared.route["model_profile"],
+            route_snapshot={**prepared.route, "failed": True},
+            rag_snapshot=prepared.rag,
+            pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
+            parent_turn_id=prepared.turn.parent_turn_id,
+            operation_id=prepared.turn.operation_id,
+            conversation_instruction=prepared.turn.conversation_instruction,
+        )
         updated = self.repository.update_chat_turn(
             prepared.turn.id,
             assistant_message=reply,
             status="failed",
-            route_snapshot={**prepared.route, "failed": True},
-            rag_snapshot=prepared.rag,
-            pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
+            route_snapshot=failed_truth.route_snapshot,
+            rag_snapshot=failed_truth.rag_snapshot,
+            pedagogy_snapshot=failed_truth.pedagogy_snapshot,
             operation_id=prepared.turn.operation_id,
             expected_operation_id=prepared.turn.operation_id,
             enforce_operation_owner=True,
@@ -530,10 +595,30 @@ class ChatService:
             )
         if existing.status == "interrupted" and existing.assistant_message == stored_reply:
             return existing, False
+        partial_truth = _normalized_turn_truth(
+            turn=existing,
+            fallback_turn_id=turn_id,
+            thread_id=thread_id,
+            user_message=existing.user_message,
+            assistant_message=stored_reply,
+            status="interrupted",
+            role=existing.role,
+            mode=existing.mode,
+            model=existing.model,
+            route_snapshot=existing.route_snapshot,
+            rag_snapshot=existing.rag_snapshot,
+            pedagogy_snapshot=existing.pedagogy_snapshot,
+            parent_turn_id=existing.parent_turn_id,
+            operation_id=operation_id,
+            conversation_instruction=existing.conversation_instruction,
+        )
         updated = self.repository.update_chat_turn(
             turn_id,
             assistant_message=stored_reply,
             status="interrupted",
+            route_snapshot=partial_truth.route_snapshot,
+            rag_snapshot=partial_truth.rag_snapshot,
+            pedagogy_snapshot=partial_truth.pedagogy_snapshot,
             expected_operation_id=operation_id,
             enforce_operation_owner=existing.status == "streaming",
             expected_status=existing.status,
@@ -572,6 +657,49 @@ class ChatService:
                 if isinstance(unit, dict) and str(unit.get("source_id", "")).strip()
             )
         return ()
+
+
+def _normalized_turn_truth(
+    *,
+    turn: ChatTurn | None,
+    fallback_turn_id: str,
+    thread_id: str,
+    user_message: str,
+    assistant_message: str,
+    status: str,
+    role: str,
+    mode: str,
+    model: str,
+    route_snapshot: dict[str, Any],
+    rag_snapshot: dict[str, Any],
+    pedagogy_snapshot: dict[str, Any],
+    parent_turn_id: str | None,
+    operation_id: str | None,
+    conversation_instruction: str,
+) -> ChatTurn:
+    normalized_rag = deepcopy(rag_snapshot)
+    raw_claims = normalized_rag.get("answer_claim_snapshot")
+    if status == "completed" and isinstance(raw_claims, dict):
+        if raw_claims.get("status") == "unavailable":
+            normalized_rag.pop("answer_claim_snapshot", None)
+    return ChatTurn(
+        id=turn.id if turn is not None else fallback_turn_id,
+        thread_id=thread_id,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        status=status,
+        role=role,
+        mode=mode,
+        model=model,
+        route_snapshot=deepcopy(route_snapshot),
+        rag_snapshot=normalized_rag,
+        pedagogy_snapshot=deepcopy(pedagogy_snapshot),
+        parent_turn_id=parent_turn_id,
+        operation_id=operation_id,
+        conversation_instruction=conversation_instruction,
+        created_at=turn.created_at if turn is not None else utc_now(),
+        updated_at=utc_now(),
+    )
 
 
 def _requires_mastery_evidence(plan: PedagogyTurnPlan) -> bool:

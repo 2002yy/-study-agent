@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 from uuid import uuid4
 
-from src.domain.evidence import build_evidence_snapshot
+from src.domain.answer_claims import normalize_answer_claim_snapshot_for_turn
+from src.domain.evidence import ClaimEvidenceLinkV1, build_evidence_snapshot
 
 
 def new_id(prefix: str) -> str:
@@ -55,20 +56,59 @@ class ChatTurn:
     updated_at: str = field(default_factory=utc_now)
 
     def __post_init__(self) -> None:
-        # ChatTurn owns one versioned server projection derived from its already
-        # persisted raw snapshots. New turns persist it inside rag_snapshot;
-        # legacy rows gain the same projection in memory without a migration.
-        if self.rag_snapshot or self.pedagogy_snapshot:
-            self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot()
+        # ChatTurn owns versioned projections derived from already persisted raw
+        # snapshots. New turns persist them inside rag_snapshot; legacy rows gain
+        # the same projections in memory without requiring a schema migration.
+        if not (self.rag_snapshot or self.pedagogy_snapshot):
+            return
+        base_evidence = self._project_evidence_snapshot()
+        known_evidence_ids = tuple(
+            str(ref.get("id", ""))
+            for ref in base_evidence.get("refs", ())
+            if isinstance(ref, dict) and str(ref.get("id", "")).strip()
+        )
+        claim_snapshot = normalize_answer_claim_snapshot_for_turn(
+            raw_snapshot=self.rag_snapshot.get("answer_claim_snapshot"),
+            assistant_message=self.assistant_message,
+            turn_status=self.status,
+            known_evidence_ids=known_evidence_ids,
+        )
+        self.rag_snapshot["answer_claim_snapshot"] = claim_snapshot.to_dict()
+        self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot(
+            claim_links=claim_snapshot.claim_links
+        )
+
+    @property
+    def answer_claim_snapshot(self) -> dict[str, Any]:
+        existing = self.rag_snapshot.get("answer_claim_snapshot")
+        if isinstance(existing, dict):
+            return dict(existing)
+        base_evidence = self._project_evidence_snapshot()
+        known_evidence_ids = tuple(
+            str(ref.get("id", ""))
+            for ref in base_evidence.get("refs", ())
+            if isinstance(ref, dict) and str(ref.get("id", "")).strip()
+        )
+        return normalize_answer_claim_snapshot_for_turn(
+            raw_snapshot={},
+            assistant_message=self.assistant_message,
+            turn_status=self.status,
+            known_evidence_ids=known_evidence_ids,
+        ).to_dict()
 
     @property
     def evidence_snapshot(self) -> dict[str, Any]:
         existing = self.rag_snapshot.get("evidence_snapshot")
         if isinstance(existing, dict):
             return dict(existing)
-        return self._project_evidence_snapshot()
+        claim_links = _claim_links_from_snapshot(self.answer_claim_snapshot)
+        return self._project_evidence_snapshot(claim_links=claim_links)
 
-    def _project_evidence_snapshot(self) -> dict[str, Any]:
+    def _project_evidence_snapshot(
+        self,
+        *,
+        claim_links: Iterable[ClaimEvidenceLinkV1] = (),
+    ) -> dict[str, Any]:
         raw_units = self.pedagogy_snapshot.get("evidence_units") or ()
         units = (
             tuple(unit for unit in raw_units if isinstance(unit, dict))
@@ -88,6 +128,7 @@ class ChatTurn:
                 self.pedagogy_snapshot.get("evidence_disclosure") or "none"
             ),
             pedagogy_evidence_ids=evidence_ids,
+            claim_links=claim_links,
         ).to_dict()
 
 
@@ -237,3 +278,25 @@ class OperationRecord:
     status: str = "running"
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+
+
+def _claim_links_from_snapshot(snapshot: dict[str, Any]) -> tuple[ClaimEvidenceLinkV1, ...]:
+    raw_links = snapshot.get("claim_links")
+    if not isinstance(raw_links, list):
+        return ()
+    links: list[ClaimEvidenceLinkV1] = []
+    for raw in raw_links:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            links.append(
+                ClaimEvidenceLinkV1(
+                    claim_id=str(raw.get("claim_id", "")),
+                    evidence_id=str(raw.get("evidence_id", "")),
+                    support_type=str(raw.get("support_type", "")),
+                    confidence=float(raw.get("confidence", 0)),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return tuple(links)
