@@ -141,7 +141,7 @@ def test_streaming_interrupted_and_failed_turns_invalidate_supplied_claims():
 
         assert turn.answer_claim_snapshot["status"] == "unavailable"
         assert turn.answer_claim_snapshot["answer_hash"] == ""
-        assert turn.answer_claim_snapshot["reason"] == f"turn_status:{status}"
+        assert turn.answer_claim_snapshot["reason"] == "turn_not_completed"
         assert turn.evidence_snapshot["claim_links"] == []
 
 
@@ -226,7 +226,7 @@ def test_continuation_invalidates_old_claim_truth_until_new_final_answer():
 
     assert resumed.answer_claim_snapshot["status"] == "unavailable"
     assert resumed.answer_claim_snapshot["answer_hash"] == ""
-    assert resumed.answer_claim_snapshot["reason"] == "turn_status:streaming"
+    assert resumed.answer_claim_snapshot["reason"] == "turn_not_completed"
     assert resumed.evidence_snapshot["claim_links"] == []
 
 
@@ -241,7 +241,7 @@ def test_retry_child_does_not_inherit_parent_claim_snapshot():
     )
 
     assert child.answer_claim_snapshot["status"] == "unavailable"
-    assert child.answer_claim_snapshot["reason"] == "turn_status:pending"
+    assert child.answer_claim_snapshot["reason"] == "turn_not_completed"
     assert child.answer_claim_snapshot["claims"] == []
 
 
