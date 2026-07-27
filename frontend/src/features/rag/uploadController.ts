@@ -111,10 +111,6 @@ export function useUploadController(options: UploadControllerOptions) {
   };
 
   useEffect(() => {
-    void refreshDocuments();
-  }, []);
-
-  useEffect(() => {
     if (!options.activeRunId || options.activeRunId === run?.id) return;
     let active = true;
     void loadRagRun(options.activeRunId)
