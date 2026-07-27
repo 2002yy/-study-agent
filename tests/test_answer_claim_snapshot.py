@@ -179,7 +179,7 @@ def test_non_completed_turn_always_invalidates_supplied_claim_truth():
         )
         assert normalized.status == "unavailable"
         assert normalized.answer_hash == ""
-        assert normalized.reason == f"turn_status:{status}"
+        assert normalized.reason == "turn_not_completed"
         assert normalized.claims == ()
 
 
