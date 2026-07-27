@@ -178,7 +178,7 @@ describe("SourcesPanel three-layer ownership", () => {
     const diagnostics = screen.getByRole("tabpanel");
     expect(within(diagnostics).getByRole("heading", { name: "证据生命周期" })).toBeVisible();
     expect(within(diagnostics).getAllByText("candidate guide").length).toBeGreaterThan(0);
-    expect(within(diagnostics).getByText("分数：42%")).toBeVisible();
+    expect(within(diagnostics).getByText("分数：0.420")).toBeVisible();
     expect(within(diagnostics).getByText("生命周期：候选")).toBeVisible();
     expect(within(diagnostics).getByText("candidate context must stay diagnostic")).toBeInTheDocument();
     expect(screen.queryByText("FastAPI source notes")).not.toBeInTheDocument();
@@ -193,7 +193,7 @@ describe("SourcesPanel three-layer ownership", () => {
     expect(within(library).getByText("Old FastAPI notes")).toBeVisible();
     expect(within(library).getByText("当前资料 · 会参与回答")).toBeVisible();
     expect(within(library).getByText("旧版本 · 不参与回答")).toBeVisible();
-    expect(within(library).getByRole("button", { name: "删除资料" })).toBeVisible();
+    expect(within(library).getAllByRole("button", { name: "删除资料" })).toHaveLength(2);
     expect(screen.queryByText("candidate guide")).not.toBeInTheDocument();
     expect(screen.queryByText(/分数：/)).not.toBeInTheDocument();
   });
