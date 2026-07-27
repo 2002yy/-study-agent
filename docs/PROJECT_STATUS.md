@@ -1,11 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-07-26  
+> 更新：2026-07-27  
 > 当前产品定义：**Study Agent 是一个能够长期保持“我正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前产品边界：GitHub = 学习源码时使用的高级研究工具；RAG = 围绕自己的资料学习；Web Research = 需要外部事实时获得可信证据；Memory = 学习连续性基础设施；Workflow = 高级诊断 / 开发者模式。  
-> 当前主线：**证据身份与实时/恢复合同已经服务端化；当前把 durable ResearchRun 的采用/排除来源接入 ChatTurn 真值。之后再做证据展示分层、Streamlit 清理、真实模型回答基线与结构化资料摄取。**  
-> 当前工作分支：`agent/research-evidence-source-truth`。
+> 当前主线：**证据身份、生命周期、ResearchRun 来源真值和实时/恢复一致性已经服务端化；当前收敛普通用户证据展示，把候选、排除、分数和工具调用下沉到显式诊断区。**  
+> 当前工作分支：`agent/evidence-display-layering`。
 
 本文件只回答：**做到哪里、真实指标是什么、已知缺陷是什么、下一步做什么。** 历史过程留在 Git 提交和 PR，不维护并列长期状态文档。
 
@@ -67,7 +67,7 @@
 4. **ThreadSummaryState**：`summarized / needs_update / not_summarized`；只有新 completed turn 才重新开放整理。
 5. **会话语义导航**：标题、目标/研究摘要、阶段/缺口、状态、搜索和分组。
 6. **学习状态去伪精化**：`已验证 / 待验证 / 需重讲 / 待语义复核`；不显示启发式百分比。
-7. **结构化恢复卡**：新用户五类入口；返回用户显示 committed 目标、确认点/采用来源、缺口和下一步；中断 Turn 可继续、重试或 durable abandon。
+7. **结构化恢复卡**：返回用户显示 committed 目标、确认点/采用来源、缺口和下一步；中断 Turn 可继续、重试或 durable abandon。
 8. **UI 收敛与窄屏可用**：一级操作只保留当前任务收束、上传、会话和 More；低频功能按需出现。
 9. **Golden Journey 门禁**：首次问答、系统学习、资料学习、联网研究、GitHub 源码学习已有决策数、surface、恢复点击、下一步可见性和内部术语合同。
 
@@ -79,15 +79,15 @@ PR #61 已合并，merge SHA：`597006e99919ea7e5f5b02f01b1536b446da9a55`。
 
 完成：
 
-- 统一证据正确读取正式嵌套 `RagResult.chunk`；
+- 正确读取嵌套 `RagResult.chunk`；
 - local evidence identity 优先使用 `chunk_id`；
-- 同一来源的不同 chunk 不错误折叠；
-- 历史 `pedagogy_snapshot.evidence_ids` 恢复；
-- 实时 response -> persisted snapshot -> restored session 等价回归；
+- 同一来源不同 chunk 不错误折叠；
+- 恢复 `pedagogy_snapshot.evidence_ids`；
+- live response -> persisted snapshot -> restored session 等价回归；
 - 刷新后教学“引”标记保持；
 - package helper 更新到当前 React/FastAPI 入口。
 
-CI #1317 全绿：pytest、RAG K1、Ruff、package、detect-secrets、mypy、前端测试与生产构建。
+CI #1317 全绿。
 
 ### 2.2 P0-2a：server-owned EvidenceSnapshot v1
 
@@ -95,22 +95,37 @@ PR #62 已合并，merge SHA：`fcfb9bc66750d10c822306fae735424e658b19ef`。
 
 完成：
 
-- `EvidenceRefV1`：稳定 ID、类型、标题、来源、URL、域名、时间、分数、生命周期、Provider 状态与采用/排除原因；
-- `EvidenceSnapshotV1`：`schema_version=evidence-snapshot-v1`、disclosure policy、refs、pedagogy evidence IDs、claim links；
-- `ClaimEvidenceLinkV1` 只定义合同；当前聊天链没有真实 answer-claim owner，因此不伪造 claim link；
+- `EvidenceRefV1`、`EvidenceSnapshotV1`、`ClaimEvidenceLinkV1` 合同；
+- 稳定证据 ID、生命周期、Provider 状态和采用/排除原因；
 - `ChatTurn` 从既有 `rag_snapshot + pedagogy_snapshot` 确定性生成服务端投影；
 - 新 Turn 在现有 JSON 边界内持久化，不增加 SQLite schema；
 - 旧非空 Turn 读取时补齐 v1 投影，数据库原行不被静默改写；
-- 真正空的旧 Turn 保持空原始快照；
-- local chunk 只有被 disclosure 选中同一 `chunk_id` 时才成为 selected；
-- WebTool search/read 只成为 candidate/read；模糊 `web-1` 序号不得冒充 selected URL；
-- 合同支持正式 ResearchRun selected/rejected source assessment，但当前聊天接线尚未注入这些明细；
-- React 优先消费服务端 snapshot；旧 Turn 才走兼容 normalizer；React 不再推断 selected/rejected；
-- pedagogy evidence IDs 与事实 claim links 正式分离。
+- local chunk 只有 disclosure 选中同一 `chunk_id` 时才成为 selected；
+- WebTool search/read 只成为 candidate/read；模糊 `web-1` 不得冒充 selected URL；
+- React 优先消费服务端 snapshot，旧 Turn 才走兼容 normalizer；
+- pedagogy evidence IDs 与事实 claim links 分离，不伪造 claim。
 
-CI #1340 全绿：pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy baseline、前端测试与生产构建。
+CI #1340 全绿。
 
-### 2.3 RAG-K1 当前完成度
+### 2.3 P0-2b：durable ResearchRun source truth
+
+PR #63 已合并，merge SHA：`f1b2a4f9d481a16e5c93e6ac8fb4c0f9ee2f45c2`。
+
+完成：
+
+- completed/partial ResearchRun 的 selected/rejected source assessments 接入 `ChatTurn.rag_snapshot.research_sources`；
+- 保存 run ID、Provider 状态、stop reason、URL/domain、相关度和排除原因；
+- snippet、文章正文、query attempts、token、密钥及任意 Provider payload 不进入 Turn 来源快照；
+- unusable Run 或不匹配的 source block 被拒绝；
+- web policy 阻断时不持久化 ResearchRun 来源明细；
+- EvidenceSnapshot v1 自动投影 selected/rejected 生命周期；
+- continuation/retry 不能切换到另一个 ResearchRun；
+- 同一 Run 恢复时忽略客户端篡改，使用原 Turn 冻结的来源真值；
+- `PreparedChatTurn.rag` 返回 repository-owned `rag_snapshot`，实时与数据库恢复一致。
+
+CI #1357 全绿：pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy baseline、前端测试与生产构建。
+
+### 2.4 RAG-K1 当前完成度
 
 K1a–K1e 已进入 `main`：
 
@@ -161,17 +176,25 @@ K1a–K1e 已进入 `main`：
 
 ## 4. 当前缺口
 
-### 4.1 ResearchRun 来源真值尚未进入 ChatTurn
+### 4.1 普通证据与开发者诊断尚未分层
 
-当前聊天使用已完成 ResearchRun 时，只持久化 run ID 和 source block；`WebLookupRun.selected_sources / rejected_sources / provider_status / stop_reason` 没有进入 `rag_snapshot.research_sources`。
+当前 `EvidenceTrail` 同时展示：
 
-结果：
+- 服务端统一证据；
+- selected/read/candidate/rejected 全生命周期；
+- 搜索调用和读取调用；
+- 旧 RAG citations；
+- score 和工具错误。
 
-- EvidenceSnapshot v1 已能消费正式 source assessment，但生产聊天还没有提供；
-- URL 来源只能显示 WebTool candidate/read 或恢复来源 run provenance；
-- selected/rejected、排除原因和 Provider 完整度不能在实时与刷新后一致恢复。
+这造成普通用户重复看到同一来源，并暴露内部候选、分数和工具过程。
 
-当前 P0-2b 只解决这条服务端接线，不同时做 UI 大改。
+正确边界：
+
+- 普通层只显示回答实际采用且可核对的 selected 证据，以及明确的教学引用；
+- 普通层不显示 candidate/read/rejected、score、搜索次数、读取正文预览和旧 citation 列表；
+- 显式“诊断详情”才显示完整生命周期、Provider 状态、采用/排除原因、工具调用和兼容数据；
+- 普通复制只复制已采用证据，诊断复制才包含全部状态和分数；
+- 无 selected 证据时不得把 candidate/read 包装成“回答来源”。
 
 ### 4.2 事实 answer-claim owner 尚未建立
 
@@ -184,19 +207,7 @@ K1a–K1e 已进入 `main`：
 - 不从自然语言回答反向猜 claim；
 - 后续必须先定义服务端结构化 answer assertion/claim owner，再允许写 claim links。
 
-### 4.3 普通证据与开发者诊断尚未分层
-
-当前 EvidenceTrail 仍可能同时展示：
-
-- 统一证据；
-- 搜索调用；
-- 阅读调用；
-- RAG citations/debug；
-- candidate/read/selected/rejected/score。
-
-普通用户只应看到回答实际采用且可核对的证据；候选、排除、score、调用预算和 Provider 细节应下沉开发者诊断。
-
-### 4.4 Streamlit 移除未收尾
+### 4.3 Streamlit 移除未收尾
 
 - 根级 `app.py` 已移除；
 - React 19 和 testing-library 已完成；
@@ -204,7 +215,7 @@ K1a–K1e 已进入 `main`：
 - `requirements.in` 仍保留 Streamlit；
 - README 仍有入口状态冲突。
 
-### 4.5 长期学习缺计划级 authoritative entity
+### 4.4 长期学习缺计划级 authoritative entity
 
 现有 TaskContract、LearningState、PedagogyEvalRun、LearningClosureRun、ThreadSummaryState 和 MemoryRun 可保证单次会话可信，但尚无正式实体维护长期目标拆分、前置关系、单元验证、失败后重规划和阶段复测。
 
@@ -212,46 +223,38 @@ K1a–K1e 已进入 `main`：
 
 所有切片遵循：**小 PR -> 目标测试 -> 全量门禁 -> 更新本文件 -> 全绿合并 -> 从最新 main 开下一刀。**
 
-### P0-2b：`agent/research-evidence-source-truth`（当前）
+### P0-2c1：`agent/evidence-display-layering`（当前）
 
-目标：把 durable ResearchRun 的 source assessment 接入 ChatTurn authoritative truth。
+目标：收敛普通用户证据展示，不改变服务端真值。
 
 范围：
 
-1. 扩展 `PolicyChatCommand`，携带恢复 Run 的 selected/rejected source records、provider status 和 stop reason；
-2. `chat_routes._chat_command()` 在校验 completed/partial ResearchRun 后读取并复制这些不可变记录；
-3. `ExternalDataPolicyChatService` 写入：
-
-```text
-rag_snapshot.research_sources = {
-  run_id,
-  provider_status,
-  stop_reason,
-  selected_sources,
-  rejected_sources
-}
-```
-
-4. EvidenceSnapshot v1 自动投影 selected/rejected、URL/domain、relevance、排除原因；
-5. 实时 response 与 session restore 返回相同 source truth；
-6. retry/continuation 继续恢复原 Turn，不注入新 Run；
-7. 不暴露完整正文、token、密钥或不必要的 Provider payload；
-8. 不修改数据库 schema，不新建 Research/Evidence 平行 owner。
+1. 默认摘要只报告实际采用证据数量，不展示搜索次数、读取次数、候选总数或分数；
+2. 普通详情只展示 selected 证据，以及被 `pedagogy.evidence_ids` 明确引用的证据；
+3. 普通证据行显示类型、标题/链接和“教学引用”标记，不显示 lifecycle 标签与 score；
+4. candidate/read/rejected、Provider 状态、采用/排除原因、WebTool 搜索/读取、错误和旧 citations 全部进入显式“诊断详情”；
+5. 普通复制只复制普通可见证据；诊断复制包含完整生命周期和技术字段；
+6. 删除“统一证据 + 搜索卡 + 阅读卡 + citation list”在普通层的重复展示；
+7. 窄屏下标题和链接可换行，按钮可触控，诊断区不产生横向溢出；
+8. 旧快照仍可诊断恢复，但不得在普通层把 candidate/read 伪装成 adopted。
 
 门禁：
 
-- wrong run/session/status 拒绝；
-- selected/rejected source records 精确恢复；
-- partial/provider_failed 与空结果不混用；
-- live/refresh EvidenceSnapshot 等价；
-- 全量 CI。
+- selected 与教学引用的普通展示测试；
+- candidate/read/rejected 默认隐藏测试；
+- 显式诊断展开测试；
+- 普通/诊断复制内容边界测试；
+- 空 selected 状态不伪造来源；
+- live/restore 使用同一 EvidenceSnapshot；
+- 全量前后端 CI。
 
-### P0-2c：证据展示分层与 answer-claim owner
+### P0-2c2：answer-claim owner
 
-拆为两个独立小 PR：
-
-1. **UI 分层**：普通模式只显示 selected/实际引用；candidate/read/rejected/score/search/read trace 下沉开发者诊断；消除重复卡片；窄屏回归。
-2. **Answer claim owner**：服务端生成结构化 assertion ID；只有最终采用 claim 与已知 EvidenceRef 建立 `ClaimEvidenceLinkV1`；无法解析时为空，不补造。
+- 服务端生成结构化 assertion ID；
+- 只有最终采用 claim 与已知 EvidenceRef 建立 `ClaimEvidenceLinkV1`；
+- 无法解析或无法确认支持关系时保持空，不补造；
+- claim links 实时与刷新一致；
+- 不从前端或自然语言字符串匹配推断关系。
 
 ### P0-3：架构真值与 Streamlit 清理
 
@@ -321,11 +324,11 @@ rag_snapshot.research_sources = {
 
 ## 7. 当前执行状态
 
-- 当前分支：`agent/research-evidence-source-truth`；
-- 已完成：PR #61 evidence parity；PR #62 EvidenceSnapshot v1；
-- 当前任务：P0-2b ResearchRun selected/rejected source truth 接线；
-- 下一动作：扩展 `PolicyChatCommand`、route adapter 和 policy chat service，补 live/restore/retry 边界测试；
-- 合并策略：Draft PR -> 完整 CI -> 证据隐私/恢复审查 -> 全绿合并。
+- 当前分支：`agent/evidence-display-layering`；
+- 已完成：PR #61 evidence parity；PR #62 EvidenceSnapshot v1；PR #63 ResearchRun source truth；
+- 当前任务：P0-2c1 普通证据与开发者诊断分层；
+- 下一动作：重构 `EvidenceTrail` 默认/诊断视图和复制边界，补桌面与窄屏回归；
+- 合并策略：Draft PR -> 完整 CI -> 普通/诊断信息边界审查 -> 全绿合并。
 
 ## 8. 文档规则
 
