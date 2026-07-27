@@ -44,6 +44,7 @@ export default function WorkspaceRuntime() {
     snapshot,
     setSnapshot,
     refresh,
+    loadFeature,
     input,
     setInput,
     chatSettings,
@@ -116,7 +117,6 @@ export default function WorkspaceRuntime() {
     <WorkspaceView
       snapshot={snapshot}
       refresh={refresh}
-      loadFeature={loadFeature}
       fileInputRef={fileInputRef}
       controllers={controllers}
       ui={{
