@@ -32,7 +32,7 @@ describe("workspace recovery and view boundaries", () => {
     for (const component of [
       "<Sidebar",
       "<ChatPanel",
-      "<SessionSidebar",
+      "<SessionNavigator",
       "<LearningStrip",
       "<SlideOver",
       "<GlobalNotices",

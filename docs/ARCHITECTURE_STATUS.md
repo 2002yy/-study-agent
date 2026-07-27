@@ -18,7 +18,7 @@
 
 | 纵向切片 | 架构状态 | Authoritative owner |
 |---|---|---|
-| Chat/Session core | sealed | FastAPI chat/session services + SQLite repositories + `chatController` |
+| Chat/Session core | sealed | FastAPI chat/session services + SQLite repositories + `chatController` + shared `SessionNavigator` |
 | Pedagogy protocol | partial | pedagogy engine + committed `ChatThread.learning_state` |
 | Pedagogy evaluation | sealed | `PedagogyEvalRun` repository/service + turn completion transaction |
 | Task intent contract | partial | `src/task_contract.py` + route snapshot + task-aware pedagogy wrappers |
@@ -26,12 +26,12 @@
 | NewsRun | sealed | news service/repository + `newsController` |
 | ToolRun | sealed | tool service/repository + `toolController` |
 | MemoryTransaction | sealed | `MemoryRun` + hash-locked commit + `memoryController` |
-| Learning closure | transitional | after-session adapter + MemoryRun；最终 owner 将为 LearningClosureService/Run |
+| Learning closure | sealed | `LearningClosureService` + durable `LearningClosureRun` + hash-locked `MemoryRun` |
 | RAG/KnowledgeBase | sealed | RagRun、document revision、index state、RAG controllers |
 | WebLookup base run | sealed | `WebLookupService` + `WebLookupRepository` + `webLookupController` |
 | Multi-step research | partial | 必须扩展现有 WebLookup owner，不新建重叠系统 |
 | External data policy | partial | policy-aware chat preparation + runtime settings |
-| Evidence presentation | partial | turn snapshots + frontend evidence helpers；统一 EvidenceRef 尚未封板 |
+| Evidence presentation | sealed | server-owned `EvidenceSnapshot` / `AnswerClaimSnapshot` + EvidenceTrail / Sources 分层 |
 | Operation ownership | partial | operation registry + scoped controllers；服务端完整 cancel propagation 尚未封板 |
 | App entry | sealed | composition-only `App.tsx` |
 | AppShell | sealed | layout-only `AppShell` |

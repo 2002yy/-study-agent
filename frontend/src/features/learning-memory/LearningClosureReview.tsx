@@ -1,0 +1,191 @@
+import { Archive, CheckCircle2, Compass, MessageCircle, ShieldCheck } from "lucide-react";
+import type { ReactNode } from "react";
+
+import type { MemoryRunResponse } from "../../types";
+import type { LearningClosureRunResponse } from "./closureTypes";
+
+type ClosureCandidate = {
+  target: string;
+  content: string;
+  learner_pending?: boolean;
+};
+
+export type ClosureReviewModel = {
+  confirmed: string[];
+  unresolved: string[];
+  next: string[];
+  impactLabels: string[];
+};
+
+const IMPACT_LABELS: Record<string, string> = {
+  current_focus: "下一次继续学习的重点",
+  progress: "已经确认的学习进展",
+  summary: "长期学习摘要",
+  learner_profile: "待你确认的学习偏好",
+  project_context: "项目背景与长期约束",
+  revision_notes: "仍需补强的内容",
+  session_archive: "本次学习归档",
+};
+
+function candidatesFrom(run: LearningClosureRunResponse): ClosureCandidate[] {
+  const raw = run.generated_result.candidates;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (candidate): candidate is ClosureCandidate =>
+      Boolean(
+        candidate &&
+          typeof candidate === "object" &&
+          typeof candidate.target === "string" &&
+          typeof candidate.content === "string" &&
+          candidate.content.trim(),
+      ),
+  );
+}
+
+export function buildClosureReviewModel(
+  run: LearningClosureRunResponse,
+  memoryRun: MemoryRunResponse | null,
+): ClosureReviewModel {
+  const model: ClosureReviewModel = {
+    confirmed: [],
+    unresolved: [],
+    next: [],
+    impactLabels: [],
+  };
+
+  for (const candidate of candidatesFrom(run)) {
+    const content = candidate.content.trim();
+    if (candidate.target === "current_focus") {
+      model.next.push(content);
+    } else if (
+      candidate.target === "revision_notes" ||
+      candidate.target === "learner_profile" ||
+      candidate.learner_pending
+    ) {
+      model.unresolved.push(content);
+    } else {
+      model.confirmed.push(content);
+    }
+  }
+
+  model.impactLabels = Array.from(
+    new Set(
+      (memoryRun?.updates ?? []).map(
+        (update) => IMPACT_LABELS[update.target] ?? "长期学习记录",
+      ),
+    ),
+  );
+  return model;
+}
+
+function ReviewSection({
+  icon,
+  title,
+  items,
+  empty,
+}: {
+  icon: ReactNode;
+  title: string;
+  items: string[];
+  empty: string;
+}) {
+  return (
+    <section className="closure-review-section">
+      <div className="closure-review-section-title">
+        {icon}
+        <h3>{title}</h3>
+      </div>
+      {items.length ? (
+        <ul>
+          {items.map((item, index) => (
+            <li key={`${title}-${index}`}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="closure-review-empty">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+export function LearningClosureReview({
+  run,
+  memoryRun,
+  isCommitting,
+  onConfirm,
+  onContinue,
+}: {
+  run: LearningClosureRunResponse;
+  memoryRun: MemoryRunResponse | null;
+  isCommitting: boolean;
+  onConfirm: () => Promise<void> | void;
+  onContinue: () => void;
+}) {
+  const review = buildClosureReviewModel(run, memoryRun);
+  const canConfirm =
+    run.status === "preview_ready" &&
+    Boolean(memoryRun?.preview.writable) &&
+    review.impactLabels.length > 0;
+
+  return (
+    <section
+      aria-labelledby="closure-review-title"
+      className="closure-review"
+      data-testid="learning-closure-review"
+    >
+      <header className="closure-review-header">
+        <div>
+          <span className="closure-review-kicker">保存前确认</span>
+          <h2 id="closure-review-title">回顾这次学习</h2>
+          <p>下面只包含已经提交的学习事实。确认后才会写入长期学习记录。</p>
+        </div>
+        <ShieldCheck aria-hidden="true" size={22} />
+      </header>
+
+      <div className="closure-review-grid">
+        <ReviewSection
+          empty="本次没有足够证据形成新的确认结论。"
+          icon={<CheckCircle2 aria-hidden="true" size={17} />}
+          items={review.confirmed}
+          title="本次确认"
+        />
+        <ReviewSection
+          empty="本次没有新增的待确认缺口。"
+          icon={<Archive aria-hidden="true" size={17} />}
+          items={review.unresolved}
+          title="还需继续"
+        />
+        <ReviewSection
+          empty="继续当前会话时，可以自行决定下一步。"
+          icon={<Compass aria-hidden="true" size={17} />}
+          items={review.next}
+          title="建议下一步"
+        />
+      </div>
+
+      <div className="closure-save-impact">
+        <strong>确认后将保存</strong>
+        {review.impactLabels.length ? (
+          <ul aria-label="保存影响">
+            {review.impactLabels.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>当前没有可写入的学习成果。</p>
+        )}
+      </div>
+
+      <div className="closure-review-actions">
+        <button disabled={!canConfirm || isCommitting} onClick={() => void onConfirm()} type="button">
+          <CheckCircle2 size={16} />
+          {isCommitting ? "保存中…" : "确认并保存学习成果"}
+        </button>
+        <button className="secondary" disabled={isCommitting} onClick={onContinue} type="button">
+          <MessageCircle size={16} />
+          暂不保存，继续学习
+        </button>
+      </div>
+    </section>
+  );
+}

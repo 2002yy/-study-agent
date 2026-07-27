@@ -48,6 +48,13 @@ export const SUMMARY_LABELS: Record<string, string> = {
   not_summarized: "待整理",
 };
 
+export function sessionIdFromRow(session: SessionRow): string {
+  if (session.session_id) return session.session_id;
+  if (session.kind === "current") return session.name.replace(/\.md$/, "");
+  const match = session.name.match(/_session_([^_]+)_/);
+  return match?.[1] ?? session.name.replace(/\.md$/, "");
+}
+
 export function sessionTitle(session: SemanticSessionRow): string {
   return session.title?.trim() || session.name || session.session_id || "未命名会话";
 }

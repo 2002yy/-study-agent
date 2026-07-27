@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import type { SessionRow } from "../../types";
+import { SessionNavigator } from "./SessionNavigator";
+
+vi.mock("./sessionApi", () => ({
+  updateSessionTitle: vi.fn().mockResolvedValue({}),
+}));
+
+const sessions: SessionRow[] = [
+  {
+    session_id: "chat-active",
+    kind: "current",
+    name: "chat-active.md",
+    path: "",
+    size_bytes: 10,
+    mtime_ns: 2,
+    title: "索引激活学习",
+    objective: "理解 active 与 staging 的边界",
+    unresolved_gap: "解释失败不激活",
+    task_intent: "learn",
+  } as SessionRow,
+  {
+    session_id: "chat-history",
+    kind: "archived",
+    name: "history.md",
+    path: "",
+    size_bytes: 10,
+    mtime_ns: 1,
+    title: "证据充分性",
+    objective: "练习拒答判断",
+    task_intent: "explain_back",
+  } as SessionRow,
+];
+
+describe("SessionNavigator", () => {
+  it("owns search and restore behavior for both presentation variants", () => {
+    const onRestore = vi.fn();
+    render(
+      <SessionNavigator
+        activeSessionId="chat-active"
+        onRestore={onRestore}
+        sessions={sessions}
+        variant="panel"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("搜索学习会话"), {
+      target: { value: "证据充分性" },
+    });
+    expect(screen.queryByText("索引激活学习")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /证据充分性/ }));
+    expect(onRestore).toHaveBeenCalledWith("chat-history");
+  });
+
+  it("requires confirmation before the active session is archived", () => {
+    const onArchive = vi.fn();
+    render(
+      <SessionNavigator
+        activeSessionId="chat-active"
+        onArchive={onArchive}
+        sessions={sessions}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "归档当前会话" }));
+    expect(onArchive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
+    expect(onArchive).toHaveBeenCalledWith("chat-active");
+  });
+});

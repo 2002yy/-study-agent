@@ -9,8 +9,7 @@ import { NewsWorkspace } from "../features/news-workspace/NewsWorkspace";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
-import { SessionSidebar } from "../features/sessions/SessionSidebar";
-import { SessionsPanel } from "../features/sessions/SessionsPanel";
+import { SessionNavigator } from "../features/sessions/SessionNavigator";
 import type { SemanticSessionRow } from "../features/sessions/sessionNavigation";
 import type { SessionSummary } from "../features/sessions/sessionSummary";
 import { ToolPanel } from "../features/tools/ToolPanel";
@@ -166,7 +165,7 @@ export function WorkspaceView({
         ref={fileInputRef}
         type="file"
       />
-      <SessionSidebar
+      <SessionNavigator
         sessions={snapshot.sessions}
         activeSessionId={chatController.threadId}
         isSending={chatController.isSending}
@@ -242,13 +241,15 @@ export function WorkspaceView({
       </div>
 
       <SlideOver open={state.activeDrawer === "sessions"} title="会话历史" onClose={closeDrawer}>
-        <SessionsPanel
+        <SessionNavigator
           sessions={snapshot.sessions}
           activeSessionId={chatController.threadId}
           isSending={chatController.isSending}
           onRestore={chatController.restoreSession}
           onArchive={chatController.archiveCurrentSession}
+          onNewSession={requestNewSession}
           onSessionChanged={refresh}
+          variant="panel"
         />
       </SlideOver>
 

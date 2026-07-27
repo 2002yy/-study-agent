@@ -1,0 +1,95 @@
+// @vitest-environment jsdom
+
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import type { MemoryRunResponse } from "../../types";
+import type { LearningClosureRunResponse } from "./closureTypes";
+import {
+  buildClosureReviewModel,
+  LearningClosureReview,
+} from "./LearningClosureReview";
+
+const memoryRun = {
+  id: "memory-1",
+  status: "previewed",
+  updates: [
+    { target: "progress", content: "理解了索引激活边界", append: true },
+    { target: "revision_notes", content: "还需练习拒答判断", append: true },
+    { target: "current_focus", content: "下一步解释证据充分性", append: false },
+  ],
+  preview: {
+    writable: true,
+    updates: [],
+  },
+  result: { results: [], errors: [] },
+} as unknown as MemoryRunResponse;
+
+const closureRun = {
+  id: "closure-1",
+  thread_id: "chat-1",
+  source_thread_version: 3,
+  last_completed_turn_id: "turn-3",
+  source_hash: "hash",
+  closure_eligibility: "learning_summary",
+  status: "preview_ready",
+  committed_snapshot: {},
+  generated_result: {
+    candidates: [
+      { target: "progress", content: "理解了索引激活边界" },
+      { target: "revision_notes", content: "还需练习拒答判断" },
+      { target: "current_focus", content: "下一步解释证据充分性" },
+    ],
+  },
+  memory_run_id: "memory-1",
+  memory_run: memoryRun,
+  thread_summary: {
+    thread_id: "chat-1",
+    status: "not_summarized",
+    can_summarize: true,
+  },
+  error: "",
+  reason: "",
+  created_at: "",
+  updated_at: "",
+  version: 1,
+} as LearningClosureRunResponse;
+
+describe("LearningClosureReview", () => {
+  it("groups committed facts, unresolved items and the next step", () => {
+    expect(buildClosureReviewModel(closureRun, memoryRun)).toEqual({
+      confirmed: ["理解了索引激活边界"],
+      unresolved: ["还需练习拒答判断"],
+      next: ["下一步解释证据充分性"],
+      impactLabels: [
+        "已经确认的学习进展",
+        "仍需补强的内容",
+        "下一次继续学习的重点",
+      ],
+    });
+  });
+
+  it("shows review-first copy and keeps internal targets out of the default layer", () => {
+    render(
+      <LearningClosureReview
+        isCommitting={false}
+        memoryRun={memoryRun}
+        onConfirm={vi.fn()}
+        onContinue={vi.fn()}
+        run={closureRun}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "回顾这次学习" })).toBeTruthy();
+    expect(screen.getByText("理解了索引激活边界")).toBeTruthy();
+    expect(screen.getByText("还需练习拒答判断")).toBeTruthy();
+    expect(screen.getByText("下一步解释证据充分性")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", {
+        name: "确认并保存学习成果",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(screen.queryByText("current_focus")).toBeNull();
+    expect(screen.queryByText("append")).toBeNull();
+  });
+});
