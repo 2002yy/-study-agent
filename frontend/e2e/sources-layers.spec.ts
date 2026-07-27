@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { seedWorkspaceRecovery } from "./api-fixture";
 import {
   SOURCE_CANDIDATE_TITLE,
+  SOURCE_REPLY,
   SOURCE_SELECTED_TITLE,
   installEvidenceApiFixture,
   makeSourceCodeSession,
@@ -52,7 +53,7 @@ test("sources drawer separates adopted evidence, documents, and diagnostics", as
   });
   await seedWorkspaceRecovery(page, session.row.session_id);
   await page.goto("/");
-  await expect(page.getByText(SOURCE_SELECTED_TITLE, { exact: true })).toBeVisible();
+  await expect(page.getByText(SOURCE_REPLY, { exact: true })).toBeVisible();
 
   await page.getByLabel("打开更多学习工具").click();
   await page.getByRole("menuitem", { name: /资料与来源/ }).click();
