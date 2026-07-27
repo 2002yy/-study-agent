@@ -6,6 +6,7 @@ interruption, retry and atomic completion reuse the established lifecycle.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -47,6 +48,7 @@ class PolicyChatCommand(ChatCommand):
     web_consent: bool = False
     cloud_context_policy: str | None = None
     task_intent: TaskIntent | None = None
+    research_sources: dict[str, Any] | None = None
 
 
 def _source_policy(route: dict[str, Any]) -> SourcePolicy:
@@ -57,6 +59,37 @@ def _source_policy(route: dict[str, Any]) -> SourcePolicy:
     if value not in _SOURCE_POLICIES:
         return "local_and_web"
     return cast(SourcePolicy, value)
+
+
+def _restore_persisted_research_truth(
+    command: PolicyChatCommand,
+    persisted_turn: ChatTurn | None,
+) -> PolicyChatCommand:
+    """Prevent continuation/retry from switching ResearchRun evidence owners."""
+
+    if persisted_turn is None:
+        return command
+    web_context = persisted_turn.rag_snapshot.get("web_context")
+    persisted_run_id = ""
+    if isinstance(web_context, dict):
+        persisted_run_id = str(web_context.get("run_id", "") or "").strip()
+    requested_run_id = str(command.web_context_run_id or "").strip()
+    if requested_run_id:
+        if not persisted_run_id or requested_run_id != persisted_run_id:
+            raise ValueError(
+                "Continuation/retry cannot switch ResearchRun evidence: "
+                f"{requested_run_id}"
+            )
+        persisted_sources = persisted_turn.rag_snapshot.get("research_sources")
+        sources = (
+            deepcopy(persisted_sources)
+            if isinstance(persisted_sources, dict)
+            else deepcopy(command.research_sources)
+            if isinstance(command.research_sources, dict)
+            else None
+        )
+        return replace(command, research_sources=sources)
+    return replace(command, research_sources=None)
 
 
 class ExternalDataPolicyChatService(ChatService):
@@ -99,6 +132,7 @@ class ExternalDataPolicyChatService(ChatService):
         thread = self.repository.ensure_chat_thread(thread_id)
         learning_state = LearningState.from_dict(thread.learning_state)
         persisted_turn = existing if is_continuation else retry_parent
+        command = _restore_persisted_research_truth(command, persisted_turn)
         task_contract = resolve_turn_task_contract(
             user_input=command.user_input,
             state=learning_state,
@@ -231,6 +265,8 @@ class ExternalDataPolicyChatService(ChatService):
                 manual_web_context if decision.web_allowed else "",
                 command.web_context_run_id,
             )
+            if decision.web_allowed and command.research_sources:
+                rag["research_sources"] = deepcopy(command.research_sources)
             evidence_rag = (
                 rag
                 if decision.local_evidence_to_model_allowed
@@ -346,7 +382,7 @@ class ExternalDataPolicyChatService(ChatService):
             turn=streaming,
             messages=messages,
             route=route,
-            rag=rag,
+            rag=streaming.rag_snapshot,
             runtime_modes=runtime_modes,
             memory_enabled=bool(memory_bundle),
             web_context_used=bool(web_context),

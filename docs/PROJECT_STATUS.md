@@ -4,143 +4,137 @@
 > 更新：2026-07-26  
 > 当前产品定义：**Study Agent 是一个能够长期保持“我正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前产品边界：GitHub = 学习源码时使用的高级研究工具；RAG = 围绕自己的资料学习；Web Research = 需要外部事实时获得可信证据；Memory = 学习连续性基础设施；Workflow = 高级诊断 / 开发者模式。  
-> 当前主线：**证据实时/刷新一致性已修复；当前封板服务端 EvidenceRef、证据生命周期和 claim-source 关系。之后才执行真实回答基线、结构化摄取、学习成效评测与自适应学习计划。**  
-> 当前工作分支：`agent/server-owned-evidence-ref-v1`。
+> 当前主线：**证据身份与实时/恢复合同已经服务端化；当前把 durable ResearchRun 的采用/排除来源接入 ChatTurn 真值。之后再做证据展示分层、Streamlit 清理、真实模型回答基线与结构化资料摄取。**  
+> 当前工作分支：`agent/research-evidence-source-truth`。
 
-本文件只回答：**做到哪里、当前真实指标是什么、已知缺陷是什么、下一步按什么顺序做。** 详细历史留在 Git 提交和 PR，不在这里重复维护第二套历史流水账。
+本文件只回答：**做到哪里、真实指标是什么、已知缺陷是什么、下一步做什么。** 历史过程留在 Git 提交和 PR，不维护并列长期状态文档。
 
-## 0. 产品方向与硬边界
+## 0. 产品方向与冻结边界
 
 所有新增能力必须先回答：
 
 > **它是否帮助用户更好地继续学习？**
 
-- **学习主链**：当前目标 / 当前任务 -> 已确认内容 -> 未解决缺口 -> 明确下一步 -> 教学或练习 -> 证据 -> 理解验证 -> 整理 -> 下次恢复。
-- **GitHub** 不是第二个产品。仓库快照、代码结构、Git 历史、PR / CI、change impact 与 review context 必须回到源码理解、解释验证和当前学习目标。
-- **RAG** 不是知识库管理产品。普通用户首先看到上传资料、围绕资料学习、不可回答时拒答和可核对引用，而不是索引、向量数据库、topK 或 Provider 参数。
-- **Web Research** 不是搜索引擎。搜索、来源筛选、阅读、采用/排除和 EvidenceTrail 是学习回答的证据基础设施。
-- **Memory** 不是独立工作区。用户关心的是本次确认了什么、还缺什么、下次从哪里继续。
-- **Workflow** 只属于高级诊断 / 开发者模式。普通用户只需要知道任务是否进行中、是否失败、能否继续或重试。
-- 群聊、新闻、工具保持实验功能，不升级为一级产品。
-- 当前阶段禁止以增加 Provider、向量库、GraphRAG、原生移动端或可执行仓库代理代替学习质量工作。
-
-## 1. 当前架构与已完成主链
-
-当前主架构是 **React 19 + FastAPI + application services + SQLite**。前端状态只负责展示和可重建缓存；服务端 durable entity、committed learning state、评估、索引和运行状态是 authoritative truth。
-
-### 1.1 核心学习产品
-
-1. **TaskContract 单一真值**：新 Turn 只判定一次；显式 override 只作用于下一新 Turn；retry / continuation 恢复原持久化合同；前端不二次推断。
-2. **G1 LearningClosureRun**：正式 durable owner、状态机、source hash 幂等、retry / cancel / resume、MemoryRun 关联和刷新恢复。
-3. **G2 结构化总结输入**：只使用 committed LearningState、最终 PedagogyEvalRun、证据引用和受预算限制的最近对话；失败/中断回合不能成为已掌握事实。
-4. **G3 ThreadSummaryState**：`summarized / needs_update / not_summarized`；只有新增 completed turn 才重新开放整理；不自动归档。
-5. **G4 会话语义导航**：标题、目标/研究摘要、阶段/缺口、summary status、搜索、分组和手动标题。
-6. **G5 学习状态去伪精化**：`已验证 / 待验证 / 需重讲 / 待语义复核`；committed 与 attempted 分离；不显示启发式掌握百分比。
-7. **G6 结构化恢复卡**：新用户五类入口；返回用户显示 committed 目标、确认点/采用来源、缺口和下一步；中断 Turn 可继续、重试或 durable abandon。
-8. **G7–G8 UI 收敛与窄屏可用**：一级操作只保留当前任务收束、上传、会话和 More；资料、来源、设置与低频功能按需出现；窄屏、触控、焦点恢复和非 hover 环境已覆盖。
-9. **PR #52–#54 产品收敛**：设置与工作区解耦；上传资料完成后直接进入系统学习或直接提问；五条 Golden Journey 已对决策数、surface 数、恢复点击、下一步可见性和内部术语建立回归合同。
-
-当前单次学习会话闭环已能走通：
+学习主路径固定为：
 
 ```text
-明确目标
--> 教学推进
--> 证据追溯
+当前目标 / 当前任务
+-> 教学或练习
+-> 资料与外部证据
 -> 理解验证
+-> 已确认内容 / 未解决缺口
+-> 明确下一步
 -> 结构化整理
--> 用户确认记忆
--> 标记本次已整理
--> 新内容出现后重新开放整理
--> 下次按语义会话恢复
+-> 下次准确恢复
 ```
 
-### 1.2 ResearchRun / 联网证据
+能力层级：
 
-- 聊天联网工具循环由带 thread / turn owner 的 durable ResearchRun 管理。
-- 保存查询尝试、采用/拒绝来源、读取结果、预算、错误和 stop reason。
-- 支持 retry / resume / cancel / get / list。
-- `status` 表示流程状态；`provider_status` 表示证据完整度。
-- 取消为协作式取消；取消后不得提交 completed 或推进 committed learning state。
-- 恢复后的联网来源与回答 EvidenceTrail 绑定同一个 Run。
+- **RAG**：围绕自己的资料学习，不是向量库管理产品。
+- **Web Research**：在需要外部事实时提供可信证据，不是平级搜索引擎。
+- **GitHub**：学习源码时使用的高级研究工具，不是第二个代码审查/执行产品。
+- **Memory**：用户确认后的学习连续性基础设施，不是独立工作区。
+- **Workflow**：高级诊断 / 开发者模式，不进入普通主路径。
+- 群聊、新闻、工具保持实验功能。
 
-### 1.3 GitHub 源码学习基础设施
+当前冻结：
 
-已具备 commit-pinned snapshot、四语言 Tree-sitter 结构图、本地代码搜索、调用/继承关系、ref/commit/compare/diff/blame、PR/issue/checks/jobs/脱敏日志、cross-fork 归属、Provider 共享预算、双仓库 change-impact、source-backed review context、SQLite cache 和 immutable replay harness。
+- 新向量数据库、GraphRAG、以新 reranker 替代质量评测；
+- 原生移动端；
+- 群聊/新闻/工具升级为一级产品；
+- 新 Workflow 主界面；
+- 自动 checkout/test/build、任意 shell、可写 worktree、私有仓库自动执行；
+- mastery 百分比和按轮数推断掌握；
+- 并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
-定位保持为**源码学习高级研究工具**，不进入普通用户平级工作区。
+## 1. 当前架构与学习主链
 
-### 1.4 RAG-K1 已完成到哪里
+当前主架构：**React 19 + FastAPI + application services + SQLite**。
+
+真值边界：
+
+- React 状态只负责交互和可重建缓存；
+- SQLite durable entities、committed learning state、评估、索引和运行状态是运行真值；
+- Markdown memory 只保存用户确认后的长期学习记忆；
+- planned / attempted / failed 不得覆盖 committed truth；
+- 多步流程由 application service + durable run 拥有，API route 只做 adapter。
+
+已完成的学习主链：
+
+1. **TaskContract 单一真值**：新 Turn 只判定一次；显式 override 只作用于下一新 Turn；retry / continuation 恢复原合同。
+2. **LearningClosureRun**：durable owner、状态机、source hash 幂等、retry/cancel/resume、MemoryRun 关联和刷新恢复。
+3. **结构化总结输入**：只使用 committed LearningState、最终 PedagogyEvalRun、证据和有预算的最近对话。
+4. **ThreadSummaryState**：`summarized / needs_update / not_summarized`；只有新 completed turn 才重新开放整理。
+5. **会话语义导航**：标题、目标/研究摘要、阶段/缺口、状态、搜索和分组。
+6. **学习状态去伪精化**：`已验证 / 待验证 / 需重讲 / 待语义复核`；不显示启发式百分比。
+7. **结构化恢复卡**：新用户五类入口；返回用户显示 committed 目标、确认点/采用来源、缺口和下一步；中断 Turn 可继续、重试或 durable abandon。
+8. **UI 收敛与窄屏可用**：一级操作只保留当前任务收束、上传、会话和 More；低频功能按需出现。
+9. **Golden Journey 门禁**：首次问答、系统学习、资料学习、联网研究、GitHub 源码学习已有决策数、surface、恢复点击、下一步可见性和内部术语合同。
+
+## 2. 已完成的证据与 RAG 质量工作
+
+### 2.1 P0-1：G13 live / restore parity
+
+PR #61 已合并，merge SHA：`597006e99919ea7e5f5b02f01b1536b446da9a55`。
+
+完成：
+
+- 统一证据正确读取正式嵌套 `RagResult.chunk`；
+- local evidence identity 优先使用 `chunk_id`；
+- 同一来源的不同 chunk 不错误折叠；
+- 历史 `pedagogy_snapshot.evidence_ids` 恢复；
+- 实时 response -> persisted snapshot -> restored session 等价回归；
+- 刷新后教学“引”标记保持；
+- package helper 更新到当前 React/FastAPI 入口。
+
+CI #1317 全绿：pytest、RAG K1、Ruff、package、detect-secrets、mypy、前端测试与生产构建。
+
+### 2.2 P0-2a：server-owned EvidenceSnapshot v1
+
+PR #62 已合并，merge SHA：`fcfb9bc66750d10c822306fae735424e658b19ef`。
+
+完成：
+
+- `EvidenceRefV1`：稳定 ID、类型、标题、来源、URL、域名、时间、分数、生命周期、Provider 状态与采用/排除原因；
+- `EvidenceSnapshotV1`：`schema_version=evidence-snapshot-v1`、disclosure policy、refs、pedagogy evidence IDs、claim links；
+- `ClaimEvidenceLinkV1` 只定义合同；当前聊天链没有真实 answer-claim owner，因此不伪造 claim link；
+- `ChatTurn` 从既有 `rag_snapshot + pedagogy_snapshot` 确定性生成服务端投影；
+- 新 Turn 在现有 JSON 边界内持久化，不增加 SQLite schema；
+- 旧非空 Turn 读取时补齐 v1 投影，数据库原行不被静默改写；
+- 真正空的旧 Turn 保持空原始快照；
+- local chunk 只有被 disclosure 选中同一 `chunk_id` 时才成为 selected；
+- WebTool search/read 只成为 candidate/read；模糊 `web-1` 序号不得冒充 selected URL；
+- 合同支持正式 ResearchRun selected/rejected source assessment，但当前聊天接线尚未注入这些明细；
+- React 优先消费服务端 snapshot；旧 Turn 才走兼容 normalizer；React 不再推断 selected/rejected；
+- pedagogy evidence IDs 与事实 claim links 正式分离。
+
+CI #1340 全绿：pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy baseline、前端测试与生产构建。
+
+### 2.3 RAG-K1 当前完成度
 
 K1a–K1e 已进入 `main`：
 
-- **K1a**：12 份学习文档、30 个 retrieval case、10 个 answer-quality gold case；覆盖 clean、paraphrase、multi-source、ambiguous overlap、stale revision 和 unanswerable；建立 corpus fingerprint、answer evaluator 和 checked-in snapshot。
-- **K1b**：`active / superseded / excluded` 在排序前生效；stale / forbidden source leakage 降为 0。
-- **K1c**：evidence sufficiency / refusal；固定 corpus 上 answerable supported 26/26、unanswerable block 4/4、answerability accuracy 1.0。
-- **K1d**：非回退 adaptive multi-source coverage；multi-source recall@K 0.8 -> 0.9，precision@K 0.7 -> 0.733333，nDCG 0.788590 -> 0.882017。
-- **K1e**：真实 Provider answer replay harness、provenance、corpus/prompt fingerprint、Provider/model/latency/usage 报告和手动工作流完成。
+- 12 份学习文档；
+- 30 个 retrieval case，其中 26 个 answerable；
+- 10 个 answer-quality gold case；
+- clean、paraphrase、multi-source、ambiguous overlap、stale revision、unanswerable；
+- corpus/prompt fingerprint、checked-in snapshot、answer evaluator；
+- active/superseded/excluded 资格；
+- evidence sufficiency/refusal；
+- non-regressive adaptive multi-source coverage；
+- real-provider replay harness、provenance、latency/usage report 与手动 workflow。
 
-**尚未完成**：还没有一份实际成功、`status=completed` 的正式真实 Provider benchmark 可以作为产品质量结论。
-
-### 1.5 P0-1 G13 evidence parity 已完成
-
-PR #61 已在完整 CI 全绿后 squash 合并，merge SHA `597006e99919ea7e5f5b02f01b1536b446da9a55`。
-
-已完成：
-
-- `normalizeEvidence()` 消费正式嵌套 `RagResult.chunk`；
-- local evidence identity 优先使用 `chunk_id`，旧快照才回退 source/title；
-- 同一来源的不同 chunk 不再错误折叠；
-- 历史 `pedagogy_snapshot.evidence_ids` 恢复；
-- 删除错误顶层 fixture 和相关 `as never`；
-- 增加 live response -> persisted snapshot -> restored session parity 回归；
-- 增加刷新后“引”标记回归；
-- 修正 package helper 对已删除根级 `app.py` 的过时要求，并加入当前 React/FastAPI 入口；残余 `src/ui` 门禁保留到独立清理 PR。
-
-CI #1317 已通过：pytest、RAG K1 baseline、Ruff、package helper、detect-secrets、expanded mypy、前端全量测试和生产构建。
-
-## 2. 当前高优先级缺陷
-
-### 2.1 G13 仍是 partial：服务端 EvidenceRef 未封板
-
-P0-1 已解决数据形状和 live/restore parity，但以下问题仍存在：
-
-1. **selected / rejected 缺正式 owner**：当前前端主要推断 local/web-search=`candidate`、web-read=`read`；采用/排除不应由 UI 猜测。
-2. **证据身份仍未统一由服务端产生**：local chunk ID、web URL、ResearchRun source identity 尚未投影为一个版本化服务端合同。
-3. **claim-source mapping 未持久化**：当前只有教学计划 `evidence_ids`，尚无 claim ID、证据 ID、支持类型和置信度的正式关系。
-4. **turn snapshot 未保存统一合同**：历史恢复仍依赖 rag/web/pedagogy 多份原始快照在前端重新组合。
-5. **普通与高级展示重复**：采用证据、候选、已阅读、已排除、score、搜索调用和读取详情尚未按用户层级分离。
-6. **旧快照兼容尚未定义版本**：需要 schema/version、安全默认和不伪造 selected 的迁移策略。
-
-当前定义：
-
-> **G13 live/restore parity 已完成；服务端身份、生命周期 owner、claim-source 持久化和展示分层未完成。**
-
-### 2.2 Streamlit 移除尚未收尾
-
-- 根级 `app.py` 已移除；
-- React 19 和 testing-library 迁移已完成；
-- `src/ui` 仍存在；
-- `requirements.in` 仍保留 Streamlit；
-- README 仍有“入口已移除”和“旧入口兼容验证”的冲突描述。
-
-该工作必须作为 P0-3 独立清理 PR，不混入 EvidenceRef。
-
-### 2.3 长期学习缺计划级 authoritative entity
-
-现有 TaskContract、LearningState、PedagogyEvalRun、LearningClosureRun、ThreadSummaryState 和 MemoryRun 可以保证单次会话可信，但尚无正式实体维护长期目标拆分、前置关系、单元验证、失败后重规划和阶段复测。该能力必须后置到证据、真实回答和结构化摄取稳定之后。
+尚未完成：**没有实际成功的 `status=completed` 真实 Provider benchmark 可作为模型质量结论。**
 
 ## 3. 当前真实指标
 
 ### 3.1 RAG K1 确定性基线
 
-- corpus：12 份学习文档；
-- retrieval：30 case / 26 answerable；
-- answer gold：10 case；
 - raw Hybrid source hit：0.961538；
-- raw Hybrid source precision@K：0.477564；
-- raw Hybrid source recall@K：0.923077；
-- raw Hybrid MRR：0.942308；
-- raw Hybrid nDCG：0.903600；
+- source precision@K：0.477564；
+- source recall@K：0.923077；
+- MRR：0.942308；
+- nDCG：0.903600；
 - stale / forbidden leakage：0；
 - adaptive overall recall@K：0.942308；
 - adaptive nDCG：0.921567；
@@ -149,7 +143,7 @@ P0-1 已解决数据形状和 live/restore parity，但以下问题仍存在：
 - deterministic answerable supported：26/26；
 - deterministic unanswerable block：4/4。
 
-这些指标证明固定 corpus 的合同和回归，不代表真实模型在更大真实资料上的最终质量。
+这些指标证明固定 corpus 的回归合同，不代表真实模型在更大真实资料上的最终质量。
 
 ### 3.2 GitHub replay 基线
 
@@ -163,112 +157,180 @@ P0-1 已解决数据形状和 live/restore parity，但以下问题仍存在：
 - symbol mapping precision / recall / F1：0.625 / 0.4545 / 0.5263；
 - CI association precision / recall / F1：0.3529 / 1.0 / 0.5217。
 
-结论：symbol recall 仍低，CI association 过度关联明显，17 case 未达到 24–30 case 目标；不得进入 G10-D 可执行仓库代理。
+结论：symbol recall 仍低，CI association 过度关联明显，17 case 未达到 24–30 case 目标；G10-D 可执行代理继续冻结。
 
-## 4. 精确下一代码顺序
+## 4. 当前缺口
 
-所有切片均使用**小 PR、完整回归、更新本文件、全绿后合并，并从最新 main 开下一刀**。
+### 4.1 ResearchRun 来源真值尚未进入 ChatTurn
 
-### P0-1：G13 evidence parity
+当前聊天使用已完成 ResearchRun 时，只持久化 run ID 和 source block；`WebLookupRun.selected_sources / rejected_sources / provider_status / stop_reason` 没有进入 `rag_snapshot.research_sources`。
 
-状态：**已完成并合并 PR #61。**
+结果：
 
-### P0-2：`feat/server-owned-evidence-ref-v1`（当前切片）
+- EvidenceSnapshot v1 已能消费正式 source assessment，但生产聊天还没有提供；
+- URL 来源只能显示 WebTool candidate/read 或恢复来源 run provenance；
+- selected/rejected、排除原因和 Provider 完整度不能在实时与刷新后一致恢复。
 
-目标：让证据身份、生命周期和 claim-source 关系成为服务端 authoritative contract。
+当前 P0-2b 只解决这条服务端接线，不同时做 UI 大改。
 
-实施边界分两层，避免一次 PR 过大：
+### 4.2 事实 answer-claim owner 尚未建立
 
-#### P0-2a：服务端投影与快照合同
+`PedagogyTurnPlan.evidence_ids` 是教学计划引用，不是回答 claim。
 
-- `EvidenceRefV1`：`id / schema_version / type / title / source / url / domain / published_at / score / lifecycle_status / provider_status / selection_reason / rejection_reason`；
-- `ClaimEvidenceLink`：`claim_id / evidence_id / support_type / confidence`；
-- 从现有 RAG 结果、Web tool trace、ResearchRun 已采用/排除来源投影；
-- 只有现有 authoritative 数据能证明时才标记 selected/rejected，不能靠前端启发式回填；
-- 写入 turn snapshot，旧行无该字段时安全回退；
-- API/前端类型先兼容双读，不立即删除旧 rag/web snapshot。
+因此当前：
 
-#### P0-2b：前端切换与展示分层
+- `ClaimEvidenceLinkV1` schema 已有；
+- `EvidenceSnapshotV1.claim_links` 保持空；
+- 不从自然语言回答反向猜 claim；
+- 后续必须先定义服务端结构化 answer assertion/claim owner，再允许写 claim links。
 
-- 前端优先使用服务端 EvidenceRefV1，不再重建 selected/rejected；
-- 普通模式只显示回答采用且可核对的证据；
-- 候选、已阅读、排除原因、score、Provider 调用下沉开发者诊断；
-- claim-source 对应可按回答 claim 展开；
-- 实时与刷新使用同一服务端合同；
-- 旧快照继续通过兼容 normalizer 恢复，但不得伪造生命周期状态。
+### 4.3 普通证据与开发者诊断尚未分层
 
-当前 PR 先执行 P0-2a；若 migration、API 和前端兼容使 diff 过大，则在稳定合同后拆出 P0-2b。
+当前 EvidenceTrail 仍可能同时展示：
 
-### P0-3：`chore/truth-and-streamlit-cleanup`
+- 统一证据；
+- 搜索调用；
+- 阅读调用；
+- RAG citations/debug；
+- candidate/read/selected/rejected/score。
 
-- 同步 `ARCHITECTURE_STATUS.md` 和 `STATE_MODEL.md` authoritative owners；
-- 删除或迁移 `src/ui`；
-- `requirements.in` 移除 Streamlit并重新锁定依赖；
-- README / USER_GUIDE 删除冲突兼容描述；
-- package diff、旧 import 搜索和完整回归。
+普通用户只应看到回答实际采用且可核对的证据；候选、排除、score、调用预算和 Provider 细节应下沉开发者诊断。
 
-### P1-1：`eval/rag-k1f-real-provider-baseline`
+### 4.4 Streamlit 移除未收尾
+
+- 根级 `app.py` 已移除；
+- React 19 和 testing-library 已完成；
+- `src/ui` 仍存在；
+- `requirements.in` 仍保留 Streamlit；
+- README 仍有入口状态冲突。
+
+### 4.5 长期学习缺计划级 authoritative entity
+
+现有 TaskContract、LearningState、PedagogyEvalRun、LearningClosureRun、ThreadSummaryState 和 MemoryRun 可保证单次会话可信，但尚无正式实体维护长期目标拆分、前置关系、单元验证、失败后重规划和阶段复测。
+
+## 5. 精确执行顺序
+
+所有切片遵循：**小 PR -> 目标测试 -> 全量门禁 -> 更新本文件 -> 全绿合并 -> 从最新 main 开下一刀。**
+
+### P0-2b：`agent/research-evidence-source-truth`（当前）
+
+目标：把 durable ResearchRun 的 source assessment 接入 ChatTurn authoritative truth。
+
+范围：
+
+1. 扩展 `PolicyChatCommand`，携带恢复 Run 的 selected/rejected source records、provider status 和 stop reason；
+2. `chat_routes._chat_command()` 在校验 completed/partial ResearchRun 后读取并复制这些不可变记录；
+3. `ExternalDataPolicyChatService` 写入：
+
+```text
+rag_snapshot.research_sources = {
+  run_id,
+  provider_status,
+  stop_reason,
+  selected_sources,
+  rejected_sources
+}
+```
+
+4. EvidenceSnapshot v1 自动投影 selected/rejected、URL/domain、relevance、排除原因；
+5. 实时 response 与 session restore 返回相同 source truth；
+6. retry/continuation 继续恢复原 Turn，不注入新 Run；
+7. 不暴露完整正文、token、密钥或不必要的 Provider payload；
+8. 不修改数据库 schema，不新建 Research/Evidence 平行 owner。
+
+门禁：
+
+- wrong run/session/status 拒绝；
+- selected/rejected source records 精确恢复；
+- partial/provider_failed 与空结果不混用；
+- live/refresh EvidenceSnapshot 等价；
+- 全量 CI。
+
+### P0-2c：证据展示分层与 answer-claim owner
+
+拆为两个独立小 PR：
+
+1. **UI 分层**：普通模式只显示 selected/实际引用；candidate/read/rejected/score/search/read trace 下沉开发者诊断；消除重复卡片；窄屏回归。
+2. **Answer claim owner**：服务端生成结构化 assertion ID；只有最终采用 claim 与已知 EvidenceRef 建立 `ClaimEvidenceLinkV1`；无法解析时为空，不补造。
+
+### P0-3：架构真值与 Streamlit 清理
+
+- 同步 `ARCHITECTURE_STATUS.md`、`STATE_MODEL.md`；
+- 删除/迁移 `src/ui`；
+- requirements 移除 Streamlit并重新锁定；
+- README / USER_GUIDE 同步；
+- package diff 和全量回归。
+
+### P1-1：RAG-K1f 真实 Provider 回答基线
 
 实际执行 K1e，固定 corpus/prompt/case fingerprint、Provider/model/temperature/repeat，报告 answerability、unsupported-answer、citation、claim support、groundedness、stale leakage、parse failure、latency、token 和成本。
 
-第一轮 record-only，但三个安全合同立即硬门禁：stale/forbidden leakage=0；明确不可回答问题不得生成无依据事实；失败或无法解析不得补造完成分数。
+首轮 record-only，但立即硬门禁：
 
-### P1-2：RAG-K2 结构化资料摄取
+- stale/forbidden leakage = 0；
+- 明确不可回答问题不得生成无依据事实；
+- Provider/parse 失败不得补造完成分数。
 
-1. `feat/rag-k2a-structured-parser`：`ParserResult -> DocumentBlock`，保留 heading/page/paragraph/table/list identity、parser version、warnings 和 preview；
-2. `feat/rag-k2b-structure-aware-chunking`：父子块、最小块合并、章节感知、表格保留、chunker version 和 manifest。
+### P1-2：RAG-K2 结构化摄取
 
-K2 必须用 Markdown / PDF / DOCX 困难 fixture 验证，并证明 K1 指标不回退。
+1. `ParserResult -> DocumentBlock`：heading/page/paragraph/table/list identity、parser version、warnings、preview；
+2. structure-aware chunking：父子块、最小块合并、章节感知、表格保留、chunker version、manifest。
 
-### P1-3：`eval/learning-outcome-baseline`
+要求 Markdown / PDF / DOCX 困难 fixture，且 K1 不回退。
 
-覆盖初始诊断、误解修正、explain-back、迁移题、直接答案泄漏、证据一致性、刷新/跨会话恢复，以及仅凭“我懂了”不得变成已验证。
+### P1-3：学习成效基线
 
-### P2-1：`feat/adaptive-learning-plan-mvp`
+覆盖：初始诊断、误解修正、explain-back、迁移题、直接答案泄漏、证据一致性、刷新/跨会话恢复，以及仅凭“我懂了”不得变成已验证。
 
-仅在前述门禁完成后新增 `LearningPlanRun / LearningUnit / AssessmentAttempt`，并保持 LearningState 只投影当前活跃单元；不新增平级课程后台，不显示伪精确百分比。
+### P2-1：自适应 LearningPlan MVP
+
+仅在前述门禁完成后新增：
+
+- `LearningPlanRun`；
+- `LearningUnit`；
+- `AssessmentAttempt`；
+- diagnosing / plan_ready / active / reassessing / replanning / completed；
+- LearningState 只投影当前活跃单元；
+- 不新增平级课程后台，不显示伪精确百分比。
 
 ### P2-2：GitHub 源码学习质量收口
 
-扩展至 24–30 immutable case，增加真实 CI 正例和 cold/hot replay，降低 generic matrix false positives，并增加阅读顺序、核心文件、explain-back、证据行号和下次恢复旅程。
-
-G10-D0/D1/D2 继续冻结。
-
-## 5. 明确冻结项
-
-当前不得作为主线推进：新向量数据库、以新 reranker 替代质量评测、GraphRAG、原生移动端、群聊/新闻/工具升级一级产品、新 Workflow 主界面、自动 checkout/test/build、任意 shell、可写 worktree、私有仓库自动执行、mastery 百分比、根据聊天轮数推断掌握，以及并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
+- 扩展到 24–30 immutable case；
+- 增加真实 CI 正例和 cold/hot replay；
+- 降低 generic matrix false positives；
+- 增加阅读顺序、核心文件、explain-back、证据行号与下次恢复旅程。
 
 ## 6. 统一验证要求
 
 每个实现切片必须同时完成：
 
-- 目标测试先行；
+- 目标测试；
 - 后端全量 pytest；
 - RAG K1 baseline；
 - Ruff；
-- expanded mypy baseline，禁止新增或扩大错误；
+- expanded mypy baseline，不得新增或扩大错误；
 - package helper；
 - detect-secrets；
 - 前端全量 Vitest；
 - TypeScript 与 Vite production build；
 - 存储变化必须有 migration / compatibility / failure recovery；
 - 桌面与窄屏人工或 Playwright Golden Journey；
-- 刷新前后状态和证据比较；
+- 实时与刷新状态/证据比较；
 - 更新本文件；
-- 相关检查未全部完成时不得合并。
+- 任一门禁未完成不得合并。
 
 ## 7. 当前执行状态
 
-- 分支：`agent/server-owned-evidence-ref-v1`；
-- 已完成：PR #61 G13 evidence parity，完整 CI #1317 全绿后合并；
-- 正在推进：P0-2a 服务端 EvidenceRefV1 投影与 turn snapshot 合同；
-- 当前动作：定位现有 RAG/Web/ResearchRun 证据 owner、ChatTurn 快照 schema、API 返回和旧行兼容边界；
-- 合并策略：Draft PR -> 完整 CI -> migration/兼容/恢复审查 -> 全绿后合并；未全绿不合并。
+- 当前分支：`agent/research-evidence-source-truth`；
+- 已完成：PR #61 evidence parity；PR #62 EvidenceSnapshot v1；
+- 当前任务：P0-2b ResearchRun selected/rejected source truth 接线；
+- 下一动作：扩展 `PolicyChatCommand`、route adapter 和 policy chat service，补 live/restore/retry 边界测试；
+- 合并策略：Draft PR -> 完整 CI -> 证据隐私/恢复审查 -> 全绿合并。
 
 ## 8. 文档规则
 
-- 当前状态只更新本文件。
-- 稳定架构边界维护在 `ARCHITECTURE_STATUS.md`，但不得维护进度顺序。
-- 稳定数据模型维护在 `STATE_MODEL.md`，但不得维护当前状态。
-- 详细需求可留在 consolidated roadmap，但不得覆盖本文件的当前事实。
-- 不再新增并列的长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT。
+- 当前状态只更新本文件；
+- `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；
+- `STATE_MODEL.md` 只维护稳定数据模型；
+- consolidated roadmap 只保存目标/验收，不覆盖当前事实；
+- 不新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT。
