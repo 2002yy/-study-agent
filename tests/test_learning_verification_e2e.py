@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api import app
@@ -22,7 +23,6 @@ from src.task_contract import (
     route_request_with_task_contract,
 )
 from src.tools.web_agent import WebToolTrace
-
 
 REASONED_BINARY_SEARCH = (
     "所以二分查找每轮把候选范围减半，因此问题规模按一半递减，"
@@ -81,7 +81,7 @@ class ControlledSemanticEvaluator:
 
 def _semantic_accept(*, evidence_refs: tuple[str, ...] = ()) -> SemanticEvaluation:
     return SemanticEvaluation(
-        claims=("候选范围每轮减半", "复杂度是对数级",),
+        claims=("候选范围每轮减半", "复杂度是对数级"),
         correct_points=("每次将剩余规模缩小为原来的一半",),
         reasoning_complete=True,
         transfer_ready=True,
@@ -159,7 +159,12 @@ def _learning_payload(
     return payload
 
 
-def _start_learning(client: TestClient, session_id: str, *, rag_enabled: bool = False):
+def _start_learning(
+    client: TestClient,
+    session_id: str,
+    *,
+    rag_enabled: bool = False,
+) -> dict[str, Any]:
     response = client.post(
         "/chat",
         json=_learning_payload(
@@ -218,57 +223,51 @@ def test_reasoned_explanation_commits_and_restores_learning_truth(
     ]
 
 
-def test_bare_understanding_and_known_misconception_never_confirm_mastery(
+@pytest.mark.parametrize(
+    ("learner_input", "reason", "expected_gap", "expected_misconceptions"),
+    [
+        (
+            "懂了",
+            "understanding_asserted_without_reasoning",
+            "",
+            [],
+        ),
+        (
+            MISCONCEPTION_BINARY_SEARCH,
+            "claim_conflicts_with_known_constraints",
+            "claim_conflicts_with_known_constraints",
+            ["binary_search_linear_complexity"],
+        ),
+    ],
+)
+def test_unverified_claims_never_confirm_mastery(
     runtime_test_context,
+    learner_input: str,
+    reason: str,
+    expected_gap: str,
+    expected_misconceptions: list[str],
 ):
     semantic = ControlledSemanticEvaluator(result=_semantic_accept())
     _install_service(runtime_test_context, semantic)
     client = TestClient(app)
+    session_id = f"learning_reject_{len(learner_input)}"
 
-    bare_session = "learning_bare_e2e"
-    _start_learning(client, bare_session)
-    bare = client.post(
+    _start_learning(client, session_id)
+    attempted = client.post(
         "/chat",
-        json=_learning_payload(bare_session, "懂了"),
-    )
-    bare_run = _evaluation(runtime_test_context, bare.json()["turn_id"])
-    bare_thread = runtime_test_context.repository.get_chat_thread(bare_session)
-
-    assert bare.status_code == 200
-    assert bare_run is not None
-    assert bare_run.final_decision == "reject"
-    assert bare_run.reasons == ("understanding_asserted_without_reasoning",)
-    assert bare_thread is not None
-    assert bare_thread.learning_state["confirmed_points"] == []
-
-    misconception_session = "learning_misconception_e2e"
-    _start_learning(client, misconception_session)
-    misconception = client.post(
-        "/chat",
-        json=_learning_payload(
-            misconception_session,
-            MISCONCEPTION_BINARY_SEARCH,
-        ),
-    )
-    misconception_run = _evaluation(
-        runtime_test_context,
-        misconception.json()["turn_id"],
-    )
-    misconception_thread = runtime_test_context.repository.get_chat_thread(
-        misconception_session
+        json=_learning_payload(session_id, learner_input),
     )
 
-    assert misconception.status_code == 200
-    assert misconception_run is not None
-    assert misconception_run.final_decision == "reject"
-    assert misconception_run.deterministic_result["misconceptions"] == [
-        "binary_search_linear_complexity"
-    ]
-    assert misconception_thread is not None
-    assert misconception_thread.learning_state["confirmed_points"] == []
-    assert misconception_thread.learning_state["unresolved_gap"] == (
-        "claim_conflicts_with_known_constraints"
-    )
+    assert attempted.status_code == 200
+    run = _evaluation(runtime_test_context, attempted.json()["turn_id"])
+    thread = runtime_test_context.repository.get_chat_thread(session_id)
+    assert run is not None
+    assert run.final_decision == "reject"
+    assert run.reasons == (reason,)
+    assert run.deterministic_result["misconceptions"] == expected_misconceptions
+    assert thread is not None
+    assert thread.learning_state["confirmed_points"] == []
+    assert thread.learning_state["unresolved_gap"] == expected_gap
     assert semantic.calls == 0
 
 
@@ -337,6 +336,7 @@ def test_unknown_evidence_reference_blocks_transfer(runtime_test_context):
             rag_enabled=True,
         ),
     )
+
     assert attempted.status_code == 200
     run = _evaluation(runtime_test_context, attempted.json()["turn_id"])
     thread = runtime_test_context.repository.get_chat_thread(session_id)
@@ -405,7 +405,7 @@ def test_interrupted_continuation_commits_once_and_restores(runtime_test_context
     assert refreshed["learning_state"] == stored_thread.learning_state
 
 
-def test_failed_retry_uses_new_turn_and_commits_once(runtime_test_context):
+def test_failed_retry_supersedes_parent_and_commits_once(runtime_test_context):
     semantic = ControlledSemanticEvaluator(result=_semantic_accept())
     service = _install_service(runtime_test_context, semantic)
     client = TestClient(app)
@@ -444,7 +444,7 @@ def test_failed_retry_uses_new_turn_and_commits_once(runtime_test_context):
     parent = runtime_test_context.repository.get_chat_turn(failed.id)
     stored_thread = runtime_test_context.repository.get_chat_thread(session_id)
     assert parent is not None
-    assert parent.status == "failed"
+    assert parent.status == "superseded"
     assert child is not None
     assert child.status == "completed"
     assert child.parent_turn_id == parent.id
