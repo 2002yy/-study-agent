@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatResponse } from "../../types";
 import { SourcesPanel } from "./SourcesPanel";
 import type { EvidenceKnowledgeDocumentListResponse } from "./evidenceEligibilityApi";
+
+afterEach(cleanup);
 
 const baseRag: ChatResponse["rag"] = {
   status: "ready",
