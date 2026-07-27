@@ -68,6 +68,17 @@ def _version_fingerprint(*parts: str) -> str:
     return _sha256_bytes(material)
 
 
+def _canonical_json_fingerprint(path: Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _sha256_bytes(canonical)
+
+
 def run_baseline(fixture_path: Path) -> dict[str, Any]:
     if not fixture_path.is_file():
         raise FileNotFoundError(f"Missing AnswerClaim eval fixture: {fixture_path}")
@@ -109,7 +120,7 @@ def run_baseline(fixture_path: Path) -> dict[str, Any]:
         "baseline_kind": BASELINE_KIND,
         "gating": GATING,
         "fingerprints": {
-            "case_fixture_sha256": _sha256_bytes(fixture_path.read_bytes()),
+            "case_fixture_sha256": _canonical_json_fingerprint(fixture_path),
             "evaluator": _version_fingerprint(ANSWER_CLAIM_EVALUATOR_VERSION),
             "producer": _version_fingerprint(PRODUCER_ID, PRODUCER_VERSION),
             "producer_outputs_sha256": payload_fingerprint,
