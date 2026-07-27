@@ -1,4 +1,4 @@
-import type { ChatResponse, PedagogySummary, TurnEvidence, WebToolCall } from "../../types";
+import type { ChatResponse, PedagogySummary, TurnEvidence } from "../../types";
 
 export type WebSearchSummary = {
   query: string;
@@ -13,29 +13,30 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
-export function summarizeWebCalls(calls: WebToolCall[] | undefined): WebCallsSummary {
+export function summarizeWebCalls(calls: unknown[] | undefined): WebCallsSummary {
   const out: WebCallsSummary = { searches: [], reads: [] };
-  for (const call of calls ?? []) {
-    if (call.name === "web_search") {
-      const rawResults = Array.isArray((call.result as { results?: unknown }).results)
-        ? ((call.result as { results: unknown[] }).results ?? [])
-        : [];
-      const results = rawResults.flatMap((value) => {
-        const result = asRecord(value);
-        const title = String(result.title ?? "").trim();
-        const url = String(result.url ?? "").trim();
-        const snippet = String(result.snippet ?? "").trim();
+  for (const value of calls ?? []) {
+    const call = asRecord(value);
+    const name = String(call.name ?? "");
+    const arguments_ = asRecord(call.arguments);
+    const result = asRecord(call.result);
+    if (name === "web_search") {
+      const rawResults = Array.isArray(result.results) ? result.results : [];
+      const results = rawResults.flatMap((rawResult) => {
+        const searchResult = asRecord(rawResult);
+        const title = String(searchResult.title ?? "").trim();
+        const url = String(searchResult.url ?? "").trim();
+        const snippet = String(searchResult.snippet ?? "").trim();
         if (!title && !url) return [];
         return [{ title: title || undefined, url: url || undefined, snippet: snippet || undefined }];
       });
-      const query = String(call.arguments.query ?? "").trim();
+      const query = String(arguments_.query ?? "").trim();
       if (query || results.length) out.searches.push({ query, results });
-    } else if (call.name === "web_read") {
-      const r = asRecord(call.result);
-      const url = String(call.arguments.url ?? r.url ?? "").trim();
-      const ok = r.ok === true || r.ok === "true";
-      const preview = String(r.content ?? "").slice(0, 300);
-      const error = String(r.error ?? "").trim() || undefined;
+    } else if (name === "web_read") {
+      const url = String(arguments_.url ?? result.url ?? "").trim();
+      const ok = result.ok === true || result.ok === "true";
+      const preview = String(result.content ?? "").slice(0, 300);
+      const error = String(result.error ?? "").trim() || undefined;
       if (url || preview || error) out.reads.push({ url, ok, preview, error });
     }
   }
