@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-27  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**学习真值与五类真实浏览器 Golden Journey 已通过；PR #69 最终状态同步后重跑完整门禁，合并后进入 P0-A3 首屏按需加载。**  
-> 当前分支：`test/browser-golden-journeys-evidence`，Draft PR #69。
+> 当前主线：**学习真值与五类真实浏览器 Golden Journey 已通过；当前进入 P0-A3，收窄核心首屏请求并让隐藏功能按需加载。**  
+> 当前分支：`perf/core-bootstrap-lazy-features`，P0-A3。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -40,9 +40,8 @@
 - PR #65 `b700da1a2751769959ae1b41966f5da0a854162a`，CI #1389；
 - PR #66 `b1ac5a841aab5948b4fee623aeaea1d87e1b8af9`，CI #1407；
 - PR #67 `c19d5070b9bcf73ed46a81731bbeae842b757208`，CI #1416；
-- PR #68 `4da85690043e9144b18dabaf0b4d2359c16eaeb8`，CI #1437。
-
-PR #69 当前实现 head `41589111f5d0583a6513d595a447039b730293f1` 的 CI #1447 已全绿；最终状态提交仍需重新通过完整门禁后才能合并。
+- PR #68 `4da85690043e9144b18dabaf0b4d2359c16eaeb8`，CI #1437；
+- PR #69 `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`，CI #1449。
 
 ## 3. 当前真实指标
 
@@ -72,11 +71,9 @@ G10-D 可执行代理继续冻结。
 - interrupted continuation 与 failed retry 只提交一次；
 - 刷新恢复与 SQLite 真值一致。
 
-## 5. P0-A2 已完成实现：真实浏览器 Golden Journeys
+## 5. P0-A2 已完成：真实浏览器 Golden Journeys
 
 PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，运行 `1440×900` 与 `390×844`。失败时保存 trace、screenshot、video、HTML report 和 JSON 指标。
-
-桌面与 390px 结果一致：
 
 | journey | clicks | decisions | surfaces | recovery | keyboard | refresh | overflow |
 |---|---:|---:|---:|---:|---|---|---|
@@ -87,45 +84,57 @@ PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，�
 | web research recovery + adopted evidence | 2 | 0 | 1 | 1 | n/a | pass | none |
 | source-code learning + adopted evidence | 2 | 0 | 1 | 0 | n/a | pass | none |
 
-实际验证：
+普通 EvidenceTrail 只显示 server-owned selected/adopted evidence；所有旅程在刷新后恢复，390px 无横向溢出。
 
-- 上传走隐藏文件输入、RagRun、知识库刷新和明确学习方式选择；
-- 普通 EvidenceTrail 只显示 selected/adopted local evidence，candidate 不出现；
-- failed ResearchRun 从持久化 `webLookupRunId` 恢复，一次点击重试后进入下一轮聊天；
-- 下一轮请求携带同一 ResearchRun ID，回答使用 server-owned selected research evidence；
-- 源码学习继续显示目标、缺口和下一步，GitHub 只作为 supporting evidence；
-- 所有新增回答和 adopted evidence 在刷新后恢复；
-- 所有旅程保持一个 product surface，390px 无横向溢出。
+## 6. 当前任务：P0-A3 核心首屏按需加载
 
-指标来自真实浏览器动作与 DOM 状态，不是组件测试常量。
+### 已确认现状
 
-### 修正记录
+普通首屏当前同时请求：
 
-- CI #1443：7/12 通过；上传缺 RagRun GET fixture，研究 seed 在刷新时覆盖新会话，源码移动端定位到隐藏重复元素；
-- CI #1445：10/12 通过；上传和研究桌面/移动全部通过，只剩恢复卡目标严格定位歧义；
-- CI #1447：12/12 浏览器用例及全部仓库门禁全绿；修正均位于测试 fixture/定位，没有修改生产代码或放宽 evidence truth。
+```text
+/health
+/rag/status
+/tools
+/workflows/runs
+/sessions
+/runtime/settings
+/memory
+/wechat
+/knowledge-base/documents
+```
 
-## 6. 下一阶段：P0-A3 核心首屏按需加载
+前八项来自 `loadApiSnapshot()` 的全量 `Promise.allSettled`；最后一项来自 `useUploadController()` 挂载时主动刷新。隐藏模块失败会写入 `snapshot.errors`，从而污染普通主路径告警。
 
-分支：`perf/core-bootstrap-lazy-features`。
+### 本切片范围
 
-目标：
+1. 核心 bootstrap 只请求 `/health`、`/sessions`、`/runtime/settings`；
+2. 有持久化活动会话或活动 run 时，仍恢复其必要 durable truth；
+3. Sources 打开后加载 RAG status 和知识库文档；
+4. Group 打开后加载 WeChat；
+5. Tools 打开后加载工具规格；
+6. Timeline 打开后加载 workflow summaries；
+7. Memory 打开或整理学习前加载 memory status；
+8. 隐藏模块失败不进入普通全局告警；显式打开后的失败必须有可执行反馈；
+9. 保留 core last-good、并发 refresh generation 和部分核心服务可用语义；
+10. 不在本切片重构 Sources、SessionNavigator、设置或 closure UX。
 
-1. 首屏只请求 health、sessions、runtime settings 和当前恢复所需数据；
-2. Memory、Sources、group、news、tools、workflow 按抽屉打开或实际使用时加载；
-3. 隐藏模块失败不进入普通全局告警；
-4. 保留 last-good、部分服务可用和恢复语义；
-5. 浏览器门禁记录首屏请求集合、隐藏模块零请求和按需加载行为；
-6. 不在本切片重构 Sources、SessionNavigator、设置或 closure UX。
+### 浏览器门禁
+
+- 首屏实际请求集合只包含 core 三项及当前恢复必要请求；
+- 未打开隐藏入口时，`/rag/status`、`/knowledge-base/documents`、`/tools`、`/workflows/runs`、`/memory`、`/wechat` 均为零请求；
+- 打开对应抽屉后只加载该功能所需请求；
+- 隐藏功能模拟失败不显示全局警告；
+- desktop 与 390px 均通过；
+- 原有 12 个浏览器用例、pytest、RAG K1、Ruff、package、detect-secrets、mypy、Vitest、TypeScript 和 Vite 全绿。
 
 ## 7. 后续顺序
 
-1. P0-A3 `perf/core-bootstrap-lazy-features`：首屏按需加载，隐藏模块失败不污染普通告警；
-2. P0-A4 `ux/sources-three-layer-separation`：本次回答依据 / 我的资料 / 检索诊断；
-3. P0-A5 `ux/closure-review-first`：默认结束流程只展示确认、缺口、下次入口和保存；
-4. P0-A6 `refactor/session-navigation-single-owner`：唯一 SessionNavigator；
-5. P0-A7 `ux/onboarding-settings-progressive-disclosure`：新手与设置渐进披露；
-6. P0-A8 `a11y/focus-feedback-responsive`：焦点、复制、上传、触控、软键盘和溢出。
+1. P0-A4 `ux/sources-three-layer-separation`：本次回答依据 / 我的资料 / 检索诊断；
+2. P0-A5 `ux/closure-review-first`：默认结束流程只展示确认、缺口、下次入口和保存；
+3. P0-A6 `refactor/session-navigation-single-owner`：唯一 SessionNavigator；
+4. P0-A7 `ux/onboarding-settings-progressive-disclosure`：新手与设置渐进披露；
+5. P0-A8 `a11y/focus-feedback-responsive`：焦点、复制、上传、触控、软键盘和溢出。
 
 ## 8. 审计完成标准
 
@@ -142,11 +151,10 @@ PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，�
 
 ## 10. 当前执行状态
 
-- 当前分支：`test/browser-golden-journeys-evidence`，Draft PR #69；
-- 基线：PR #68 merge SHA `4da85690043e9144b18dabaf0b4d2359c16eaeb8`；
-- 实现 head：`41589111f5d0583a6513d595a447039b730293f1`，CI #1447 全绿；
-- 当前阶段：状态文档同步后，对最新 head 重跑完整 CI；
-- 下一动作：最终 head 全绿后 Ready + squash merge，随后从最新 `main` 建立 P0-A3 分支；
+- 当前分支：`perf/core-bootstrap-lazy-features`；
+- 基线：PR #69 merge SHA `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`；
+- 当前阶段：拆分 core snapshot、feature loader 与显式入口加载；
+- 下一动作：实现 core bootstrap，移除 upload controller 挂载读取并增加请求集合浏览器门禁；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 11. 文档规则
