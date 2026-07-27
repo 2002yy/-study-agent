@@ -3,14 +3,12 @@
 > **唯一进度入口**  
 > 更新：2026-07-27  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**证据身份、来源生命周期、实时/恢复一致性和普通/诊断展示已经完成；当前建立服务端 AnswerClaim 真值合同。**  
-> 当前分支：`agent/answer-claim-owner-v1`。
+> 当前主线：**AnswerClaim 离线评测基线已通过完整门禁；合并后立即进入功能与使用体验审计，先证明核心学习闭环真实可用。**  
+> 当前分支：`agent/answer-claim-eval-baseline`，Draft PR #66，等待合并。
 
-本文件只维护当前事实、真实指标、缺口、执行顺序和门禁。历史细节以 Git 提交和 PR 为准。
+本文件只维护当前事实、真实指标、缺口、执行顺序和门禁。历史细节以 Git 提交和 PR 为准；不得新增并列的长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
-## 1. 产品边界
-
-学习主路径：
+## 1. 产品与架构边界
 
 ```text
 当前目标
@@ -22,199 +20,249 @@
 -> 整理与恢复
 ```
 
-- RAG 服务于“围绕自己的资料学习”。
-- Web Research 服务于“需要外部事实时获得可信证据”。
+- RAG 服务于围绕自己的资料学习。
+- Web Research 服务于需要外部事实时获得可信证据。
 - GitHub 是源码学习高级研究工具，不是第二个执行产品。
 - Memory 是学习连续性基础设施。
 - Workflow 只属于高级诊断。
-- 群聊、新闻、工具保持实验功能。
-- 当前不推进新向量数据库、GraphRAG、原生移动端、可执行仓库代理、掌握百分比或并列长期状态文档。
+- React 只负责交互和可重建缓存；SQLite durable entities 是运行真值。
+- planned / attempted / failed 不得覆盖 committed truth。
+- 当前不推进新向量数据库、GraphRAG、原生移动端、可执行仓库代理、掌握百分比或新的并列工作台。
+- 下一阶段以“核心学习闭环是否真实可用”为判断标准，而不是以新增功能数量为判断标准。
 
-## 2. 当前架构与主链
-
-当前架构：**React 19 + FastAPI + application services + SQLite**。
-
-真值边界：
-
-- React 只负责交互和可重建缓存；
-- SQLite durable entities、committed learning state、评估和运行状态是运行真值；
-- 用户确认后的长期学习记忆写入 Markdown memory；
-- planned / attempted / failed 不得覆盖 committed truth；
-- 多步流程由 application service + durable run 拥有。
-
-已完成：
+## 2. 已完成主链
 
 - TaskContract 单一真值；
 - LearningClosureRun 与总结闭环；
 - ThreadSummaryState；
 - 学习状态去伪精化；
-- 结构化恢复卡；
-- 会话语义导航；
-- UI 收敛和窄屏适配；
-- 五条 Golden Journey 回归合同。
+- 结构化恢复卡与语义会话导航；
+- UI 学习优先层级、窄屏适配和五条 Golden Journey 组件回归；
+- RAG K1a–K1e 确定性基线和真实 Provider replay harness；
+- EvidenceSnapshot、ResearchRun source truth、EvidenceTrail 普通/诊断分层；
+- AnswerClaimSnapshot v1 服务端合同和完整 Turn 生命周期。
 
-## 3. 已完成的证据主线
+## 3. 已完成的证据与 claim 真值
 
 ### PR #61：G13 live / restore parity
 
-Merge SHA：`597006e99919ea7e5f5b02f01b1536b446da9a55`。
+Merge SHA：`597006e99919ea7e5f5b02f01b1536b446da9a55`，CI #1317 全绿。
 
-- 正确读取嵌套 `RagResult.chunk`；
 - local evidence 使用稳定 `chunk_id`；
-- 同来源不同 chunk 不错误折叠；
-- 恢复 `pedagogy_snapshot.evidence_ids`；
-- live -> persisted -> restored 等价回归。
+- live -> persisted -> restored 等价；
+- 教学引用刷新后保持。
 
-CI #1317 全绿。
+### PR #62：EvidenceSnapshot v1
 
-### PR #62：server-owned EvidenceSnapshot v1
+Merge SHA：`fcfb9bc66750d10c822306fae735424e658b19ef`，CI #1340 全绿。
 
-Merge SHA：`fcfb9bc66750d10c822306fae735424e658b19ef`。
-
-- `EvidenceRefV1`、`EvidenceSnapshotV1`、`ClaimEvidenceLinkV1`；
+- `EvidenceRefV1 / EvidenceSnapshotV1 / ClaimEvidenceLinkV1`；
 - 服务端拥有证据身份和生命周期；
-- 新 Turn 在现有 JSON 快照内持久化；
-- 旧 Turn 确定性兼容恢复；
-- React 优先读取服务端快照；
-- 教学引用与事实 claim link 分离。
+- 新旧 Turn 使用现有 JSON 快照兼容持久化；
+- pedagogy 引用与事实 claim link 分离。
 
-CI #1340 全绿。
+### PR #63：ResearchRun source truth
 
-### PR #63：durable ResearchRun source truth
+Merge SHA：`f1b2a4f9d481a16e5c93e6ac8fb4c0f9ee2f45c2`，CI #1357 全绿。
 
-Merge SHA：`f1b2a4f9d481a16e5c93e6ac8fb4c0f9ee2f45c2`。
-
-- selected/rejected ResearchRun 来源进入 ChatTurn 真值；
+- selected/rejected ResearchRun 来源进入 ChatTurn；
 - 保存 Provider 状态、stop reason、URL/domain、相关度和排除原因；
 - continuation/retry 不能切换来源 owner；
-- 同一 Run 恢复使用原 Turn 冻结真值；
-- 实时与数据库恢复读取同一 `rag_snapshot`。
-
-CI #1357 全绿。
+- 实时与恢复读取同一 `rag_snapshot`。
 
 ### PR #64：adopted evidence / diagnostics 分层
 
-Merge SHA：`451bc4a78fc3eda6219083371591aa46c8e62900`。
+Merge SHA：`451bc4a78fc3eda6219083371591aa46c8e62900`，CI #1368 全绿。
 
-- 普通层只显示 selected 或教学明确引用的证据；
-- candidate/read/rejected、分数、Provider 状态和工具调用进入显式诊断详情；
-- 没有 selected 时不把候选来源包装成回答来源；
-- 普通复制和诊断复制分离；
-- 链接换行、触控尺寸和窄屏溢出已处理；
-- `web_tools.calls` 使用结构化类型收窄。
+- 普通层只显示 selected 或教学明确引用证据；
+- candidate/read/rejected、分数和工具调用进入诊断详情；
+- 无 selected 时不把候选包装成回答来源；
+- 普通复制和诊断复制分离。
 
-CI #1368 全绿：后端测试、RAG K1、Ruff、package、detect-secrets、mypy、195 项前端测试、TypeScript 与 Vite build。
+### PR #65：AnswerClaimSnapshot v1
 
-## 4. RAG K1 当前基线
+Merge SHA：`b700da1a2751769959ae1b41966f5da0a854162a`，CI #1389 全绿。
 
-K1a–K1e 已进入 `main`：
+- `AnswerClaimV1 / AnswerClaimSnapshotV1`；
+- final answer hash、稳定 claim ID、claim kind/status/source、support type、confidence 和 evidence ID 校验；
+- validated claim links 回投 EvidenceSnapshot；
+- streaming/interrupted/failed/abandoned 使用稳定 `turn_not_completed`；
+- completed 且无 producer 时保存 final answer hash + `producer_unavailable`；
+- continuation 使旧 claim truth 失效；retry 不继承父 Turn claims；
+- partial commit 不能覆盖服务端 route/rag/pedagogy 或注入伪造 claim；
+- 未修改 prompt、未增加模型调用、未用自然语言字符串推断 claim、未增加 UI。
 
-- 12 份学习文档；
-- 30 个 retrieval case，其中 26 个 answerable；
-- 10 个 answer-quality gold case；
-- stale / forbidden leakage：0；
+### PR #66：AnswerClaim 离线评测基线
+
+当前 head：`f95e992ac7577966e2ed010aec13246728d04f5a`；CI #1405 全绿，等待合并。
+
+- 复用 RAG K1 的 10 个 answer-quality gold case；
+- 版本化 `AnswerClaimEvalCase` 和结构化 producer adapter；
+- deterministic gold producer 只验证 evaluator 正确性；
+- 指标覆盖 schema parse、answerability、claim precision/recall/F1、kind accuracy、claim coverage、unsupported claim、link precision/recall/F1、refusal/forbidden leakage；
+- 覆盖 malformed、hallucinated、missing-claim、wrong-link、unknown-evidence、producer failure 等负例；
+- case/evaluator/producer/output fingerprints 和 checked-in snapshot；
+- 失败、无法解析或 unavailable 不补造完成分数；
+- 不调用生产聊天、不修改 prompt、不写 ChatTurn、不调用真实 Provider、不增加 UI；
+- 满分结果只能表述为 `evaluator_self_test_only`，不得冒充模型质量。
+
+完整门禁：pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 Vitest、TypeScript 与 Vite production build 全部通过。
+
+## 4. 当前真实指标
+
+### RAG K1
+
+- corpus：12 份学习文档；
+- retrieval：30 case / 26 answerable；
+- answer-quality gold：10 case；
 - source recall@K：0.923077；
 - nDCG：0.903600；
 - adaptive recall@K：0.942308；
 - multi-source recall@K：0.9；
+- stale / forbidden leakage：0；
 - deterministic answerable supported：26/26；
-- deterministic unanswerable block：4/4；
-- real-provider replay harness 已完成。
+- deterministic unanswerable block：4/4。
 
-尚未完成：还没有实际成功的正式真实 Provider benchmark 可作为模型质量结论。
+这些是固定 corpus 的回归合同，不代表真实模型最终质量。尚未有正式真实 Provider benchmark 可作为模型质量结论。
 
-## 5. 当前缺口：AnswerClaim owner
+### GitHub replay
 
-目前已有 EvidenceRef 和 ClaimEvidenceLink schema，但尚无服务端 owner 能稳定回答：
+- 15 个仓库；
+- 17 个 case；
+- 15 个 Provider replay；
+- partial rate：0.7647；
+- symbol mapping precision / recall / F1：0.625 / 0.4545 / 0.5263；
+- CI association precision / recall / F1：0.3529 / 1.0 / 0.5217。
 
-- 最终回答包含哪些可核对 assertion；
-- 哪些内容只是教学指令、问题、建议或不确定表达；
-- assertion 的稳定 ID；
-- assertion 与 EvidenceRef 的支持关系；
-- 中断、失败、重试和 continuation 后哪个版本才是最终真值。
+G10-D 可执行代理继续冻结。
 
-禁止：
+## 5. 下一阶段：功能与使用体验审计
 
-- 按标点切分回答并把每句当 claim；
-- 用关键词或标题匹配自动建立支持关系；
-- 把 `PedagogyTurnPlan.evidence_ids` 当作 answer claim links；
-- partial/interrupted 文本覆盖 completed claim truth。
+核心问题：
 
-## 6. 精确执行顺序
+> 用户是否能够从第一次提问开始，经过教学、真实理解验证、失败恢复、成果整理和下次恢复，完成可信且低摩擦的学习闭环，而不需要理解 Run、RAG、Provider、Memory 文件和 Workflow 等内部结构？
 
-### P0-2c2a：AnswerClaimSnapshot v1（当前）
+已确认的生产事实：
 
-目标：建立版本化服务端合同和 ChatTurn 生命周期边界，本 PR 不自动生成 claim。
+- FastAPI `get_chat_service()` 注入 `TaskAwarePedagogyEvaluationService(LLMSemanticEvaluator())`；
+- P0-A1 不预设“缺少 semantic evaluator 接线”，而是验证真实成功、误解、无推理、不可用和恢复链路；
+- 审计结果、进度和整改顺序只写入本文件。
 
-拟新增：
+已识别高风险：
+
+1. 理解验证生产链尚未经过完整端到端证明；
+2. Golden Journey 仍以组件存在性和人工常量为主；
+3. 首屏仍加载隐藏实验模块；
+4. Sources 抽屉混合回答依据、资料管理和检索诊断；
+5. 默认学习结束流程暴露过多 Memory 工程细节；
+6. SessionSidebar 与 SessionsPanel 存在双实现；
+7. 首次打开和普通设置仍有认知负担；
+8. 焦点、复制反馈、上传约束和窄屏关键内容仍需真实浏览器验证。
+
+## 6. 审计与整改精确顺序
+
+### P0-A1：学习验证 E2E
+
+分支：`audit/learning-verification-e2e`。
 
 ```text
-AnswerClaimV1
-- id
-- text
-- kind: factual | instructional | question | recommendation | uncertainty
-- status: asserted | qualified | withdrawn
-- source: provider_structured | application_supplied
-
-AnswerClaimSnapshotV1
-- schema_version
-- answer_hash
-- claims
-- claim_links
-- producer
-- status: unavailable | supplied | validated | rejected
-- reason
+建立目标
+-> 教学或练习
+-> 学习者解释
+-> PedagogyEvalRun
+-> committed LearningState
+-> 刷新
+-> 恢复卡与学习条保持一致
 ```
 
-规则：
+必须覆盖：
 
-1. claim ID 由规范化 claim text + final answer hash 确定性产生，或接受上游已验证 ID；不得按数组位置生成。
-2. ChatTurn 只在 final answer 与 snapshot 的 answer hash 一致时接受 claim truth。
-3. claim links 只接受已知 EvidenceRef ID。
-4. 空 claim ID、未知 evidence、非法枚举或越界 confidence 被拒绝。
-5. interrupted / failed / abandoned Turn 不产生 validated snapshot。
-6. retry 创建新 Turn 和新 answer hash，不继承父 Turn claims。
-7. continuation 在新 final answer 完成前使旧 claim snapshot 失效。
-8. 当前生成链没有结构化 claims 时保存 `unavailable`，不从自然语言回答推断。
-9. 旧 Turn 安全回退 unavailable。
-10. 不增加 SQLite schema，继续使用现有 JSON 快照边界。
+- 正确且有推理的解释；
+- 明显误解；
+- 只说“懂了”；
+- semantic evaluator 不可用或超时；
+- evidence ref 不合法；
+- continuation / retry / interrupted；
+- 刷新恢复一致性。
 
-本 PR不修改主模型 prompt，不增加额外模型调用，不改 UI。
+若真实生产链不能产生可信 `accept`，先修真值链，不推进后续体验重构。
 
-门禁：
+### P0-A2：真实浏览器 Golden Journeys
 
-- deterministic ID / answer hash；
-- answer hash mismatch 拒绝；
-- evidence ID 和 confidence 校验；
-- interrupted / retry / continuation 生命周期测试；
-- old Turn compatibility；
-- full CI。
+分支：`test/browser-golden-journeys`。
 
-### P0-2c2b：结构化生成接线与质量基线
+使用 Playwright 或等价 E2E，运行真实 React + 可控 FastAPI，覆盖首次问答、系统学习闭环、上传资料学习、联网研究恢复和 GitHub 源码学习。真实测量必需点击、必需决策、跨 surface 数、恢复点击、失败下一动作，并覆盖 1440px、约 390px、键盘、焦点、刷新和网络失败。
 
-合同稳定后再选择同次生成 sidecar 或独立 evaluator，先以 record-only 评估 schema parse rate、claim coverage、unsupported claim rate、link precision/recall 和额外成本。质量未达标时不进入普通 UI。
+### P0-A3：核心首屏按需加载
 
-### P0-3：架构真值与 Streamlit 清理
+分支：`perf/core-bootstrap-lazy-features`。
 
-- 同步 `ARCHITECTURE_STATUS.md`、`STATE_MODEL.md`；
-- 删除或迁移 `src/ui`；
-- requirements 移除 Streamlit 并重新锁定；
-- README / USER_GUIDE 同步；
-- package diff 和全量回归。
+- 首屏只加载 health、sessions、runtime settings 和当前学习恢复所需数据；
+- Sources、Memory、群聊、新闻、工具、Workflow 按打开时加载；
+- 隐藏模块失败不进入全局普通用户告警；
+- 保留 last-good cache 和并发刷新防回退。
 
-### P1
+### P0-A4：资料与来源三层收口
 
-1. 执行 RAG-K1f 真实 Provider 回答基线；
-2. RAG-K2 结构化 parser 和 structure-aware chunking；
-3. 学习成效基线。
+分支：`ux/sources-three-layer-separation`。
 
-### P2
+在现有抽屉内分为“本次回答依据 / 我的资料 / 检索诊断”；普通层不得把 candidate/read/rejected 或检索分数包装成回答依据。
 
-1. 自适应 `LearningPlanRun / LearningUnit / AssessmentAttempt`；
-2. GitHub 源码学习 24–30 case 质量收口；
-3. G10-D 可执行代理继续冻结。
+### P0-A5：学习结束 review-first
 
-## 7. 统一验证要求
+分支：`ux/closure-review-first`。
+
+默认只展示本次确认、剩余缺口、下次入口和确认保存；Memory 文件目标、追加/替换、候选编辑和 provenance 进入高级编辑。
+
+### P0-A6：会话导航单一 owner
+
+分支：`refactor/session-navigation-single-owner`。
+
+提取唯一 `SessionNavigator`，宽屏为侧栏、窄屏装入 SlideOver，共用搜索、分组、重命名、归档、错误和切换保护。
+
+### P0-A7：新手与设置渐进披露
+
+分支：`ux/onboarding-settings-progressive-disclosure`。
+
+首次打开以输入框为主，只保留“系统学习 / 上传资料”轻量入口；普通设置只保留学习方式、是否使用资料、外部数据与隐私、互动氛围，其余进入高级设置。
+
+### P0-A8：可访问性、反馈与移动端收口
+
+分支：`a11y/focus-feedback-responsive`。
+
+覆盖 SlideOver 焦点循环、Escape、焦点恢复、focus-visible、复制失败反馈、上传格式/大小/accept、关键内容换行、触控目标、软键盘和横向溢出。
+
+## 7. 审计阶段完成标准
+
+只有同时满足以下条件，才允许恢复后续扩展：
+
+- 正确解释能通过真实生产链进入 committed learning truth；
+- 无推理表达、明显误解和不可用 evaluator 不会伪造掌握；
+- 五条 Golden Journey 在桌面与窄屏浏览器 E2E 全部通过；
+- first-answer 没有强制配置决策；
+- 系统学习恢复、资料学习、联网研究恢复均不超过两层产品 surface；
+- 刷新、网络失败、stream interruption 后都有一键或明确恢复路径；
+- 首屏不依赖隐藏实验模块；
+- 普通证据层只显示 adopted evidence；
+- 默认学习结束流程不要求理解 Memory 文件结构；
+- 桌面与移动端使用同一个会话导航 owner；
+- 键盘、焦点、复制、上传和窄屏关键问题有自动回归；
+- 全量 CI 通过。
+
+## 8. 审计期间冻结
+
+1. 真实 Provider claim replay；
+2. claim producer 接入生产 ChatService；
+3. UI 展示“已支持 claim”；
+4. Streamlit / 架构清理；
+5. RAG-K1f 正式真实 Provider 回答基线；
+6. RAG-K2 结构化 parser / chunking；
+7. 自适应 `LearningPlanRun / LearningUnit / AssessmentAttempt`；
+8. G10-D 可执行代理。
+
+审计完成后根据真实结果重新排序，不自动沿用旧计划。
+
+## 9. 统一验证要求
 
 每个切片必须完成：
 
@@ -227,22 +275,27 @@ AnswerClaimSnapshotV1
 - detect-secrets；
 - 前端全量 Vitest；
 - TypeScript 与 Vite production build；
-- 存储兼容与失败恢复；
-- 实时与刷新真值比较；
+- 兼容和失败恢复；
+- P0-A2 之后相关 UI 切片必须运行浏览器 E2E；
 - 更新本文件；
 - 任一门禁未完成不得合并。
 
-## 8. 当前执行状态
+## 10. 当前执行状态
 
-- 当前分支：`agent/answer-claim-owner-v1`；
-- 已完成：PR #61、#62、#63、#64；
-- 当前任务：P0-2c2a AnswerClaimSnapshot v1 合同与 ChatTurn 生命周期；
-- 下一动作：审查 complete / interrupt / retry / continuation 写入点，新增纯领域合同与兼容测试；
-- 合并策略：Draft PR -> 完整 CI -> claim 真值与失败安全审查 -> 全绿合并。
+- 当前分支：`agent/answer-claim-eval-baseline`；
+- 当前 Draft PR：#66；
+- 当前 head：`f95e992ac7577966e2ed010aec13246728d04f5a`；
+- CI #1405：完整门禁全绿；
+- 下一动作：合并 PR #66；
+- 合并后从最新 `main` 建立 `audit/learning-verification-e2e`；
+- 下一主阶段：P0-A1 -> P0-A2 -> 根据真实审计结果执行 P0-A3–P0-A8；
+- 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿后合并。
 
-## 9. 文档规则
+## 11. 文档规则
 
 - 当前状态只更新本文件；
+- status-only 更新留在当前 active branch，不直接推 `main`；
 - `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；
 - `STATE_MODEL.md` 只维护稳定数据模型；
-- 不新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT。
+- 不新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT；
+- 代码状态、CI 状态、分支和 PR 顺序变化时必须同步更新本文件。
