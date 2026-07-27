@@ -13,7 +13,7 @@ import type {
 } from "../types";
 
 export default function WorkspaceRuntime() {
-  const { snapshot, setSnapshot, refresh } = useWorkspaceBootstrap();
+  const { snapshot, setSnapshot, refresh, loadFeature } = useWorkspaceBootstrap();
   const { state: workspaceRuntime, dispatch: dispatchWorkspace } = useWorkspace();
   const [input, setInput] = useState("");
   const [ragEnabled, setRagEnabled] = useState(true);
@@ -116,6 +116,7 @@ export default function WorkspaceRuntime() {
     <WorkspaceView
       snapshot={snapshot}
       refresh={refresh}
+      loadFeature={loadFeature}
       fileInputRef={fileInputRef}
       controllers={controllers}
       ui={{
