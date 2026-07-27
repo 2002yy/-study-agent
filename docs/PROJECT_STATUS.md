@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-27  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**学习真值与核心浏览器基线已通过；当前补齐资料学习、联网研究恢复和源码学习三条真实浏览器旅程。**  
-> 当前分支：`test/browser-golden-journeys-evidence`，P0-A2b。
+> 当前主线：**学习真值与五类真实浏览器 Golden Journey 已通过；PR #69 最终状态同步后重跑完整门禁，合并后进入 P0-A3 首屏按需加载。**  
+> 当前分支：`test/browser-golden-journeys-evidence`，Draft PR #69。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -29,7 +29,7 @@
 - EvidenceTrail 普通/诊断分层；
 - AnswerClaimSnapshot v1 与 record-only 离线评测；
 - 生产路径学习验证 E2E；
-- Chromium desktop / 390px 核心浏览器基线。
+- Chromium desktop / 390px 五类 Golden Journey 浏览器基线。
 
 已合并：
 
@@ -41,6 +41,8 @@
 - PR #66 `b1ac5a841aab5948b4fee623aeaea1d87e1b8af9`，CI #1407；
 - PR #67 `c19d5070b9bcf73ed46a81731bbeae842b757208`，CI #1416；
 - PR #68 `4da85690043e9144b18dabaf0b4d2359c16eaeb8`，CI #1437。
+
+PR #69 当前实现 head `41589111f5d0583a6513d595a447039b730293f1` 的 CI #1447 已全绿；最终状态提交仍需重新通过完整门禁后才能合并。
 
 ## 3. 当前真实指标
 
@@ -70,58 +72,51 @@ G10-D 可执行代理继续冻结。
 - interrupted continuation 与 failed retry 只提交一次；
 - 刷新恢复与 SQLite 真值一致。
 
-## 5. P0-A2a 已完成：核心浏览器基线
+## 5. P0-A2 已完成实现：真实浏览器 Golden Journeys
 
-PR #68 建立真实 React + Chromium + 网络级 API/SSE fixture，运行 `1440×900` 与 `390×844`，失败时保存 trace、screenshot、video、HTML report 和 JSON 指标。
+PR #68 和 PR #69 使用真实 React + Chromium + 网络级 API/SSE fixture，运行 `1440×900` 与 `390×844`。失败时保存 trace、screenshot、video、HTML report 和 JSON 指标。
+
+桌面与 390px 结果一致：
 
 | journey | clicks | decisions | surfaces | recovery | keyboard | refresh | overflow |
 |---|---:|---:|---:|---:|---|---|---|
 | first answer | 0 | 0 | 1 | 0 | pass | pass | none |
 | returning learning | 1 | 1 | 1 | 1 | n/a | pass | none |
 | chat 503 recovery | 1 | 0 | 1 | 1 | n/a | pass | none |
+| material learning + adopted evidence | 3 | 1 | 1 | 0 | n/a | pass | none |
+| web research recovery + adopted evidence | 2 | 0 | 1 | 1 | n/a | pass | none |
+| source-code learning + adopted evidence | 2 | 0 | 1 | 0 | n/a | pass | none |
 
-指标来自浏览器动作和 DOM，不是组件测试常量。
+实际验证：
 
-## 6. 当前任务：P0-A2b
+- 上传走隐藏文件输入、RagRun、知识库刷新和明确学习方式选择；
+- 普通 EvidenceTrail 只显示 selected/adopted local evidence，candidate 不出现；
+- failed ResearchRun 从持久化 `webLookupRunId` 恢复，一次点击重试后进入下一轮聊天；
+- 下一轮请求携带同一 ResearchRun ID，回答使用 server-owned selected research evidence；
+- 源码学习继续显示目标、缺口和下一步，GitHub 只作为 supporting evidence；
+- 所有新增回答和 adopted evidence 在刷新后恢复；
+- 所有旅程保持一个 product surface，390px 无横向溢出。
 
-复用现有 Playwright 配置、fixture 和 metric helper，增加 desktop / mobile 三类旅程：
+指标来自真实浏览器动作与 DOM 状态，不是组件测试常量。
 
-### 6.1 资料学习
+### 修正记录
 
-```text
-上传资料 -> processing/ready -> 显式选择学习方式 -> 提问
--> 打开证据轨迹 -> 只核对 adopted local evidence -> 刷新恢复
-```
+- CI #1443：7/12 通过；上传缺 RagRun GET fixture，研究 seed 在刷新时覆盖新会话，源码移动端定位到隐藏重复元素；
+- CI #1445：10/12 通过；上传和研究桌面/移动全部通过，只剩恢复卡目标严格定位歧义；
+- CI #1447：12/12 浏览器用例及全部仓库门禁全绿；修正均位于测试 fixture/定位，没有修改生产代码或放宽 evidence truth。
 
-验证文件输入、RAG write run、知识库刷新、学习选择、adopted evidence，以及候选/排除来源不进入普通层。
+## 6. 下一阶段：P0-A3 核心首屏按需加载
 
-### 6.2 联网研究恢复
+分支：`perf/core-bootstrap-lazy-features`。
 
-```text
-聊天触发研究 -> ResearchRun 保存失败/停止/进行中状态
--> 聊天内显示继续或重试 -> 一键恢复 -> completed found
--> 下一轮使用恢复来源 -> 刷新恢复
-```
+目标：
 
-验证不跳转第二工作台、恢复点击不超过 1、selected 与 candidate/rejected 分层。
-
-### 6.3 源码学习
-
-```text
-提出源码学习目标 -> 回答采用源码证据 -> 打开证据轨迹核对文件/符号
--> 仍停留在原学习目标、缺口和下一步 -> 刷新恢复
-```
-
-验证没有平行 GitHub 工作台；GitHub 只是 supporting evidence；普通层只显示 adopted source。
-
-### 6.4 边界与门禁
-
-- 使用可控网络 fixture，不调用真实模型、联网搜索、GitHub 或用户文件；
-- 本切片不重构 Sources、SessionNavigator、首屏加载、设置或 closure UX；
-- 产品缺陷写回本文件，由 P0-A3-P0-A8 独立修复；
-- 新增旅程与原有 6 个浏览器用例全部通过；
-- pytest、RAG K1、Ruff、package、detect-secrets、mypy、Vitest、TypeScript、Vite 全绿；
-- browser diagnostics artifact 完整；任一门禁失败不得合并。
+1. 首屏只请求 health、sessions、runtime settings 和当前恢复所需数据；
+2. Memory、Sources、group、news、tools、workflow 按抽屉打开或实际使用时加载；
+3. 隐藏模块失败不进入普通全局告警；
+4. 保留 last-good、部分服务可用和恢复语义；
+5. 浏览器门禁记录首屏请求集合、隐藏模块零请求和按需加载行为；
+6. 不在本切片重构 Sources、SessionNavigator、设置或 closure UX。
 
 ## 7. 后续顺序
 
@@ -147,11 +142,11 @@ PR #68 建立真实 React + Chromium + 网络级 API/SSE fixture，运行 `1440�
 
 ## 10. 当前执行状态
 
-- 当前分支：`test/browser-golden-journeys-evidence`；
+- 当前分支：`test/browser-golden-journeys-evidence`，Draft PR #69；
 - 基线：PR #68 merge SHA `4da85690043e9144b18dabaf0b4d2359c16eaeb8`；
-- 当前任务：P0-A2b 三类证据/研究浏览器旅程；
-- 当前阶段：追踪真实入口、API owner、恢复状态和 EvidenceTrail 数据结构；
-- 下一动作：扩展 fixture，先实现资料上传与 adopted evidence；
+- 实现 head：`41589111f5d0583a6513d595a447039b730293f1`，CI #1447 全绿；
+- 当前阶段：状态文档同步后，对最新 head 重跑完整 CI；
+- 下一动作：最终 head 全绿后 Ready + squash merge，随后从最新 `main` 建立 P0-A3 分支；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 11. 文档规则
