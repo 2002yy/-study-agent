@@ -120,10 +120,14 @@ def run_baseline(fixture_path: Path) -> dict[str, Any]:
         "baseline_kind": BASELINE_KIND,
         "gating": GATING,
         "fingerprints": {
-            "case_fixture_sha256": _canonical_json_fingerprint(fixture_path),
-            "evaluator": _version_fingerprint(ANSWER_CLAIM_EVALUATOR_VERSION),
-            "producer": _version_fingerprint(PRODUCER_ID, PRODUCER_VERSION),
-            "producer_outputs_sha256": payload_fingerprint,
+            "case_fixture_fingerprint_sha256": _canonical_json_fingerprint(fixture_path),
+            "evaluator_fingerprint_sha256": _version_fingerprint(
+                ANSWER_CLAIM_EVALUATOR_VERSION
+            ),
+            "producer_fingerprint_sha256": _version_fingerprint(
+                PRODUCER_ID, PRODUCER_VERSION
+            ),
+            "producer_outputs_fingerprint_sha256": payload_fingerprint,
         },
         "producer": {
             "id": producer.producer_id,
