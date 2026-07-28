@@ -163,7 +163,10 @@ async def chat_stream_endpoint(
             raise
         except Exception as exc:
             with suppress(ValueError):
-                service.interrupt_turn(prepared, "".join(reply_parts))
+                if reply_parts:
+                    service.interrupt_turn(prepared, "".join(reply_parts))
+                else:
+                    service.fail_turn(prepared)
             yield sse_event(
                 "error",
                 {"message": str(exc), "error_type": type(exc).__name__},
@@ -174,7 +177,10 @@ async def chat_stream_endpoint(
             current = service.repository.get_chat_turn(prepared.turn.id)
             if current is not None and current.status == "streaming":
                 with suppress(ValueError):
-                    service.interrupt_turn(prepared, "".join(reply_parts))
+                    if reply_parts:
+                        service.interrupt_turn(prepared, "".join(reply_parts))
+                    else:
+                        service.fail_turn(prepared)
 
     return StreamingResponse(
         events(),
