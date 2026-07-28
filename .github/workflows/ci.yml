@@ -209,3 +209,31 @@ jobs:
         run: |
           tail -300 browser-e2e.log
           exit 1
+
+      - name: Run real-stack browser gates
+        id: real_stack_browser_e2e
+        continue-on-error: true
+        timeout-minutes: 8
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run test:e2e:real-stack > ../real-stack-browser-e2e.log 2>&1
+
+      - name: Upload real-stack browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-stack-browser-gates
+          path: |
+            real-stack-browser-e2e.log
+            frontend/playwright-real-stack-report
+            frontend/test-results/real-stack-artifacts
+            frontend/test-results/real-stack-runtime
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Enforce real-stack browser gates
+        if: steps.real_stack_browser_e2e.outcome == 'failure'
+        run: |
+          tail -300 real-stack-browser-e2e.log
+          exit 1
