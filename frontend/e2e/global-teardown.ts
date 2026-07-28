@@ -8,12 +8,47 @@ import {
 } from "./global-setup";
 import type { JourneyMetric, SuccessArtifact } from "./journey-metrics";
 
-const EXPECTED_STEPS: Record<string, string[]> = {
-  first_answer: ["ready", "completed", "restored"],
-  returning_learning: ["restored-context", "continued", "continued-restored"],
-  chat_failure_recovery: ["failure-visible", "recovered", "recovered-restored"],
+type ExpectedJourney = {
+  journey: string;
+  projects: string[];
+  steps: string[];
 };
-const EXPECTED_PROJECTS = ["desktop-chromium", "mobile-chromium"];
+
+type ComplexArtifact = SuccessArtifact & {
+  conversation_scroll_top?: number;
+  conversation_scroll_height?: number;
+  conversation_client_height?: number;
+  conversation_distance_from_bottom?: number;
+};
+
+const EXPECTED_JOURNEYS: ExpectedJourney[] = [
+  {
+    journey: "first_answer",
+    projects: ["desktop-chromium", "mobile-chromium"],
+    steps: ["ready", "completed", "restored"],
+  },
+  {
+    journey: "returning_learning",
+    projects: ["desktop-chromium", "mobile-chromium"],
+    steps: ["restored-context", "continued", "continued-restored"],
+  },
+  {
+    journey: "chat_failure_recovery",
+    projects: ["desktop-chromium", "mobile-chromium"],
+    steps: ["failure-visible", "recovered", "recovered-restored"],
+  },
+  {
+    journey: "complex_content_narrow",
+    projects: ["narrow-chromium"],
+    steps: [
+      "long-text-and-url",
+      "wide-code",
+      "user-scrolled",
+      "back-to-latest",
+      "restored",
+    ],
+  },
+];
 
 function requireFile(path: string, label: string) {
   if (!existsSync(path)) throw new Error(`${label} is missing: ${path}`);
@@ -26,15 +61,17 @@ export default function globalTeardown() {
 
   const manifest = JSON.parse(
     readFileSync(GOLDEN_JOURNEY_SUCCESS_MANIFEST_PATH, "utf8"),
-  ) as SuccessArtifact[];
+  ) as ComplexArtifact[];
   const metrics = JSON.parse(
     readFileSync(GOLDEN_JOURNEY_METRICS_PATH, "utf8"),
   ) as JourneyMetric[];
 
   const expectedArtifactKeys = new Set<string>();
-  for (const [journey, steps] of Object.entries(EXPECTED_STEPS)) {
-    for (const project of EXPECTED_PROJECTS) {
-      for (const step of steps) expectedArtifactKeys.add(`${journey}:${project}:${step}`);
+  for (const expected of EXPECTED_JOURNEYS) {
+    for (const project of expected.projects) {
+      for (const step of expected.steps) {
+        expectedArtifactKeys.add(`${expected.journey}:${project}:${step}`);
+      }
     }
   }
   const actualArtifactKeys = new Set(
@@ -46,7 +83,9 @@ export default function globalTeardown() {
     );
   }
   for (const key of expectedArtifactKeys) {
-    if (!actualArtifactKeys.has(key)) throw new Error(`Missing success artifact manifest entry: ${key}`);
+    if (!actualArtifactKeys.has(key)) {
+      throw new Error(`Missing success artifact manifest entry: ${key}`);
+    }
   }
 
   for (const item of manifest) {
@@ -62,17 +101,17 @@ export default function globalTeardown() {
     requireFile(resolve(GOLDEN_JOURNEY_SUCCESS_DIR, item.file), "Success screenshot");
   }
 
-  for (const journey of Object.keys(EXPECTED_STEPS)) {
-    for (const project of EXPECTED_PROJECTS) {
+  for (const expected of EXPECTED_JOURNEYS) {
+    for (const project of expected.projects) {
       const metric = metrics.find(
-        (item) => item.journey === journey && item.project === project,
+        (item) => item.journey === expected.journey && item.project === project,
       );
-      if (!metric) throw new Error(`Missing observed metric: ${journey}:${project}`);
+      if (!metric) throw new Error(`Missing observed metric: ${expected.journey}:${project}`);
       if (!metric.action_summary) {
-        throw new Error(`Observed metric has no action summary: ${journey}:${project}`);
+        throw new Error(`Observed metric has no action summary: ${expected.journey}:${project}`);
       }
-      if (metric.success_artifacts?.length !== EXPECTED_STEPS[journey].length) {
-        throw new Error(`Observed metric has incomplete success artifacts: ${journey}:${project}`);
+      if (metric.success_artifacts?.length !== expected.steps.length) {
+        throw new Error(`Observed metric has incomplete success artifacts: ${expected.journey}:${project}`);
       }
       for (const file of metric.success_artifacts) {
         if (!manifest.some((item) => item.file === file)) {
@@ -80,5 +119,46 @@ export default function globalTeardown() {
         }
       }
     }
+  }
+
+  const narrowArtifacts = manifest.filter(
+    (item) => item.journey === "complex_content_narrow" && item.project === "narrow-chromium",
+  );
+  for (const item of narrowArtifacts) {
+    if (item.viewport?.width !== 360 || item.viewport?.height !== 520) {
+      throw new Error(`Narrow evidence has the wrong viewport: ${item.file}`);
+    }
+    if (
+      item.conversation_scroll_height === undefined
+      || item.conversation_client_height === undefined
+      || item.conversation_scroll_top === undefined
+      || item.conversation_distance_from_bottom === undefined
+    ) {
+      throw new Error(`Narrow evidence lacks conversation scroll metadata: ${item.file}`);
+    }
+    if (item.conversation_scroll_height <= item.conversation_client_height) {
+      throw new Error(`Narrow evidence did not produce a scrollable conversation: ${item.file}`);
+    }
+  }
+
+  const userScrolled = narrowArtifacts.find((item) => item.step === "user-scrolled");
+  if (!userScrolled || (userScrolled.conversation_distance_from_bottom ?? 0) < 100) {
+    throw new Error("Narrow user-scroll evidence did not move meaningfully away from the latest message");
+  }
+  for (const step of ["back-to-latest", "restored"]) {
+    const item = narrowArtifacts.find((artifact) => artifact.step === step);
+    if (!item || (item.conversation_distance_from_bottom ?? Number.POSITIVE_INFINITY) >= 80) {
+      throw new Error(`Narrow evidence is not at the latest message after ${step}`);
+    }
+  }
+
+  const narrowMetric = metrics.find(
+    (item) => item.journey === "complex_content_narrow" && item.project === "narrow-chromium",
+  );
+  if (!narrowMetric?.action_summary || narrowMetric.action_summary.scrolls < 1) {
+    throw new Error("Narrow observed metric does not contain a real user scroll action");
+  }
+  if (!narrowMetric.no_horizontal_overflow) {
+    throw new Error("Narrow complex-content journey has horizontal page overflow");
   }
 }
