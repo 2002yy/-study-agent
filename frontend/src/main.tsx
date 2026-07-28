@@ -11,6 +11,7 @@ import "./learning-closure.css";
 import "./session-navigation.css";
 import "./trustworthy-learning-status.css";
 import "./restore-card.css";
+import "./progressive-disclosure.css";
 import "./features/rag/sourcesPanel.css";
 
 type AppErrorBoundaryState = {
