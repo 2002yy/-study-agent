@@ -8,6 +8,7 @@ import { MemoryPanel } from "../features/learning-memory/MemoryPanel";
 import { NewsWorkspace } from "../features/news-workspace/NewsWorkspace";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
+import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadContract";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
 import type { SemanticSessionRow } from "../features/sessions/sessionNavigation";
@@ -158,6 +159,8 @@ export function WorkspaceView({
   return (
     <AppShell>
       <input
+        accept={RAG_UPLOAD_ACCEPT}
+        aria-describedby="rag-upload-policy"
         aria-label="上传资料"
         className="visually-hidden"
         multiple
@@ -165,6 +168,9 @@ export function WorkspaceView({
         ref={fileInputRef}
         type="file"
       />
+      <span className="visually-hidden" id="rag-upload-policy">
+        {RAG_UPLOAD_HELP_TEXT}
+      </span>
       <SessionNavigator
         sessions={snapshot.sessions}
         activeSessionId={chatController.threadId}
