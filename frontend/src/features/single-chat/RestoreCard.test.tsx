@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, type RenderResult } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SemanticSessionRow } from "../sessions/sessionNavigation";
 import type { TaskIntent } from "../task/taskContract";
@@ -39,6 +39,8 @@ function renderCard(options: RenderOptions = {}): RenderResult {
   );
 }
 
+afterEach(() => cleanup());
+
 describe("RestoreCard", () => {
   it("keeps direct input primary and shows only learning plus upload by default", () => {
     const onSelectEntry = vi.fn<(intent: TaskIntent, prompt: string) => void>();
@@ -48,8 +50,8 @@ describe("RestoreCard", () => {
     expect(screen.queryByRole("button", { name: /快速问答/ })).toBeNull();
     expect(screen.getByRole("button", { name: /系统学习/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /上传资料/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /联网研究/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /项目推进/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /联网研究/, hidden: true })).not.toBeVisible();
+    expect(screen.getByRole("button", { name: /项目推进/, hidden: true })).not.toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /系统学习/ }));
     expect(onSelectEntry).toHaveBeenCalledWith("learn", "我想系统学习：");
@@ -62,8 +64,8 @@ describe("RestoreCard", () => {
     fireEvent.click(screen.getByText("更多开始方式"));
     const research = screen.getByRole("button", { name: /联网研究/ });
     const project = screen.getByRole("button", { name: /项目推进/ });
-    expect(research).toBeTruthy();
-    expect(project).toBeTruthy();
+    expect(research).toBeVisible();
+    expect(project).toBeVisible();
 
     fireEvent.click(research);
     fireEvent.click(project);
