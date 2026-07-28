@@ -1,35 +1,84 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SlideOver } from "./SlideOver";
 
-describe("SlideOver", () => {
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue({
+    0: {} as DOMRect,
+    length: 1,
+    item: () => null,
+    [Symbol.iterator]: function* iterator() {
+      yield {} as DOMRect;
+    },
+  } as DOMRectList);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  document.body.style.overflow = "";
+});
+
+describe("SlideOver keyboard ownership", () => {
   it("does not render when closed", () => {
     const { container } = render(
       <SlideOver open={false} title="会话历史" onClose={vi.fn()}>
         <p>内容</p>
-      </SlideOver>
+      </SlideOver>,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("exposes explicit close controls without relying on hover", () => {
+  it("focuses close, loops Tab and Shift+Tab, closes with Escape, and restores the opener", () => {
     const onClose = vi.fn();
-    render(
-      <SlideOver open title="会话历史" onClose={onClose}>
-        <p>内容</p>
-      </SlideOver>
+    const opener = document.createElement("button");
+    opener.textContent = "打开";
+    document.body.append(opener);
+    opener.focus();
+
+    const { unmount } = render(
+      <SlideOver open title="设置" onClose={onClose}>
+        <button type="button">第一个操作</button>
+        <input aria-label="设置输入" />
+        <button type="button">最后一个操作</button>
+      </SlideOver>,
     );
 
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveAttribute("aria-label", "会话历史");
+    const dialog = screen.getByRole("dialog", { name: "设置" });
+    const close = screen.getByRole("button", { name: "关闭设置" });
+    const last = screen.getByRole("button", { name: "最后一个操作" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(close).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
 
-    const closeButtons = screen.getAllByRole("button", { name: "关闭会话历史" });
-    expect(closeButtons).toHaveLength(2);
+    last.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
 
-    fireEvent.click(closeButtons[1]);
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(opener).toHaveFocus();
+    expect(document.body.style.overflow).toBe("");
+    opener.remove();
+  });
+
+  it("keeps focus on the panel when it contains no interactive children", () => {
+    render(
+      <SlideOver open title="空面板" onClose={vi.fn()}>
+        <p>没有操作</p>
+      </SlideOver>,
+    );
+    const panel = document.querySelector("aside.slide-over") as HTMLElement;
+    panel.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(panel).toHaveFocus();
   });
 });
