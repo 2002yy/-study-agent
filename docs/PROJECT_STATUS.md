@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A7 已进入 `main`；当前执行最后一个功能与体验审计切片 P0-A8。**  
-> 当前代码切片：`a11y/focus-feedback-responsive`。
+> 当前主线：**P0-A1–P0-A7 已进入 `main`；P0-A8 已完成实现与实现-head 全量门禁，正在通过 PR #74 做最终状态同步与合并收口。**  
+> 当前代码切片：`a11y/focus-feedback-responsive`；Draft PR #74。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -33,9 +33,10 @@
 - 资料与来源三层收口；
 - 学习结束 review-first；
 - desktop / mobile SessionNavigator 单一交互 owner；
-- 新手入口与设置渐进披露。
+- 新手入口与设置渐进披露；
+- SlideOver 键盘焦点闭环、复制结果反馈、上传前置合同和窄屏/软键盘体验门禁。
 
-已合并：
+已进入 `main`：
 
 - PR #61 `597006e99919ea7e5f5b02f01b1536b446da9a55`，CI #1317；
 - PR #62 `fcfb9bc66750d10c822306fae735424e658b19ef`，CI #1340；
@@ -101,62 +102,46 @@ PR #72 在用户提交 `fae13fc90345a9147a3f08b9c8f156dc43300ab9` 基础上完�
 - `progressive_onboarding` 在 desktop / 390px 均为 0 必需点击、0 配置决策、1 个 product surface、无横向溢出；
 - `progressive_settings` 在 desktop / 390px 均为 3 次点击、0 配置决策、2 个 product surface、无横向溢出。
 
-## 7. 当前任务：P0-A8 焦点、反馈与窄屏体验
+## 7. P0-A8 已完成实现：焦点、反馈与窄屏体验
 
-### 已确认风险
+PR #74 在分支 `a11y/focus-feedback-responsive` 完成 P0-A8。实现 head `e3eb406c2e1c65da244dc797c212171a34fcb7fc` 的 CI #1544 已完整全绿。
 
-1. `SlideOver` 已支持初始焦点、Escape 和关闭后焦点恢复，但没有 Tab / Shift+Tab 焦点循环；
-2. 部分复制动作吞掉 Clipboard API 失败，用户无法判断是否已复制；
-3. 上传入口缺少统一的 `accept`、支持格式、单文件/总大小与失败原因提示；
-4. 前端选择约束必须与服务端真实校验一致，不能只做视觉提示；
-5. 学习缺口、下一步和其他关键长文本在窄屏不得单行省略；
-6. 需要验证触控目标、390px 无横向溢出、移动端软键盘后输入区仍可操作。
+### P0-A8.1 焦点与键盘
 
-### 执行顺序
+- `SlideOver` 打开后聚焦唯一关闭按钮；遮罩与关闭按钮使用不同可访问名称；
+- Tab 从最后一个可交互元素回到第一个，Shift+Tab 反向循环，焦点不会逃出 dialog；
+- 保留 Escape 关闭、背景滚动锁定和关闭后焦点返回原触发控件；
+- Vitest 与 desktop / 390px Playwright 均覆盖 keyboard-only 路径。
 
-#### P0-A8.1 焦点与键盘
+### P0-A8.2 复制反馈
 
-- 为 `SlideOver` 增加焦点 trap；
-- Tab 从最后一个可交互元素回到第一个，Shift+Tab 反向循环；
-- 保留 Escape、初始焦点和关闭后焦点恢复；
-- 补 Vitest 与 Playwright 键盘回归。
+- 回答正文、中断回答、已采用证据和证据诊断四类复制入口均显示 success / failure 状态；
+- Clipboard API 不可用或拒绝时，不再静默吞错；
+- 可见按钮文案与 `aria-live` 状态同时反馈，且不暴露浏览器内部异常文本。
 
-#### P0-A8.2 复制反馈
+### P0-A8.3 上传约束与提示
 
-- 统一复制动作的 success / failure 可见反馈；
-- Clipboard API 不可用或拒绝时不得静默；
-- 反馈使用普通用户可理解文案，不暴露浏览器内部错误。
+- 前端单一合同与服务端当前约束一致：`.md`、`.markdown`、`.txt`、`.pdf`、`.docx`；
+- 单文件上限 10 MiB，单批次上限 25 MiB；空文件、不支持类型、超限和混合无效批次在网络请求前整体拒绝；
+- 文件选择器 `accept`、入口说明、前置校验和错误文案共用同一合同；
+- 服务端继续负责 MIME、文件签名、UTF-8 和 DOCX 结构等权威校验，前端不伪装后端成功。
 
-#### P0-A8.3 上传约束与提示
+### P0-A8.4 触控、软键盘与窄屏
 
-- 以服务端真实支持格式与大小限制为准建立单一前端合同；
-- 文件选择器 `accept`、入口说明和校验逻辑保持一致；
-- 不支持格式、超限、空文件和混合批次给出明确处理结果；
-- 上传前阻止确定无效文件，服务端失败仍保留可重试路径。
+- 关键移动端交互目标达到至少 44px；
+- 学习缺口、下一步、错误、会话、来源和上传说明允许换行，不再以单行 ellipsis 丢失关键内容；
+- 动态 viewport、安全区、抽屉和 composer 布局加固；
+- 390×520 模拟输入聚焦/软键盘收缩后，输入框与发送按钮仍在 viewport 内且可操作；
+- desktop / 390px 所有新增与既有旅程均通过横向溢出检查。
 
-#### P0-A8.4 触控、软键盘与窄屏
+### P0-A8 门禁结果
 
-- 关键交互触控目标达到可操作尺寸；
-- 长缺口、下一步、错误与上传说明允许换行，不以 ellipsis 丢失关键内容；
-- 390px 检查抽屉、设置、闭包、会话导航和上传流程无横向溢出；
-- 模拟移动端输入焦点/viewport 变化，验证 composer 与发送/停止按钮仍可达。
-
-### 边界
-
-- 不重做视觉主题，不新增顶级页面；
-- 不修改学习真值、TaskContract、RAG 排序或 Provider 行为；
-- 不把浏览器兼容问题伪装成后端成功；
-- P0-A8 完成前继续冻结生产 claim producer、RAG-K2、自适应 LearningPlan 和可执行代理。
-
-### 门禁
-
-- 焦点 trap、Escape、焦点恢复和 keyboard-only 路径有自动回归；
-- 所有复制入口的失败均有可见反馈；
-- 上传 `accept`、提示、前端校验与服务端约束一致；
-- desktop / 390px 无横向溢出，关键文本不被单行截断；
-- 移动端输入聚焦后 composer 仍可操作；
-- 原有学习验证、closure、session、evidence、lazy-load、onboarding/settings 和 Golden Journeys 全部继续通过；
-- pytest、RAG K1、Ruff、package、detect-secrets、mypy、Vitest、TypeScript、Vite 和 Playwright 全绿。
+- CI #1538 暴露 SlideOver 两个关闭入口同名的真实可访问性歧义，产品代码修正为唯一关闭控件名称；
+- CI #1542 已通过后端和 62 files / 217 Vitest、TypeScript、Vite build，并通过 32/34 浏览器用例；剩余 2 项仅为 Playwright 模糊定位同时命中背景按钮；
+- CI #1544 在精确定位修正后完整全绿；
+- pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy、62 files / 217 Vitest、TypeScript、Vite build 和 34/34 desktop / 390px Playwright 全部通过；
+- 新增浏览器门禁覆盖 SlideOver 焦点循环、无效上传不发请求、Clipboard 拒绝反馈、390×520 composer 可达、44px 触控目标和无横向溢出；
+- 未修改学习真值、TaskContract、RAG 排序、Provider 行为、服务端上传策略或顶级产品表面。
 
 ## 8. P0-A8 完成后的独立评估
 
@@ -201,11 +186,12 @@ P0-A8 全绿并合并后，**先暂停新增功能**，立即进行一次独立�
 
 ## 11. 当前执行状态
 
-- 当前分支：`a11y/focus-feedback-responsive`；
+- 当前分支：`a11y/focus-feedback-responsive`；Draft PR #74；
 - 基线：PR #73 merge SHA `676fe23a0f26d500712b71c6e175d99d953f1e80`；
-- 当前阶段：P0-A8 范围与门禁已锁定；
-- 下一动作：先实现 SlideOver focus trap 与键盘回归，再处理复制反馈、上传合同和窄屏/软键盘；
-- P0-A8 合并后：先做独立功能评估与使用体验评估，再决定下一批功能；
+- P0-A8 实现 head：`e3eb406c2e1c65da244dc797c212171a34fcb7fc`；实现 CI #1544 完整全绿；
+- 当前阶段：状态文档已同步 P0-A8 实现事实，等待本次 status-sync commit 的最终 head 完整 CI；
+- 收口动作：最终 head CI 全绿 -> PR #74 转 Ready -> 按最新 head squash merge；
+- PR #74 合并后：先做独立功能评估与使用体验评估，再决定下一批功能；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 12. 文档规则
