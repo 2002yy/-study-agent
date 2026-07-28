@@ -33,6 +33,9 @@ const STATUS_ORDER: EvidenceRef["status"][] = [
   "rejected",
 ];
 
+type CopyTarget = "adopted" | "diagnostics";
+type CopyState = "idle" | "success" | "error";
+
 function evidenceTypeLabel(type: EvidenceRef["type"]): string {
   if (type === "local") return "本地";
   if (type === "web_search") return "搜索";
@@ -69,8 +72,10 @@ export function formatEvidencePlainText(
   return lines.join("\n");
 }
 
-function copyText(text: string): void {
-  void navigator.clipboard?.writeText(text);
+function copyButtonLabel(target: CopyTarget, state: CopyState): string {
+  if (state === "success") return "已复制";
+  if (state === "error") return "复制失败";
+  return target === "diagnostics" ? "复制诊断" : "复制";
 }
 
 function EvidenceRow({
@@ -119,6 +124,8 @@ function EvidenceRow({
 export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
   const [open, setOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [copyResult, setCopyResult] = useState<{ target: CopyTarget; state: CopyState } | null>(null);
+  const [copyAnnouncement, setCopyAnnouncement] = useState("");
   const pedagogy = evidence.pedagogy;
   const rag = evidence.rag;
   const web = rag
@@ -141,10 +148,32 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
       recoveredResearchUsed,
   );
 
+  const copyEvidence = async (target: CopyTarget, text: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      setCopyResult({ target, state: "success" });
+      setCopyAnnouncement(target === "diagnostics" ? "证据诊断已复制" : "采用证据已复制");
+    } catch {
+      setCopyResult({ target, state: "error" });
+      setCopyAnnouncement("复制失败，请检查浏览器剪贴板权限后重试");
+    }
+    window.setTimeout(() => {
+      setCopyResult((current) => (current?.target === target ? null : current));
+      setCopyAnnouncement("");
+    }, 2400);
+  };
+
+  const stateFor = (target: CopyTarget): CopyState =>
+    copyResult?.target === target ? copyResult.state : "idle";
+
   if (!pedagogy && !hasDiagnostics) return null;
 
   return (
     <div className="evidence-trail">
+      <span className="visually-hidden" aria-live="polite" role="status">
+        {copyAnnouncement}
+      </span>
       <button
         className="evidence-toggle"
         onClick={() => setOpen((value) => !value)}
@@ -170,14 +199,14 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
               <div className="evidence-unified-header">
                 <span>回答采用的证据（{adoptedRefs.length} 条）</span>
                 <button
-                  className="ghost-action compact evidence-copy"
+                  className={`ghost-action compact evidence-copy${stateFor("adopted") === "error" ? " copy-error" : ""}`}
                   onClick={() =>
-                    copyText(formatEvidencePlainText(pedagogy, adoptedRefs))
+                    void copyEvidence("adopted", formatEvidencePlainText(pedagogy, adoptedRefs))
                   }
                   type="button"
                   title="复制采用证据"
                 >
-                  <Clipboard size={12} /> 复制
+                  <Clipboard size={12} /> {copyButtonLabel("adopted", stateFor("adopted"))}
                 </button>
               </div>
               <div className="evidence-primary-list">
@@ -214,16 +243,17 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
                     <strong>完整证据生命周期</strong>
                     {evidenceRefs.length ? (
                       <button
-                        className="ghost-action compact evidence-copy"
+                        className={`ghost-action compact evidence-copy${stateFor("diagnostics") === "error" ? " copy-error" : ""}`}
                         onClick={() =>
-                          copyText(
+                          void copyEvidence(
+                            "diagnostics",
                             formatEvidencePlainText(pedagogy, evidenceRefs, true),
                           )
                         }
                         type="button"
                         title="复制诊断详情"
                       >
-                        <Clipboard size={12} /> 复制诊断
+                        <Clipboard size={12} /> {copyButtonLabel("diagnostics", stateFor("diagnostics"))}
                       </button>
                     ) : null}
                   </div>
