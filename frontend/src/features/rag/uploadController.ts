@@ -11,6 +11,7 @@ import type {
   RagRunResponse,
 } from "../../types";
 import type { EvidenceKnowledgeDocumentListResponse } from "./evidenceEligibilityApi";
+import { validateRagUploadFiles } from "./uploadContract";
 
 type UploadControllerOptions = {
   activeRunId?: string;
@@ -58,14 +59,23 @@ export function useUploadController(options: UploadControllerOptions) {
 
   const upload = async (files: File[]) => {
     if (!files.length || isUploading) return;
-    setIsUploading(true);
+    const validation = validateRagUploadFiles(files);
     setLastUploadCount(files.length);
+    if (!validation.valid) {
+      setFlowPhase("failed");
+      setStatus("资料未上传，请修正文件后重新选择。");
+      setDetail(validation.message);
+      options.setOperationError(validation.message);
+      return;
+    }
+
+    setIsUploading(true);
     setFlowPhase("processing");
     setStatus(`正在解析 ${files.length} 份资料…`);
     setDetail("");
     options.setOperationError("");
     try {
-      const created = await createRagWriteRun(files, mode);
+      const created = await createRagWriteRun(validation.files, mode);
       const result = created.result as unknown as RagIndexResponse;
       setRun(created);
       options.setActiveRunId(created.id);
