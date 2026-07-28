@@ -68,8 +68,9 @@ test("invalid upload is explained and never reaches the upload endpoint", async 
     buffer: Buffer.from("a,b\n1,2"),
   });
 
-  await expect(page.getByText("资料未上传，请修正文件后重新选择。")).toBeVisible();
-  await expect(page.getByText(/unsupported\.csv：不支持该文件类型/)).toBeVisible();
+  const prompt = page.locator(".upload-learning-prompt");
+  await expect(prompt.getByText("资料未上传，请修正文件后重新选择。")).toBeVisible();
+  await expect(prompt.getByText(/unsupported\.csv：不支持该文件类型/)).toBeVisible();
   expect(fixture.unexpectedApiPaths).toEqual([]);
 
   const noOverflow = await noHorizontalOverflow(page);
@@ -105,7 +106,7 @@ test("clipboard denial remains visible on a recovered answer", async ({ page }, 
   await expect(copy).toBeVisible();
   await copy.click();
   await expect(copy).toContainText("复制失败");
-  await expect(page.getByRole("status")).toContainText("复制失败");
+  await expect(page.locator("main#chat [role='status']")).toContainText("复制失败");
   expect(fixture.unexpectedApiPaths).toEqual([]);
 
   const noOverflow = await noHorizontalOverflow(page);
