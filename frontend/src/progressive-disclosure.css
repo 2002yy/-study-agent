@@ -1,0 +1,48 @@
+.settings-advanced-main {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-strong));
+  overflow: hidden;
+}
+
+.settings-advanced-main > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settings-advanced-main > .field-hint {
+  margin: 0;
+  padding: 0 14px 12px;
+}
+
+.settings-advanced-main[open] > summary {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.settings-advanced-main .advanced-settings-section {
+  margin: 12px;
+  box-shadow: none;
+}
+
+.settings-advanced-main .advanced-settings-section + .advanced-settings-section {
+  margin-top: 0;
+}
+
+@media (max-width: 480px) {
+  .settings-advanced-main > summary {
+    min-height: 44px;
+  }
+
+  .settings-advanced-main .advanced-settings-section {
+    margin: 10px;
+    padding: 12px;
+  }
+}
