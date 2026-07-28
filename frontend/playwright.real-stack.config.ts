@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "real-stack.spec.ts",
+  testMatch: ["real-stack.spec.ts", "real-stack-recovery.spec.ts"],
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,
