@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 import type { SessionRow } from "../../types";
 import { updateSessionTitle } from "./sessionApi";
@@ -17,48 +17,102 @@ export type SessionNavigatorActions = {
   onSessionChanged?: () => Promise<void> | void;
 };
 
+type SessionNavigatorInteractionState = {
+  query: string;
+  groupMode: SessionGroupMode;
+  editingId: string | null;
+  editingTitle: string;
+  confirmArchiveId: string | null;
+  renameError: string;
+  isRenaming: boolean;
+};
+
+const INITIAL_INTERACTION_STATE: SessionNavigatorInteractionState = {
+  query: "",
+  groupMode: "time",
+  editingId: null,
+  editingTitle: "",
+  confirmArchiveId: null,
+  renameError: "",
+  isRenaming: false,
+};
+
+let sharedInteractionState = INITIAL_INTERACTION_STATE;
+const interactionListeners = new Set<() => void>();
+
+function interactionSnapshot(): SessionNavigatorInteractionState {
+  return sharedInteractionState;
+}
+
+function updateInteractionState(
+  patch:
+    | Partial<SessionNavigatorInteractionState>
+    | ((current: SessionNavigatorInteractionState) => Partial<SessionNavigatorInteractionState>),
+) {
+  const nextPatch = typeof patch === "function" ? patch(sharedInteractionState) : patch;
+  sharedInteractionState = { ...sharedInteractionState, ...nextPatch };
+  interactionListeners.forEach((listener) => listener());
+}
+
+function subscribeToInteractionState(listener: () => void) {
+  interactionListeners.add(listener);
+  return () => {
+    interactionListeners.delete(listener);
+    if (!interactionListeners.size) {
+      sharedInteractionState = INITIAL_INTERACTION_STATE;
+    }
+  };
+}
+
+/**
+ * One workspace-level interaction owner shared by the desktop sidebar and mobile drawer.
+ * Both render surfaces subscribe to this store, so search, rename and archive confirmation
+ * cannot diverge while they are mounted at the same time.
+ */
 export function useSessionNavigator(
   sessions: SessionRow[],
   activeSessionId: string | undefined,
   isSending: boolean,
   actions: SessionNavigatorActions,
 ) {
-  const [query, setQuery] = useState("");
-  const [groupMode, setGroupMode] = useState<SessionGroupMode>("time");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
-  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
-  const [renameError, setRenameError] = useState("");
-  const [isRenaming, setIsRenaming] = useState(false);
+  const interaction = useSyncExternalStore(
+    subscribeToInteractionState,
+    interactionSnapshot,
+    interactionSnapshot,
+  );
   const semanticSessions = sessions as SemanticSessionRow[];
   const grouped = useMemo(
     () =>
       groupSessions(
-        semanticSessions.filter((session) => matchesSessionSearch(session, query)),
-        groupMode,
+        semanticSessions.filter((session) =>
+          matchesSessionSearch(session, interaction.query),
+        ),
+        interaction.groupMode,
       ),
-    [semanticSessions, query, groupMode],
+    [semanticSessions, interaction.query, interaction.groupMode],
   );
 
   const beginRename = (session: SemanticSessionRow) => {
-    const sessionId = sessionIdFromRow(session);
-    setEditingId(sessionId);
-    setEditingTitle(session.manual_title || sessionTitle(session));
-    setRenameError("");
+    updateInteractionState({
+      editingId: sessionIdFromRow(session),
+      editingTitle: session.manual_title || sessionTitle(session),
+      renameError: "",
+    });
   };
 
   const saveRename = async (session: SemanticSessionRow) => {
-    if (isRenaming) return;
-    setIsRenaming(true);
-    setRenameError("");
+    if (interaction.isRenaming) return;
+    updateInteractionState({ isRenaming: true, renameError: "" });
     try {
-      await updateSessionTitle(sessionIdFromRow(session), editingTitle);
-      setEditingId(null);
+      await updateSessionTitle(sessionIdFromRow(session), interaction.editingTitle);
+      updateInteractionState({ editingId: null });
       await actions.onSessionChanged?.();
     } catch (error) {
-      setRenameError(error instanceof Error ? error.message : "会话标题保存失败");
+      updateInteractionState({
+        renameError: error instanceof Error ? error.message : "会话标题保存失败",
+      });
     } finally {
-      setIsRenaming(false);
+      updateInteractionState({ isRenaming: false });
     }
   };
 
@@ -72,35 +126,32 @@ export function useSessionNavigator(
     actions.onRestore?.(sessionId);
   };
 
-  const requestArchive = (sessionId: string) => {
-    setConfirmArchiveId(sessionId);
-  };
-
   const confirmArchive = () => {
-    if (!confirmArchiveId) return;
-    actions.onArchive?.(confirmArchiveId);
-    setConfirmArchiveId(null);
+    if (!interaction.confirmArchiveId) return;
+    actions.onArchive?.(interaction.confirmArchiveId);
+    updateInteractionState({ confirmArchiveId: null });
   };
 
   return {
     semanticSessions,
     grouped,
-    query,
-    setQuery,
-    groupMode,
-    setGroupMode,
-    editingId,
-    editingTitle,
-    setEditingTitle,
-    cancelRename: () => setEditingId(null),
+    query: interaction.query,
+    setQuery: (query: string) => updateInteractionState({ query }),
+    groupMode: interaction.groupMode,
+    setGroupMode: (groupMode: SessionGroupMode) => updateInteractionState({ groupMode }),
+    editingId: interaction.editingId,
+    editingTitle: interaction.editingTitle,
+    setEditingTitle: (editingTitle: string) => updateInteractionState({ editingTitle }),
+    cancelRename: () => updateInteractionState({ editingId: null, renameError: "" }),
     beginRename,
     saveRename,
-    isRenaming,
-    renameError,
-    confirmArchiveId,
-    requestArchive,
+    isRenaming: interaction.isRenaming,
+    renameError: interaction.renameError,
+    confirmArchiveId: interaction.confirmArchiveId,
+    requestArchive: (confirmArchiveId: string) =>
+      updateInteractionState({ confirmArchiveId }),
     confirmArchive,
-    cancelArchive: () => setConfirmArchiveId(null),
+    cancelArchive: () => updateInteractionState({ confirmArchiveId: null }),
     restore,
     activeSessionId,
   };
