@@ -37,7 +37,7 @@
 
 .restore-entry-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -74,6 +74,30 @@
   color: var(--muted);
   font-size: 10px;
   line-height: 1.4;
+}
+
+.restore-entry-more {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.restore-entry-more summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.restore-entry-more > p {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.secondary-entry-grid {
+  margin-top: 8px;
 }
 
 .restore-facts {
@@ -180,12 +204,6 @@
   padding: 8px 10px;
   color: var(--muted);
   font-size: 11px;
-}
-
-@media (max-width: 1100px) {
-  .restore-entry-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 720px) {

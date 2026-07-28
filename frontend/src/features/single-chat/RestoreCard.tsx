@@ -3,7 +3,6 @@ import {
   FileUp,
   FolderKanban,
   Globe2,
-  MessageCircleQuestion,
   Play,
   RotateCcw,
   SearchCheck,
@@ -21,7 +20,15 @@ import {
 } from "../sessions/sessionNavigation";
 import type { TaskIntent } from "../task/taskContract";
 
-const ENTRY_POINTS: Array<{
+const PRIMARY_ENTRY = {
+  intent: "learn" as const,
+  title: "系统学习",
+  description: "建立目标，逐步讲解并验证理解",
+  prompt: "我想系统学习：",
+  icon: BookOpen,
+};
+
+const SECONDARY_ENTRY_POINTS: Array<{
   intent: TaskIntent;
   title: string;
   description: string;
@@ -29,30 +36,16 @@ const ENTRY_POINTS: Array<{
   icon: typeof BookOpen;
 }> = [
   {
-    intent: "quick_answer",
-    title: "快速问答",
-    description: "直接解决一个具体问题",
-    prompt: "请直接回答这个问题：",
-    icon: MessageCircleQuestion,
-  },
-  {
-    intent: "learn",
-    title: "系统学习",
-    description: "建立目标，逐步讲解并验证理解",
-    prompt: "我想系统学习：",
-    icon: BookOpen,
-  },
-  {
     intent: "research",
     title: "联网研究",
-    description: "围绕一个问题检索、核对并整理来源",
+    description: "显式要求检索、核对并整理公开来源",
     prompt: "请联网研究：",
     icon: Globe2,
   },
   {
     intent: "project_execution",
     title: "项目推进",
-    description: "围绕当前项目目标、阻塞和验证继续执行",
+    description: "显式围绕项目目标、阻塞和验证继续执行",
     prompt: "我想推进这个项目：",
     icon: FolderKanban,
   },
@@ -117,41 +110,62 @@ export function RestoreCard({
   }
 
   if (!session?.has_completed_turns) {
+    const PrimaryIcon = PRIMARY_ENTRY.icon;
     return (
       <section className="restore-card new-user-restore-card" aria-label="开始新任务">
         <div className="restore-card-heading">
           <div>
             <span className="restore-card-kicker">从这里开始</span>
-            <h3>你现在想完成什么？</h3>
+            <h3>直接输入问题即可开始</h3>
           </div>
           <Sparkles size={18} />
         </div>
-        <div className="restore-entry-grid">
-          {ENTRY_POINTS.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <button
-                className="restore-entry"
-                key={entry.intent}
-                onClick={() => onSelectEntry(entry.intent, entry.prompt)}
-                type="button"
-              >
-                <Icon size={17} />
-                <span>
-                  <strong>{entry.title}</strong>
-                  <small>{entry.description}</small>
-                </span>
-              </button>
-            );
-          })}
+        <p className="restore-card-preview">
+          系统会根据你的问题自动判断是直接回答、学习、研究还是项目推进，无需先选择模式。
+        </p>
+        <div className="restore-entry-grid primary-entry-grid">
+          <button
+            className="restore-entry"
+            onClick={() => onSelectEntry(PRIMARY_ENTRY.intent, PRIMARY_ENTRY.prompt)}
+            type="button"
+          >
+            <PrimaryIcon size={17} />
+            <span>
+              <strong>{PRIMARY_ENTRY.title}</strong>
+              <small>{PRIMARY_ENTRY.description}</small>
+            </span>
+          </button>
           <button className="restore-entry" onClick={onUpload} type="button">
             <FileUp size={17} />
             <span>
               <strong>上传资料</strong>
-              <small>先把文档加入知识库，再围绕资料学习</small>
+              <small>先加入资料，再围绕自己的内容学习</small>
             </span>
           </button>
         </div>
+        <details className="restore-entry-more">
+          <summary>更多开始方式</summary>
+          <p>通常直接输入即可；只有需要显式固定任务类型时再选择。</p>
+          <div className="restore-entry-grid secondary-entry-grid">
+            {SECONDARY_ENTRY_POINTS.map((entry) => {
+              const Icon = entry.icon;
+              return (
+                <button
+                  className="restore-entry"
+                  key={entry.intent}
+                  onClick={() => onSelectEntry(entry.intent, entry.prompt)}
+                  type="button"
+                >
+                  <Icon size={17} />
+                  <span>
+                    <strong>{entry.title}</strong>
+                    <small>{entry.description}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </details>
       </section>
     );
   }

@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, Database, Loader2, Settings } from "lucide-react";
+import { BookOpen, CheckCircle2, Database, Loader2, Settings, SlidersHorizontal } from "lucide-react";
 
 import { RoleAvatar } from "../../components/RoleAvatar";
 import { StatusDot } from "../../components/StatusDot";
@@ -164,74 +164,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
       <div className="panel-header">
         <div>
           <h2>设置</h2>
-          <span>只保留会影响学习体验、资料使用和隐私的选项</span>
+          <span>默认只显示影响学习方式、资料使用、隐私和互动感受的选项</span>
         </div>
         <Settings size={18} />
       </div>
 
-      <section className="side-section">
-        <div className="section-title">
+      <section className="side-section" aria-labelledby="ordinary-learning-settings">
+        <div className="section-title" id="ordinary-learning-settings">
           <BookOpen size={15} />
           学习体验
         </div>
-        <label className="field-row">
-          <span>角色</span>
-          <select
-            disabled={isSending}
-            value={chatSettings.selectedRole}
-            onChange={(event) => updateChatSetting("selectedRole", event.target.value)}
-          >
-            {roleOptions.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <small className="field-hint">{roleDescriptions[chatSettings.selectedRole]}</small>
-        <div className="role-current">
-          <RoleAvatar fallback="assistant" roleId={chatSettings.selectedRole} />
-          <div>
-            <strong>{roleLabel(chatSettings.selectedRole)}</strong>
-            <span>{chatSettings.selectedRole === "auto" ? "按当前学习任务自动选择" : "当前手动指定角色"}</span>
-          </div>
-        </div>
-        <button
-          aria-pressed={keepCurrentRole}
-          className={`ghost-action compact ${keepCurrentRole ? "active" : ""}`}
-          disabled={chatSettings.selectedRole !== "auto" || isSending}
-          onClick={() => setKeepCurrentRole(!keepCurrentRole)}
-          type="button"
-        >
-          强制保持当前角色
-        </button>
-        <label className="field-row">
-          <span>本会话微调</span>
-          <textarea
-            className="session-instruction"
-            disabled={isSending}
-            onChange={(event) => setConversationInstruction(event.target.value)}
-            placeholder="例如：这次更重视原理推导，不要过快给结论。"
-            rows={3}
-            value={conversationInstruction}
-          />
-        </label>
-        <small className="field-hint">只影响当前会话，不修改角色原始人设或全局默认。</small>
-        {chatSettings.selectedRole !== "auto" ? (
-          <button className="ghost-action compact" onClick={onLoadRole} type="button">
-            <BookOpen size={15} />
-            查看角色人设
-          </button>
-        ) : null}
-        {roleDetail && roleDetail.id === chatSettings.selectedRole ? (
-          <div className="role-preview">
-            <strong>{roleDetail.label}</strong>
-            <p>{roleDetail.description || roleDetail.summary}</p>
-            <details>
-              <summary>完整提示词</summary>
-              <pre>{roleDetail.prompt}</pre>
-            </details>
-          </div>
-        ) : null}
-
         <label className="field-row">
           <span>学习方式</span>
           <select
@@ -245,34 +187,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </select>
         </label>
         <small className="field-hint">{modeDescriptions[chatSettings.selectedMode]}</small>
-
-        <label className="field-row">
-          <span>模型档位</span>
-          <select
-            disabled={isSending}
-            value={chatSettings.selectedModel}
-            onChange={(event) => updateChatSetting("selectedModel", event.target.value)}
-          >
-            {modelOptions.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <small className="field-hint">{modelDescriptions[chatSettings.selectedModel]}</small>
-
-        <label className="field-row">
-          <span>上下文深度</span>
-          <select
-            disabled={isSending}
-            value={chatSettings.contextMode}
-            onChange={(event) => updateChatSetting("contextMode", event.target.value)}
-          >
-            {contextModeOptions.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <small className="field-hint">{contextModeDescriptions[chatSettings.contextMode]}</small>
 
         <label className="field-row">
           <span>互动氛围</span>
@@ -289,10 +203,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <small className="field-hint">{relationshipDescriptions[chatSettings.relationshipMode]}</small>
       </section>
 
-      <section className="side-section">
-        <div className="section-title">
+      <section className="side-section" aria-labelledby="ordinary-material-settings">
+        <div className="section-title" id="ordinary-material-settings">
           <Database size={15} />
-          资料辅助
+          我的资料
         </div>
         <label className="toggle-row">
           <input
@@ -304,10 +218,112 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <span>回答时使用我的资料</span>
         </label>
         <small className="field-hint">开启后会按需检索已上传资料；关闭后只使用当前对话和模型知识。</small>
+      </section>
 
-        <details className="settings-advanced">
-          <summary>高级检索设置</summary>
-          <small className="field-hint">大多数情况下保持默认即可。这些设置只影响资料检索范围，不改变学习目标。</small>
+      <ExternalDataPolicySettings
+        runtimeSettings={snapshot.runtimeSettings}
+        disabled={isSending}
+        onSaved={refresh}
+      />
+
+      <details className="settings-advanced settings-advanced-main">
+        <summary>
+          <SlidersHorizontal size={15} />
+          高级设置
+        </summary>
+        <p className="field-hint">这些选项用于固定角色、模型和检索参数。大多数学习任务保持自动即可。</p>
+
+        <section className="side-section advanced-settings-section" aria-labelledby="advanced-conversation-settings">
+          <div className="section-title" id="advanced-conversation-settings">角色与运行方式</div>
+          <label className="field-row">
+            <span>角色</span>
+            <select
+              disabled={isSending}
+              value={chatSettings.selectedRole}
+              onChange={(event) => updateChatSetting("selectedRole", event.target.value)}
+            >
+              {roleOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <small className="field-hint">{roleDescriptions[chatSettings.selectedRole]}</small>
+          <div className="role-current">
+            <RoleAvatar fallback="assistant" roleId={chatSettings.selectedRole} />
+            <div>
+              <strong>{roleLabel(chatSettings.selectedRole)}</strong>
+              <span>{chatSettings.selectedRole === "auto" ? "按当前学习任务自动选择" : "当前手动指定角色"}</span>
+            </div>
+          </div>
+          <button
+            aria-pressed={keepCurrentRole}
+            className={`ghost-action compact ${keepCurrentRole ? "active" : ""}`}
+            disabled={chatSettings.selectedRole !== "auto" || isSending}
+            onClick={() => setKeepCurrentRole(!keepCurrentRole)}
+            type="button"
+          >
+            强制保持当前角色
+          </button>
+          <label className="field-row">
+            <span>本会话微调</span>
+            <textarea
+              className="session-instruction"
+              disabled={isSending}
+              onChange={(event) => setConversationInstruction(event.target.value)}
+              placeholder="例如：这次更重视原理推导，不要过快给结论。"
+              rows={3}
+              value={conversationInstruction}
+            />
+          </label>
+          <small className="field-hint">只影响当前会话，不修改角色原始人设或全局默认。</small>
+          {chatSettings.selectedRole !== "auto" ? (
+            <button className="ghost-action compact" onClick={onLoadRole} type="button">
+              <BookOpen size={15} />
+              查看角色人设
+            </button>
+          ) : null}
+          {roleDetail && roleDetail.id === chatSettings.selectedRole ? (
+            <div className="role-preview">
+              <strong>{roleDetail.label}</strong>
+              <p>{roleDetail.description || roleDetail.summary}</p>
+              <details>
+                <summary>完整提示词</summary>
+                <pre>{roleDetail.prompt}</pre>
+              </details>
+            </div>
+          ) : null}
+
+          <label className="field-row">
+            <span>模型档位</span>
+            <select
+              disabled={isSending}
+              value={chatSettings.selectedModel}
+              onChange={(event) => updateChatSetting("selectedModel", event.target.value)}
+            >
+              {modelOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <small className="field-hint">{modelDescriptions[chatSettings.selectedModel]}</small>
+
+          <label className="field-row">
+            <span>上下文深度</span>
+            <select
+              disabled={isSending}
+              value={chatSettings.contextMode}
+              onChange={(event) => updateChatSetting("contextMode", event.target.value)}
+            >
+              {contextModeOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <small className="field-hint">{contextModeDescriptions[chatSettings.contextMode]}</small>
+        </section>
+
+        <section className="side-section advanced-settings-section" aria-labelledby="advanced-retrieval-settings">
+          <div className="section-title" id="advanced-retrieval-settings">资料检索参数</div>
           <label className="field-row">
             <span>检索方式</span>
             <select
@@ -356,14 +372,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
               value={ragSettings.minScore}
             />
           </label>
-        </details>
-      </section>
-
-      <ExternalDataPolicySettings
-        runtimeSettings={snapshot.runtimeSettings}
-        disabled={isSending}
-        onSaved={refresh}
-      />
+        </section>
+      </details>
 
       <section className="side-section">
         <div className="status-line">
