@@ -262,7 +262,7 @@ test("real Markdown upload activates an index and grounds restored learning", as
     ),
   });
 
-  await expect(page.getByText(/资料已准备好/)).toBeVisible();
+  await expect(page.getByText("资料已准备好", { exact: true })).toBeVisible();
   await expect(page.getByText(/已索引 1 个文档、\d+ 个片段 · 索引版本 v1/)).toBeVisible();
 
   const status = await jsonFrom<RagStatus>(page, "/rag/status");
@@ -322,7 +322,15 @@ test("learning closure previews, hash-commits and restores before archive", asyn
   await expect(review.getByRole("heading", { name: "回顾这次学习" })).toBeVisible();
   await expect(review.getByText(CORRECT_EXPLANATION, { exact: true })).toBeVisible();
   await expect(
-    review.getByText("下一步练习二分查找边界迁移", { exact: true }),
+    review.getByText("继续当前会话时，可以自行决定下一步。", { exact: true }),
+  ).toBeVisible();
+  const previewDialog = page.getByRole("dialog", { name: "学习成果" });
+  await previewDialog.getByText("高级写入明细", { exact: true }).click();
+  const focusPreview = previewDialog
+    .locator(".memory-preview-item")
+    .filter({ hasText: "当前重点" });
+  await expect(
+    focusPreview.getByText("下一步练习二分查找边界迁移", { exact: true }),
   ).toBeVisible();
 
   const previewClosures = await jsonFrom<ClosureList>(
