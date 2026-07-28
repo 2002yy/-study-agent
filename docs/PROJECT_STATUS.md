@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A8 已进入 `main`；独立代码、CI 与浏览器产物评估已完成，下一步只补真实全栈门禁与可审查体验证据。**  
-> 当前代码切片：`agent/independent-function-ux-evaluation`，仅记录评估结论与下一阶段门禁。
+> 当前主线：**P0-A1–P0-A8 与独立评估已进入 `main`；P0-E1 首个真实全栈切片已通过实现 head 全量门禁，正在状态同步后重跑最终 CI。**  
+> 当前代码切片：`p0-e1/real-stack-browser-gates`，Draft PR #77。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -51,7 +51,8 @@
 - PR #71 `cca4bdfac775909956f90aeaddc5bcfc96597e12`，CI #1481；
 - PR #72 `3796bfe3bbc7c83feac9eeb9f195803a5ed57228`，最终 CI #1496；
 - PR #73 `676fe23a0f26d500712b71c6e175d99d953f1e80`，最终 CI #1520；
-- PR #74 `911e83769c1b53849fe21772099bec0323357180`，最终 head CI #1546。
+- PR #74 `911e83769c1b53849fe21772099bec0323357180`，最终 head CI #1546；
+- PR #76 `267969d92f0eaed4d6b2dc6b631a5380dd86f591`，最终 CI #1554。
 
 ## 3. 当前真实指标
 
@@ -147,27 +148,27 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 
 ## 8. 独立功能与使用体验评估结论
 
-本轮独立检查覆盖当前 `main` 的架构 owner、持久化模型、生产路径测试、Playwright 旅程、CI #1546 及其浏览器/RAG产物。没有使用真实 Provider 密钥，也没有可供人工复核的成功旅程截图或视频，因此本节只确认已有证据能够支持的结论，不把自动化通过扩张为“真实产品体验已经完成”。
+本轮独立检查覆盖当时 `main` 的架构 owner、持久化模型、生产路径测试、Playwright 旅程、CI #1546 及其浏览器/RAG 产物。评估后由 PR #76 将下一阶段收敛为 P0-E1 真实全栈门禁和 P0-E2 可审查体验证据。
 
 ### 8.1 成熟度判断
 
 - **存在：通过。** 开始任务、持续学习、资料学习、联网研究、源码学习、理解验证、学习结束、刷新恢复和失败恢复均已有生产 owner 或明确的既有 owner 扩展边界。
-- **可用：有条件通过。** desktop / 390px 的固定 API fixture 旅程能够完成核心操作，首次回答无强制配置，关键失败有可见恢复路径。
-- **稳定：在确定性测试条件下通过。** CI #1546 的 pytest、RAG K1、前端单测、构建和 34/34 Playwright 全绿；committed truth、失败/中断不推进、retry/continuation 单次提交均有回归。
-- **达到产品目标：尚未证明。** 浏览器 E2E 只启动 Vite 并拦截 API；后端生产路径测试使用 TestClient 和受控 evaluator/provider。两层分别可信，但尚无 React -> FastAPI -> SQLite -> stream/recovery 的完整浏览器门禁，也没有真实 Provider 教学与 claim 质量基线。
+- **可用：有条件通过。** 固定 fixture 旅程覆盖完整产品表面；P0-E1 第一切片进一步证明首次系统学习和理解验证可经过真实 React、FastAPI 与 SQLite。
+- **稳定：在确定性测试条件下通过。** CI #1577 的 pytest、RAG K1、静态门禁、前端单测/构建、34/34 fixture Playwright 与 4/4 real-stack Playwright 全绿。
+- **达到产品目标：仍未完全证明。** 首次学习与正确/空泛理解已有真实全栈证明，但上传解析/索引、closure、stream continuation、failed retry 和成功体验人工审查仍未完成；真实 Provider 教学与 claim 质量也尚未测量。
 
 ### 8.2 核心闭环逐项判断
 
 | 闭环 | 当前结论 | 主要限制 |
 |---|---|---|
-| 首次开始 | 可用、稳定 | 仅 fixture 浏览器旅程；键盘到输入框容许上限仍过宽 |
-| 返回与持续学习 | 可用 | “继续这里”先填入提示，再由用户发送；当前指标只记为一次选择，未完整反映动作成本 |
-| 上传资料学习 | 可用 | 浏览器层未走真实解析、revision、索引激活和失败不切换链路 |
+| 首次开始 | 真实全栈第一切片通过 | desktop / 390px 均从 UI 进入 FastAPI、application service 与 SQLite，并通过刷新恢复 |
+| 返回与持续学习 | 基础可用 | “继续这里”先填入提示，再由用户发送；尚未纳入真实全栈动作成本采集 |
+| 上传资料学习 | 可用 | 浏览器层尚未走真实解析、revision、索引激活和失败不切换链路 |
 | 联网研究 | 基础恢复可用 | multi-step research 与完整 cancel propagation 仍为 partial owner |
 | 源码学习 | 展示与恢复可用 | GitHub replay 的 symbol mapping 与 CI association 精度仍不足以证明稳定理解源码关系 |
-| 理解验证 | 真值边界稳定 | 当前生产路径 E2E 注入受控 semantic evaluator；真实 Provider 质量尚未测量 |
-| 学习结束 | review-first 与 hash-confirm 边界成立 | 浏览器旅程没有覆盖保存后刷新、重新进入和长期记忆实际恢复 |
-| 刷新/失败/中断恢复 | 基础路径稳定 | 缺少同一真实全栈运行中的连续故障注入与恢复证明 |
+| 理解验证 | 首个真实全栈切片通过 | 空泛“懂了”明确 reject 且不进入 transfer；正确推理进入 committed truth 并刷新恢复；真实 Provider 质量尚未测量 |
+| 学习结束 | review-first 与 hash-confirm 边界成立 | 浏览器旅程尚未覆盖保存后刷新、重新进入和长期记忆实际恢复 |
+| 刷新/失败/中断恢复 | 首次学习刷新恢复已通过 | 仍缺同一真实全栈运行中的 interruption continuation 与 failed retry 证明 |
 
 ### 8.3 P0 评估缺口
 
@@ -175,11 +176,21 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 
 #### P0-E1：真实全栈确定性浏览器门禁
 
-- CI 同时启动 React、FastAPI 与临时 SQLite；
-- Provider、Embedding 和外部网络使用服务端 fake gateway，浏览器不得通过 `page.route` 伪造核心业务 API；
-- 至少覆盖首次回答、返回学习、上传并学习、正确/错误理解验证、学习结束并刷新恢复、stream interruption continuation、failed retry；
-- 断言浏览器展示、API 返回、SQLite durable truth 和重新加载结果一致；
-- 失败、partial、planned 状态不得覆盖 committed truth。
+已完成第一切片：
+
+- CI 同时启动 React/Vite、FastAPI/Uvicorn 与临时 SQLite；
+- 浏览器不通过 `page.route` 伪造核心业务 API；只有 Provider、Memory、RAG 和外部网络 gateway 使用服务端 deterministic fake；
+- desktop / 390px 覆盖首次系统学习、SQLite durable truth、刷新恢复、空泛理解 reject、正确推理 commit 与再次刷新恢复；
+- 浏览器展示、服务端状态、SQLite truth 和重新加载结果一致；
+- 全量既有门禁没有回退。
+
+剩余切片：
+
+1. 真实文件上传 -> 解析 -> revision -> 索引激活 -> 基于资料开始学习；
+2. learning closure preview -> hash-confirm commit -> 刷新/归档/重新进入；
+3. stream interruption -> continuation，确保 partial 不覆盖 committed truth；
+4. failed turn -> retry -> parent superseded，确保只提交一次；
+5. 在现有 WebLookup owner 上补必要的真实研究恢复链路，不扩张第二套研究系统。
 
 #### P0-E2：可审查的成功体验证据
 
@@ -196,7 +207,7 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 1. P0-E1 / P0-E2 通过后，解冻真实 Provider AnswerClaim replay，但保持 record-only，不接生产 ChatTurn；
 2. 根据真实 replay 暴露的问题决定先做 claim producer 还是 RAG-K1f / K2，不能依据 deterministic gold producer 的 1.0 自测分数直接接生产；
 3. 加强 GitHub replay 的 symbol mapping、CI association precision 和 partial-result 解释，再讨论源码学习的自动推进；
-4. 补 closure commit 后刷新/跨会话恢复，以及 multi-step research/cancel 的完整生命周期门禁。
+4. 补 multi-step research/cancel 的完整生命周期门禁。
 
 **P2：**
 
@@ -204,16 +215,43 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 2. 清理 README 中 Streamlit“已移除”与“兼容入口仍存在”的表述差异，再决定 legacy 代码删除；
 3. 校准 Golden Journey 指标定义，使“点击、决策、surface、恢复”能够跨用例稳定比较。
 
-## 9. 评估后的阶段决策
+## 9. P0-E1 第一切片实现结果
 
-1. **未发现由现有自动化证据能够确认的普通学习闭环功能级 P0 阻断。**
-2. **暂不宣布产品闭环完成。** P0-E1 与 P0-E2 是下一阶段唯一优先工作，属于评估基础设施和验收证据，不新增顶级产品表面。
-3. P0-E1 / P0-E2 通过后，下一项优先解冻真实 Provider AnswerClaim replay；首次运行只产出基线、错误样本、延迟和成本，不修改生产 prompt、ChatTurn 或学习真值。
+PR #77 在不接真实外部 Provider 的前提下建立了首个真实组合门禁：
+
+```text
+Playwright browser
+-> Vite proxy
+-> production FastAPI routes
+-> ExternalDataPolicyChatService / TaskContract / pedagogy
+-> production SQLite repositories
+-> session reload and UI restoration
+```
+
+- 新增 `tools.real_stack_test_server`，只替换外部模型、Memory、RAG 与网络 gateway；生产 route、application service、transaction 和 repository 继续执行；
+- 新增独立 Playwright real-stack 配置，同时启动 Uvicorn 与 Vite；默认 fixture 套件明确排除该 spec，避免两套 owner 混跑；
+- 每个用例通过 test-only reset 清空临时数据库、WAL/SHM 和导出目录，desktop / mobile 不共享残留状态；
+- 2 条旅程在 desktop / 390px 各执行一次，共 4/4：首次学习并刷新；空泛理解 reject 后正确推理 commit 并刷新；
+- CI #1577 的 real-stack 日志为 `4 passed (11.8s)`，同时全部既有门禁全绿。
+
+真实全栈门禁还暴露并修复了一个此前 fixture 隐藏的生产缺口：`TaskContract` 已识别 `learn`，但“带我系统学习……”在自动学习方式下仍可能被通用路由选为“普通”，从而只进入 `direct_answer`，没有建立学习目标。当前新增高优先级 `system_learning` 路由规则，使自动方式进入苏格拉底协议；用户显式选择“直接讲解”时仍保留“普通”，没有剥夺手动控制。
+
+边界：
+
+- 本切片没有接入真实 Provider、Embedding 或外部网络；
+- 没有修改 AnswerClaim 生产接入、RAG 排序、Memory 写入合同或新建顶级产品表面；
+- 这只是 P0-E1 第一切片，不代表整个真实学习闭环已经封板。
+
+## 10. 评估后的阶段决策
+
+1. **P0-E1 第一切片已通过实现 head 门禁，并修复了一个真实默认路由 P0 缺口。**
+2. **暂不宣布产品闭环完成。** 下一顺序为 P0-E1 上传/closure 切片 -> interruption/retry 切片 -> P0-E2 可审查体验证据。
+3. P0-E1 / P0-E2 全部通过后，下一项才解冻真实 Provider AnswerClaim replay；首次运行只产出基线、错误样本、延迟和成本，不修改生产 prompt、ChatTurn 或学习真值。
 4. 生产 claim producer、claim UI 在真实 replay 证明 schema、claim/evidence link 和 leakage 质量前继续冻结。
-5. 自适应 LearningPlan 与 G10-D 可执行代理继续冻结；当前系统最缺的不是更多自动规划，而是对现有闭环的真实证明。
+5. 自适应 LearningPlan 与 G10-D 可执行代理继续冻结；当前系统最缺的仍不是更多自动规划，而是对现有闭环的真实证明。
 6. 若 Provider replay 显示主要失败来自检索或证据供给，先推进 RAG-K1f / K2；若检索充足而 claim 提取失败，再推进 producer。不得并行扩张两条生产路径。
 
-## 10. 下一阶段完成标准
+## 11. 下一阶段完成标准
 
 - 浏览器通过真实 FastAPI 与临时 SQLite 完成核心学习闭环，核心业务 API 无 `page.route` fixture；
 - 至少一条正确理解和一条错误/空泛理解从 UI 发起，并在刷新后验证 committed truth；
@@ -223,17 +261,19 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 - 人工试玩明确记录阻断、困惑点和可接受项；
 - 全量既有 CI 不回退；评估结论再次写回本文件后，才允许解冻 Provider replay。
 
-## 11. 当前冻结与执行状态
+## 12. 当前冻结与执行状态
 
-- `main` 当前 P0-A8 merge SHA：`911e83769c1b53849fe21772099bec0323357180`；
-- PR #74 已 closed / merged，最终 head `31bd2ff17178eb60d7cc6e4cbb83763250f8126c`，最终 CI #1546 完整全绿；
-- 当前评估分支：`agent/independent-function-ux-evaluation`；
-- 下一实现顺序：P0-E1 真实全栈确定性浏览器门禁 -> P0-E2 可审查体验证据；
+- `main` 当前独立评估 merge SHA：`267969d92f0eaed4d6b2dc6b631a5380dd86f591`；
+- PR #76 已 closed / merged，CI #1554 完整全绿；
+- 当前实现分支：`p0-e1/real-stack-browser-gates`，Draft PR #77；
+- 实现 head `e7d695cc89f029c3edfc2c03c54dbd2948a598b0` 的 CI #1577 完整全绿；
+- 当前状态同步提交后必须对最新 head 重跑完整 CI，未全绿前 PR #77 保持 Draft；
+- 下一实现顺序：真实上传/索引与 closure -> interruption continuation 与 failed retry -> P0-E2；
 - 真实 Provider claim replay 在 P0-E1 / P0-E2 通过前继续冻结；
 - 生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略继续保持：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
-## 12. 文档规则
+## 13. 文档规则
 
 - 当前状态只更新本文件；status-only 更新留在 active branch；
 - `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；`STATE_MODEL.md` 只维护稳定数据模型；
