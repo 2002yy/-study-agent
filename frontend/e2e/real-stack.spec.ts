@@ -138,7 +138,11 @@ test("bare understanding is rejected before a reasoned claim commits", async ({
     assistant_message: BARE_REPLY,
   });
   expect(rejected.thread.learning_state.confirmed_points ?? []).toEqual([]);
-  expect(rejected.thread.learning_state.payload?.state_advance_blocked).toBe(true);
+  expect(rejected.thread.learning_state.phase).not.toBe("transfer");
+  expect(rejected.thread.learning_state.payload?.pedagogy_evaluation).toMatchObject({
+    final_decision: "reject",
+    reasons: ["understanding_asserted_without_reasoning"],
+  });
 
   await send(page, CORRECT_EXPLANATION);
   await expect(assistantMessage(page, CORRECT_REPLY)).toBeVisible();
