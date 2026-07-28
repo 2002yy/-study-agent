@@ -81,7 +81,7 @@ describe("SettingsPanel progressive disclosure", () => {
     expect(screen.queryByRole("combobox", { name: "模型档位" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "上下文深度" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "检索方式" })).toBeNull();
-    expect(screen.queryByLabelText("本会话微调")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "本会话微调" })).toBeNull();
   });
 
   it("keeps all existing engineering controls reachable after opening advanced settings", () => {
@@ -90,7 +90,7 @@ describe("SettingsPanel progressive disclosure", () => {
 
     expect(screen.getByRole("combobox", { name: "角色" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "强制保持当前角色" })).toBeTruthy();
-    expect(screen.getByLabelText("本会话微调")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "本会话微调" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "模型档位" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "上下文深度" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "检索方式" })).toBeTruthy();
