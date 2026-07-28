@@ -1,8 +1,8 @@
 """Deterministic FastAPI entrypoint for real-stack browser gates.
 
 This module keeps the production HTTP routes, application services and SQLite
-repositories intact while replacing only external model, memory and retrieval
-gateways. It must never be used as the normal application entrypoint.
+repositories intact while replacing only external model and network gateways.
+It must never be used as the normal application entrypoint.
 """
 
 from __future__ import annotations
@@ -22,6 +22,9 @@ E2E_ROOT = Path(
         str(ROOT / "frontend" / "test-results" / "real-stack-runtime"),
     )
 ).resolve()
+RAG_INDEX_PATH = E2E_ROOT / "rag_index.json"
+RAG_UPLOAD_DIR = E2E_ROOT / "rag_uploads"
+MEMORY_DIR = E2E_ROOT / "memory"
 
 if os.getenv("STUDY_AGENT_E2E_RESET", "").strip() == "1":
     shutil.rmtree(E2E_ROOT, ignore_errors=True)
@@ -36,28 +39,45 @@ os.environ.setdefault(
 os.environ.setdefault(
     "STUDY_AGENT_ARCHIVE_EXPORT_DIR", str(E2E_ROOT / "archive")
 )
+os.environ.setdefault("RAG_VECTOR_BACKEND", "local")
+os.environ.setdefault("RAG_EMBEDDING_PROFILE", "local_hash")
+os.environ.setdefault("RAG_EMBEDDING_PROVIDER", "local_hash")
 
 from fastapi import HTTPException  # noqa: E402
 
+from src import api as api_package  # noqa: E402
+from src import memory as memory_module  # noqa: E402
+from src import memory_writer as memory_writer_module  # noqa: E402
 from src.api.app import app  # noqa: E402
+from src.application import memory_service as memory_service_module  # noqa: E402
 from src.application.chat_service import ChatDependencies  # noqa: E402
+from src.application.learning_closure_service import (  # noqa: E402
+    LearningClosureService,
+)
 from src.application.policy_chat_service import (  # noqa: E402
     ExternalDataPolicyChatService,
 )
 from src.application.runtime_repository import (  # noqa: E402
     get_chat_service,
+    get_learning_closure_repository,
+    get_learning_closure_service,
+    get_memory_service,
+    get_pedagogy_eval_repository,
     get_runtime_repository,
+    get_session_service,
     reset_runtime_repository_cache,
     runtime_database_path,
 )
 from src.context_builder import build_messages  # noqa: E402
 from src.mode_manager import RuntimeModes  # noqa: E402
 from src.pedagogy.evaluation import SemanticEvaluation  # noqa: E402
+from src.rag import index as rag_index_module  # noqa: E402
 from src.task_contract import (  # noqa: E402
     TaskAwarePedagogyEngine,
     TaskAwarePedagogyEvaluationService,
     route_request_with_task_contract,
 )
+from src.tools.local_knowledge import retrieve_local_knowledge  # noqa: E402
 from src.tools.web_agent import WebToolTrace  # noqa: E402
 
 FIRST_REPLY = (
@@ -66,23 +86,43 @@ FIRST_REPLY = (
 )
 BARE_REPLY = "只说“懂了”还不足以确认掌握。请用因果关系解释候选区间怎样变化？"
 CORRECT_REPLY = "这段解释已经通过理解验证；下一步把减半过程迁移到查找次数估算。"
+MATERIAL_REPLY = (
+    "根据刚上传的资料，目标值大于中点值时，左边界更新为 mid + 1。"
+    "请解释为什么不能仍把 mid 留在候选区间。"
+)
 
 
-class EmptyRagResult:
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "status": "skipped",
-            "query": "",
-            "retrieval_mode": "",
-            "reason": "real_stack_deterministic_gateway",
-            "context": "",
-            "sources": "",
-            "result_count": 0,
-            "results": [],
-            "debug": {},
-            "attempts": [],
-            "rewritten_query": "",
-        }
+def _test_runtime_modes() -> RuntimeModes:
+    return RuntimeModes(
+        memory_mode="confirm_write",
+        safe_mode=False,
+        performance_mode="fast",
+        entry_mode="single",
+    )
+
+
+# Isolate every filesystem owner used by the real upload and memory workflows.
+api_package.RAG_UPLOAD_DIR = RAG_UPLOAD_DIR
+api_package.MEMORY_DIR = MEMORY_DIR
+api_package.load_runtime_modes = _test_runtime_modes
+api_package.is_memory_write_allowed = lambda _modes: True
+memory_module.MEMORY_DIR = MEMORY_DIR
+rag_index_module.DEFAULT_RAG_INDEX_PATH = RAG_INDEX_PATH
+memory_service_module.load_runtime_modes = _test_runtime_modes
+memory_service_module.is_memory_write_allowed = lambda _modes: True
+memory_writer_module.load_runtime_modes = _test_runtime_modes
+memory_writer_module.is_memory_write_allowed = lambda _modes: True
+memory_writer_module.MEMORY_TARGETS = {
+    "index": MEMORY_DIR / "index.md",
+    "summary": MEMORY_DIR / "summary.md",
+    "archive_summary": MEMORY_DIR / "archive_summary.md",
+    "progress": MEMORY_DIR / "progress.md",
+    "current_focus": MEMORY_DIR / "current_focus.md",
+    "learner_profile": MEMORY_DIR / "learner_profile.md",
+    "project_context": MEMORY_DIR / "project_context.md",
+    "revision_notes": MEMORY_DIR / "revision_notes.md",
+    "session_archive": MEMORY_DIR / "session_archive.md",
+}
 
 
 class DeterministicSemanticEvaluator:
@@ -130,6 +170,8 @@ def _last_user_message(messages: list[dict[str, Any]]) -> str:
 
 def _reply_for(messages: list[dict[str, Any]]) -> str:
     user_input = _last_user_message(messages).strip()
+    if "刚上传" in user_input and "左边界" in user_input:
+        return MATERIAL_REPLY
     if user_input.rstrip("。！？.! ") == "懂了":
         return BARE_REPLY
     compact = user_input.lower().replace(" ", "")
@@ -164,17 +206,61 @@ async def _async_stream_chat(
         yield chunk
 
 
+def _real_stack_retrieve(
+    query: str,
+    *,
+    enabled: bool = True,
+    force: bool = False,
+    top_k: int = 3,
+    min_score: float = 0.01,
+    retrieval_mode: str = "hybrid",
+    **_kwargs: Any,
+):
+    return retrieve_local_knowledge(
+        query,
+        enabled=enabled,
+        force=force,
+        index_path=RAG_INDEX_PATH,
+        top_k=top_k,
+        min_score=min_score,
+        retrieval_mode=retrieval_mode,
+    )
+
+
+def _closure_generator(
+    structured_input: dict[str, Any],
+    _memory_context: dict[str, str],
+    _role: str,
+    _mode: str,
+    **_kwargs: Any,
+) -> dict[str, str]:
+    committed = structured_input.get("committed_learning_state")
+    committed_state = committed if isinstance(committed, dict) else {}
+    confirmed = [
+        str(item).strip()
+        for item in committed_state.get("confirmed_points", [])
+        if str(item).strip()
+    ]
+    unresolved = str(committed_state.get("unresolved_gap") or "").strip()
+    progress = confirmed[-1] if confirmed else "本次没有足够证据形成新的确认结论"
+    return {
+        "progress_update": f"已确认：{progress}",
+        "learner_profile_update": "本轮无需更新",
+        "current_focus_update": "下一步练习二分查找边界迁移",
+        "revision_notes_update": unresolved or "继续解释左右边界更新时机",
+        "session_archive_update": "完成二分查找复杂度理解验证并保留后续边界练习",
+        "role_updates": "本轮无需更新",
+    }
+
+
 @lru_cache(maxsize=1)
 def _real_stack_chat_service() -> ExternalDataPolicyChatService:
     dependencies = ChatDependencies(
-        load_runtime_modes=lambda: RuntimeModes(
-            performance_mode="fast",
-            entry_mode="single",
-        ),
+        load_runtime_modes=_test_runtime_modes,
         read_memory_bundle=lambda _context_mode: {},
         build_role_prompt=lambda role, **_kwargs: f"role:{role}",
         route_request=route_request_with_task_contract,
-        retrieve_local_knowledge=lambda *_args, **_kwargs: EmptyRagResult(),
+        retrieve_local_knowledge=_real_stack_retrieve,
         build_messages=build_messages,
         chat=_chat,
         stream_chat=_stream_chat,
@@ -189,7 +275,20 @@ def _real_stack_chat_service() -> ExternalDataPolicyChatService:
     return ExternalDataPolicyChatService(get_runtime_repository(), dependencies)
 
 
+@lru_cache(maxsize=1)
+def _real_stack_closure_service() -> LearningClosureService:
+    return LearningClosureService(
+        get_learning_closure_repository(),
+        get_session_service(),
+        get_memory_service(),
+        evaluation_repository=get_pedagogy_eval_repository(),
+        generator=_closure_generator,
+        memory_bundle_loader=lambda _mode: {},
+    )
+
+
 app.dependency_overrides[get_chat_service] = _real_stack_chat_service
+app.dependency_overrides[get_learning_closure_service] = _real_stack_closure_service
 
 
 def _remove_runtime_database() -> None:
@@ -198,16 +297,33 @@ def _remove_runtime_database() -> None:
         Path(f"{database_path}{suffix}").unlink(missing_ok=True)
 
 
+def _reset_filesystem_state() -> None:
+    RAG_INDEX_PATH.unlink(missing_ok=True)
+    for directory in (
+        E2E_ROOT / "current",
+        E2E_ROOT / "archive",
+        RAG_UPLOAD_DIR,
+        MEMORY_DIR,
+    ):
+        shutil.rmtree(directory, ignore_errors=True)
+    memory_module._read_text_file_cached.cache_clear()
+
+
 @app.post("/__e2e__/reset")
 def reset_real_stack_state() -> dict[str, Any]:
     """Reset all durable test state between isolated browser journeys."""
 
     _real_stack_chat_service.cache_clear()
+    _real_stack_closure_service.cache_clear()
     reset_runtime_repository_cache()
     _remove_runtime_database()
-    for directory in (E2E_ROOT / "current", E2E_ROOT / "archive"):
-        shutil.rmtree(directory, ignore_errors=True)
-    return {"reset": True, "database_path": str(runtime_database_path())}
+    _reset_filesystem_state()
+    return {
+        "reset": True,
+        "database_path": str(runtime_database_path()),
+        "rag_index_path": str(RAG_INDEX_PATH),
+        "memory_dir": str(MEMORY_DIR),
+    }
 
 
 @app.get("/__e2e__/state/{session_id}")
@@ -222,4 +338,5 @@ def read_real_stack_state(session_id: str) -> dict[str, Any]:
         "database_path": str(runtime_database_path()),
         "thread": asdict(thread),
         "turns": [asdict(turn) for turn in repository.list_chat_turns(session_id)],
+        "summary": get_session_service().summary_payload(session_id),
     }
