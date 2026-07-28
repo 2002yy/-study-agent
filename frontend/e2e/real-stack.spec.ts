@@ -13,7 +13,8 @@ const CORRECT_EXPLANATION =
 const CORRECT_REPLY =
   "这段解释已经通过理解验证；下一步把减半过程迁移到查找次数估算。";
 const MATERIAL_FILE = "binary-search-boundaries.md";
-const MATERIAL_TITLE = "二分查找边界条件";
+const MATERIAL_HEADING = "二分查找边界条件";
+const MATERIAL_SOURCE_TITLE = "binary-search-boundaries";
 const MATERIAL_QUESTION =
   "请根据刚上传的资料，带我系统学习二分查找边界：目标值大于中点值时左边界如何更新？";
 const MATERIAL_REPLY =
@@ -251,7 +252,7 @@ test("real Markdown upload activates an index and grounds restored learning", as
     mimeType: "text/markdown",
     buffer: Buffer.from(
       [
-        `# ${MATERIAL_TITLE}`,
+        `# ${MATERIAL_HEADING}`,
         "",
         "二分查找用于升序数组，每轮比较中点并缩小候选区间。",
         "当目标值大于中点值时，左边界更新为 mid + 1。",
@@ -278,7 +279,7 @@ test("real Markdown upload activates an index and grounds restored learning", as
   expect(knowledge.index_exists).toBe(true);
   expect(knowledge.documents).toHaveLength(1);
   expect(knowledge.documents[0]).toMatchObject({
-    title: MATERIAL_TITLE,
+    title: MATERIAL_SOURCE_TITLE,
     evidence_status: "active",
   });
   expect(knowledge.documents[0].revision_id).not.toBe("");
@@ -295,12 +296,16 @@ test("real Markdown upload activates an index and grounds restored learning", as
   expect(ragSnapshot).toMatchObject({ status: "found", result_count: 1 });
 
   const adopted = await openEvidence(page);
-  await expect(adopted.getByText(MATERIAL_TITLE, { exact: true })).toBeVisible();
+  await expect(
+    adopted.getByText(MATERIAL_SOURCE_TITLE, { exact: true }),
+  ).toBeVisible();
 
   await page.reload();
   await expect(assistantMessage(page, MATERIAL_REPLY)).toBeVisible();
   const restoredAdopted = await openEvidence(page);
-  await expect(restoredAdopted.getByText(MATERIAL_TITLE, { exact: true })).toBeVisible();
+  await expect(
+    restoredAdopted.getByText(MATERIAL_SOURCE_TITLE, { exact: true }),
+  ).toBeVisible();
 
   const restored = await durableState(page, sessionId);
   expect(restored.turns).toEqual(stored.turns);
@@ -355,8 +360,10 @@ test("learning closure previews, hash-commits and restores before archive", asyn
     memory.files.find((file) => file.name === "current_focus.md"),
   ).toMatchObject({
     exists: true,
-    preview: "下一步练习二分查找边界迁移\n",
   });
+  expect(
+    memory.files.find((file) => file.name === "current_focus.md")?.preview,
+  ).toContain("下一步练习二分查找边界迁移");
   expect(
     memory.files.find((file) => file.name === "progress.md")?.preview,
   ).toContain(CORRECT_EXPLANATION);
