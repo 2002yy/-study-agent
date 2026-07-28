@@ -29,6 +29,7 @@ import type {
   MemoryStatusResponse,
 } from "../../types";
 import { EvidenceTrail } from "../evidence/EvidenceTrail";
+import { RAG_UPLOAD_HELP_TEXT } from "../rag/uploadContract";
 import { roleLabel } from "../roles/roleCatalog";
 import type { SemanticSessionRow } from "../sessions/sessionNavigation";
 import {
@@ -77,7 +78,7 @@ type ChatPanelProps = {
   onContinueInterruptedReply: () => void;
   onRetry: () => void;
   onAbandonInterruptedReply: () => Promise<void> | void;
-  onCopyInterruptedReply: () => void;
+  onCopyInterruptedReply: () => Promise<void> | void;
   onUploadClick: () => void;
   onSearchSources: () => void;
   isSearching: boolean;
@@ -99,6 +100,8 @@ type ChatPanelProps = {
   onRetryResearch: () => void;
   onResumeResearch: () => void;
 };
+
+type CopyState = "idle" | "success" | "error";
 
 export function ChatPanel(props: ChatPanelProps) {
   const {
@@ -136,7 +139,9 @@ export function ChatPanel(props: ChatPanelProps) {
   const conversationRef = useRef<HTMLElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [messageCopy, setMessageCopy] = useState<{ index: number; state: CopyState } | null>(null);
+  const [interruptedCopy, setInterruptedCopy] = useState<CopyState>("idle");
+  const [copyAnnouncement, setCopyAnnouncement] = useState("");
   const [taskIntentOverride, setTaskIntentOverride] = useState<"" | TaskIntent>("");
   const taskContract = taskContractFromRoute(lastChat?.route);
   const closureLabel = closureActionLabel(taskContract);
@@ -157,6 +162,17 @@ export function ChatPanel(props: ChatPanelProps) {
           ),
       );
 
+  const resetCopyFeedbackLater = (kind: "message" | "interrupted", index?: number) => {
+    window.setTimeout(() => {
+      if (kind === "message") {
+        setMessageCopy((current) => (current?.index === index ? null : current));
+      } else {
+        setInterruptedCopy("idle");
+      }
+      setCopyAnnouncement("");
+    }, 2400);
+  };
+
   const updateScrollState = () => {
     const element = conversationRef.current;
     if (!element) return;
@@ -171,14 +187,27 @@ export function ChatPanel(props: ChatPanelProps) {
 
   const copyMessage = async (content: string, index: number) => {
     try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(content);
-      setCopiedMessageIndex(index);
-      window.setTimeout(() => {
-        setCopiedMessageIndex((current) => (current === index ? null : current));
-      }, 1600);
+      setMessageCopy({ index, state: "success" });
+      setCopyAnnouncement("回答已复制");
     } catch {
-      // Clipboard permission or browser support may be unavailable.
+      setMessageCopy({ index, state: "error" });
+      setCopyAnnouncement("复制失败，请检查浏览器剪贴板权限后重试");
     }
+    resetCopyFeedbackLater("message", index);
+  };
+
+  const copyInterruptedReply = async () => {
+    try {
+      await onCopyInterruptedReply();
+      setInterruptedCopy("success");
+      setCopyAnnouncement("已有内容已复制");
+    } catch {
+      setInterruptedCopy("error");
+      setCopyAnnouncement("复制失败，请检查浏览器剪贴板权限后重试");
+    }
+    resetCopyFeedbackLater("interrupted");
   };
 
   const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -232,6 +261,9 @@ export function ChatPanel(props: ChatPanelProps) {
 
   return (
     <main className="chat-panel" id="chat">
+      <span className="visually-hidden" aria-live="polite" role="status">
+        {copyAnnouncement}
+      </span>
       <header className="topbar">
         <div className="topbar-copy">
           <h1>学习工作台</h1>
@@ -261,7 +293,7 @@ export function ChatPanel(props: ChatPanelProps) {
             className="icon-button"
             onClick={onUploadClick}
             type="button"
-            title="上传学习资料"
+            title={`上传学习资料。${RAG_UPLOAD_HELP_TEXT}`}
           >
             <Upload size={17} />
           </button>
@@ -330,6 +362,7 @@ export function ChatPanel(props: ChatPanelProps) {
         {displayMessages.map((message, index) => {
           const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
           const label = message.role === "user" ? "你" : roleLabel(avatarRole);
+          const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
           return (
             <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
               <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
@@ -338,12 +371,12 @@ export function ChatPanel(props: ChatPanelProps) {
                 {message.role === "assistant" && message.content ? (
                   <button
                     aria-label="复制回答正文"
-                    className="ghost-action compact message-copy-button"
+                    className={`ghost-action compact message-copy-button${currentCopyState === "error" ? " copy-error" : ""}`}
                     onClick={() => void copyMessage(message.content, index)}
                     type="button"
                   >
                     <Clipboard size={13} />
-                    {copiedMessageIndex === index ? "已复制" : "复制"}
+                    {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
                   </button>
                 ) : null}
                 <MarkdownMessage content={message.content} />
@@ -365,9 +398,14 @@ export function ChatPanel(props: ChatPanelProps) {
       {streamRecovery?.reply ? (
         <div className="interrupted-copy-shortcut">
           <span>部分回答已保留；恢复、重试或放弃请使用上方恢复卡。</span>
-          <button className="ghost-action compact" disabled={isSending} onClick={onCopyInterruptedReply} type="button">
+          <button
+            className={`ghost-action compact${interruptedCopy === "error" ? " copy-error" : ""}`}
+            disabled={isSending}
+            onClick={() => void copyInterruptedReply()}
+            type="button"
+          >
             <Clipboard size={14} />
-            复制已有内容
+            {interruptedCopy === "success" ? "已复制" : interruptedCopy === "error" ? "复制失败" : "复制已有内容"}
           </button>
         </div>
       ) : null}
