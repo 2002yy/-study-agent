@@ -31,6 +31,11 @@ type DurableState = {
   }>;
 };
 
+test.beforeEach(async ({ request }) => {
+  const response = await request.post(`${API_BASE}/__e2e__/reset`);
+  expect(response.ok()).toBe(true);
+});
+
 async function activeSessionId(page: Page): Promise<string> {
   await page.waitForFunction(
     ({ key }) => {
