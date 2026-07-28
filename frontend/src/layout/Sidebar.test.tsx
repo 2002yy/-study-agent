@@ -11,7 +11,7 @@ import {
 } from "./Sidebar";
 
 describe("focused learning settings", () => {
-  it("keeps the settings drawer limited to learning experience, materials, and privacy", () => {
+  it("keeps the settings drawer limited to learning experience, materials, privacy and secondary advanced controls", () => {
     const snapshot = {
       health: { status: "ok", service: "provider-secret-service" },
       error: null,
@@ -63,9 +63,10 @@ describe("focused learning settings", () => {
 
     const html = container.innerHTML;
     expect(html).toContain("学习体验");
-    expect(html).toContain("资料辅助");
+    expect(html).toContain("我的资料");
     expect(html).toContain("外发数据与联网");
-    expect(html).toContain("高级检索设置");
+    expect(html).toContain("高级设置");
+    expect(html).toContain("资料检索参数");
     expect(html).toContain("服务已连接");
 
     expect(html).not.toContain("添加到现有知识库");
