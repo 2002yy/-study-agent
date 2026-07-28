@@ -14,8 +14,8 @@ const memoryRun = {
   id: "memory-1",
   status: "previewed",
   updates: [
-    { target: "progress", content: "理解了索引激活边界", append: true },
-    { target: "revision_notes", content: "还需练习拒答判断", append: true },
+    { target: "progress", content: "模型生成的学习进展摘要", append: true },
+    { target: "revision_notes", content: "模型生成的待补强摘要", append: true },
     { target: "current_focus", content: "下一步解释证据充分性", append: false },
   ],
   preview: {
@@ -33,11 +33,19 @@ const closureRun = {
   source_hash: "hash",
   closure_eligibility: "learning_summary",
   status: "preview_ready",
-  committed_snapshot: {},
+  committed_snapshot: {
+    structured_input: {
+      committed_learning_state: {
+        confirmed_points: ["理解了索引激活边界"],
+        unresolved_gap: "还需练习拒答判断",
+      },
+      committed_project_state: {},
+    },
+  },
   generated_result: {
     candidates: [
-      { target: "progress", content: "理解了索引激活边界" },
-      { target: "revision_notes", content: "还需练习拒答判断" },
+      { target: "progress", content: "模型生成的学习进展摘要" },
+      { target: "revision_notes", content: "模型生成的待补强摘要" },
       { target: "current_focus", content: "下一步解释证据充分性" },
     ],
   },
@@ -56,7 +64,7 @@ const closureRun = {
 } as LearningClosureRunResponse;
 
 describe("LearningClosureReview", () => {
-  it("groups committed facts, unresolved items and the next step", () => {
+  it("uses committed facts for confirmation and gaps while keeping the frozen next step", () => {
     expect(buildClosureReviewModel(closureRun, memoryRun)).toEqual({
       confirmed: ["理解了索引激活边界"],
       unresolved: ["还需练习拒答判断"],
@@ -67,6 +75,12 @@ describe("LearningClosureReview", () => {
         "下一次继续学习的重点",
       ],
     });
+  });
+
+  it("does not promote model-generated progress or revision summaries into committed truth", () => {
+    const review = buildClosureReviewModel(closureRun, memoryRun);
+    expect(review.confirmed).not.toContain("模型生成的学习进展摘要");
+    expect(review.unresolved).not.toContain("模型生成的待补强摘要");
   });
 
   it("shows review-first copy and keeps internal targets out of the default layer", () => {
@@ -84,6 +98,8 @@ describe("LearningClosureReview", () => {
     expect(screen.getByText("理解了索引激活边界")).toBeTruthy();
     expect(screen.getByText("还需练习拒答判断")).toBeTruthy();
     expect(screen.getByText("下一步解释证据充分性")).toBeTruthy();
+    expect(screen.queryByText("模型生成的学习进展摘要")).toBeNull();
+    expect(screen.queryByText("模型生成的待补强摘要")).toBeNull();
     expect(
       (screen.getByRole("button", {
         name: "确认并保存学习成果",
