@@ -106,8 +106,10 @@ test("stopped stream restores partial truth and completes the same turn once", a
   expect(interruptedTurn.user_message).toBe(INTERRUPT_QUESTION);
   expect(interruptedTurn.assistant_message.length).toBeGreaterThan(0);
   expect(INTERRUPT_REPLY.startsWith(interruptedTurn.assistant_message)).toBe(true);
-  expect(interrupted.thread.learning_state).toEqual(
-    interruptedTurn.pedagogy_snapshot.learning_state_before,
+  expect(interrupted.thread.learning_state).toEqual({});
+  expect(interruptedTurn.pedagogy_snapshot.learning_state_before).not.toEqual({});
+  expect(interruptedTurn.pedagogy_snapshot).not.toHaveProperty(
+    "committed_learning_state",
   );
 
   await page.reload();
@@ -167,8 +169,10 @@ test("zero-token failure retries as one child commit and supersedes its parent",
     user_message: FAIL_ONCE_QUESTION,
     assistant_message: "",
   });
-  expect(failed.thread.learning_state).toEqual(
-    failedTurn.pedagogy_snapshot.learning_state_before,
+  expect(failed.thread.learning_state).toEqual({});
+  expect(failedTurn.pedagogy_snapshot.learning_state_before).not.toEqual({});
+  expect(failedTurn.pedagogy_snapshot).not.toHaveProperty(
+    "committed_learning_state",
   );
 
   await recovery.getByRole("button", { name: "重新生成" }).click();
