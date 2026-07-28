@@ -40,22 +40,35 @@ function renderCard(options: RenderOptions = {}): RenderResult {
 }
 
 describe("RestoreCard", () => {
-  it("shows five explicit entry points for a new session", () => {
+  it("keeps direct input primary and shows only learning plus upload by default", () => {
     const onSelectEntry = vi.fn<(intent: TaskIntent, prompt: string) => void>();
-    const { container } = renderCard({ onSelectEntry });
-    const text = container.textContent ?? "";
+    renderCard({ onSelectEntry });
 
-    expect(text).toContain("快速问答");
-    expect(text).toContain("系统学习");
-    expect(text).toContain("联网研究");
-    expect(text).toContain("项目推进");
-    expect(text).toContain("上传资料");
+    expect(screen.getByRole("heading", { name: "直接输入问题即可开始" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /快速问答/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /系统学习/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /上传资料/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /联网研究/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /项目推进/ })).toBeNull();
 
-    const learningButton = screen
-      .getAllByRole("button")
-      .find((button) => (button.textContent ?? "").includes("系统学习"));
-    fireEvent.click(learningButton as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: /系统学习/ }));
     expect(onSelectEntry).toHaveBeenCalledWith("learn", "我想系统学习：");
+  });
+
+  it("keeps explicit research and project overrides in a secondary disclosure", () => {
+    const onSelectEntry = vi.fn<(intent: TaskIntent, prompt: string) => void>();
+    renderCard({ onSelectEntry });
+
+    fireEvent.click(screen.getByText("更多开始方式"));
+    const research = screen.getByRole("button", { name: /联网研究/ });
+    const project = screen.getByRole("button", { name: /项目推进/ });
+    expect(research).toBeTruthy();
+    expect(project).toBeTruthy();
+
+    fireEvent.click(research);
+    fireEvent.click(project);
+    expect(onSelectEntry).toHaveBeenNthCalledWith(1, "research", "请联网研究：");
+    expect(onSelectEntry).toHaveBeenNthCalledWith(2, "project_execution", "我想推进这个项目：");
   });
 
   it("shows committed learning restore facts for returning users", () => {
@@ -89,10 +102,7 @@ describe("RestoreCard", () => {
     expect(text).toContain("完成一次边界迁移练习");
     expect(text).toContain("有新增内容");
 
-    const continueButton = screen
-      .getAllByRole("button")
-      .find((button) => (button.textContent ?? "").includes("继续这里"));
-    fireEvent.click(continueButton as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: /继续这里/ }));
     expect(onContinueHere).toHaveBeenCalledWith(
       "继续当前任务，下一步是：完成一次边界迁移练习",
     );
@@ -148,11 +158,10 @@ describe("RestoreCard", () => {
       onRetryInterrupted,
       onAbandonInterrupted,
     });
-    const buttons = screen.getAllByRole("button");
 
-    fireEvent.click(buttons.find((button) => (button.textContent ?? "").includes("从断点继续")) as HTMLButtonElement);
-    fireEvent.click(buttons.find((button) => (button.textContent ?? "").includes("重新生成")) as HTMLButtonElement);
-    fireEvent.click(buttons.find((button) => (button.textContent ?? "").includes("放弃恢复")) as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: /从断点继续/ }));
+    fireEvent.click(screen.getByRole("button", { name: /重新生成/ }));
+    fireEvent.click(screen.getByRole("button", { name: /放弃恢复/ }));
 
     expect(onContinueInterrupted).toHaveBeenCalledTimes(1);
     expect(onRetryInterrupted).toHaveBeenCalledTimes(1);
