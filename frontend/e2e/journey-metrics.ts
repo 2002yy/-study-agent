@@ -59,6 +59,9 @@ export type SuccessArtifact = {
   step: string;
   file: string;
   viewport: { width: number; height: number } | null;
+  scroll_y: number;
+  document_height: number;
+  screenshot_mode: "viewport";
   product_surfaces: string[];
 };
 
@@ -121,9 +124,11 @@ export async function installJourneyRecorder(page: Page) {
 
     document.addEventListener("keydown", (event) => {
       if (!(event instanceof KeyboardEvent)) return;
-      if (!["Tab", "Enter", "Escape"].includes(event.key)) return;
+      if (!["Tab", "Enter", "Escape", "PageDown", "PageUp", "Home", "End"].includes(event.key)) return;
       push({
-        kind: "keydown",
+        kind: event.key === "PageDown" || event.key === "PageUp" || event.key === "Home" || event.key === "End"
+          ? "scroll"
+          : "keydown",
         label: event.key,
         at: Date.now(),
         decision: false,
@@ -145,18 +150,32 @@ export async function installJourneyRecorder(page: Page) {
       });
     }, true);
 
-    let lastY = window.scrollY;
-    let lastRecordedAt = 0;
-    window.addEventListener("scroll", () => {
-      const now = Date.now();
-      const delta = Math.abs(window.scrollY - lastY);
-      lastY = window.scrollY;
-      if (delta < 48 || now - lastRecordedAt < 120) return;
-      lastRecordedAt = now;
+    window.addEventListener("wheel", (event) => {
+      if (!(event instanceof WheelEvent) || Math.abs(event.deltaY) < 16) return;
       push({
         kind: "scroll",
-        label: `window:${Math.round(window.scrollY)}`,
-        at: now,
+        label: `wheel:${Math.round(event.deltaY)}`,
+        at: Date.now(),
+        decision: false,
+        recovery: false,
+        surface_switch: false,
+      });
+    }, { passive: true });
+
+    let touchStartY: number | null = null;
+    window.addEventListener("touchstart", (event) => {
+      touchStartY = event.touches.item(0)?.clientY ?? null;
+    }, { passive: true });
+    window.addEventListener("touchend", (event) => {
+      const endY = event.changedTouches.item(0)?.clientY ?? null;
+      if (touchStartY === null || endY === null) return;
+      const delta = touchStartY - endY;
+      touchStartY = null;
+      if (Math.abs(delta) < 24) return;
+      push({
+        kind: "scroll",
+        label: `touch:${Math.round(delta)}`,
+        at: Date.now(),
         decision: false,
         recovery: false,
         surface_switch: false,
@@ -254,13 +273,20 @@ export async function captureSuccessStep(
   const path = resolve(GOLDEN_JOURNEY_SUCCESS_DIR, filename);
   mkdirSync(dirname(path), { recursive: true });
   const surfaces = await visibleProductSurfaceNames(page);
-  await page.screenshot({ path, fullPage: true, animations: "disabled" });
+  const pagePosition = await page.evaluate(() => ({
+    scrollY: Math.round(window.scrollY),
+    documentHeight: document.documentElement.scrollHeight,
+  }));
+  await page.screenshot({ path, fullPage: false, animations: "disabled" });
   const artifact: SuccessArtifact = {
     journey,
     project: testInfo.project.name,
     step,
     file: filename,
     viewport: page.viewportSize(),
+    scroll_y: pagePosition.scrollY,
+    document_height: pagePosition.documentHeight,
+    screenshot_mode: "viewport",
     product_surfaces: surfaces,
   };
   const next = successManifest()
