@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A8 与独立评估已进入 `main`；P0-E1 首个真实全栈切片已通过实现 head 全量门禁，正在状态同步后重跑最终 CI。**  
-> 当前代码切片：`p0-e1/real-stack-browser-gates`，Draft PR #77。
+> 当前主线：**P0-E1 首个真实全栈切片已进入 `main`；下一步继续补真实上传/索引与 learning closure 组合门禁。**  
+> 当前代码切片：`docs/p0-e1-slice1-merged-status`，仅同步合并后事实。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -52,7 +52,8 @@
 - PR #72 `3796bfe3bbc7c83feac9eeb9f195803a5ed57228`，最终 CI #1496；
 - PR #73 `676fe23a0f26d500712b71c6e175d99d953f1e80`，最终 CI #1520；
 - PR #74 `911e83769c1b53849fe21772099bec0323357180`，最终 head CI #1546；
-- PR #76 `267969d92f0eaed4d6b2dc6b631a5380dd86f591`，最终 CI #1554。
+- PR #76 `267969d92f0eaed4d6b2dc6b631a5380dd86f591`，最终 CI #1554；
+- PR #77 `836a50c306b1af17f1c01e07dc96291cb5da9b30`，最终 head CI #1579。
 
 ## 3. 当前真实指标
 
@@ -217,7 +218,7 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 
 ## 9. P0-E1 第一切片实现结果
 
-PR #77 在不接真实外部 Provider 的前提下建立了首个真实组合门禁：
+PR #77 已于 2026-07-28 squash merge，并在不接真实外部 Provider 的前提下建立了首个真实组合门禁：
 
 ```text
 Playwright browser
@@ -244,7 +245,7 @@ Playwright browser
 
 ## 10. 评估后的阶段决策
 
-1. **P0-E1 第一切片已通过实现 head 门禁，并修复了一个真实默认路由 P0 缺口。**
+1. **P0-E1 第一切片已进入 `main`，并修复了一个真实默认路由 P0 缺口。**
 2. **暂不宣布产品闭环完成。** 下一顺序为 P0-E1 上传/closure 切片 -> interruption/retry 切片 -> P0-E2 可审查体验证据。
 3. P0-E1 / P0-E2 全部通过后，下一项才解冻真实 Provider AnswerClaim replay；首次运行只产出基线、错误样本、延迟和成本，不修改生产 prompt、ChatTurn 或学习真值。
 4. 生产 claim producer、claim UI 在真实 replay 证明 schema、claim/evidence link 和 leakage 质量前继续冻结。
@@ -263,12 +264,10 @@ Playwright browser
 
 ## 12. 当前冻结与执行状态
 
-- `main` 当前独立评估 merge SHA：`267969d92f0eaed4d6b2dc6b631a5380dd86f591`；
-- PR #76 已 closed / merged，CI #1554 完整全绿；
-- 当前实现分支：`p0-e1/real-stack-browser-gates`，Draft PR #77；
-- 实现 head `e7d695cc89f029c3edfc2c03c54dbd2948a598b0` 的 CI #1577 完整全绿；
-- 当前状态同步提交后必须对最新 head 重跑完整 CI，未全绿前 PR #77 保持 Draft；
-- 下一实现顺序：真实上传/索引与 closure -> interruption continuation 与 failed retry -> P0-E2；
+- `main` 当前 P0-E1 第一切片 merge SHA：`836a50c306b1af17f1c01e07dc96291cb5da9b30`；
+- PR #77 已 closed / merged，最终 head `3fa988325906a67dfd19a885c59570e72a58642a`，最终 CI #1579 完整全绿；
+- 当前状态分支：`docs/p0-e1-slice1-merged-status`，只负责同步合并事实与下一切片；
+- 下一实现顺序：真实上传/索引与 learning closure -> interruption continuation 与 failed retry -> P0-E2；
 - 真实 Provider claim replay 在 P0-E1 / P0-E2 通过前继续冻结；
 - 生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略继续保持：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
