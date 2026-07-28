@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "real-stack.spec.ts",
+  testIgnore: ["real-stack.spec.ts", "real-stack-recovery.spec.ts"],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
