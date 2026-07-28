@@ -71,4 +71,26 @@ describe("SessionNavigator", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
     expect(onArchive).toHaveBeenCalledWith("chat-active");
   });
+
+  it("shares one interaction state across sidebar and drawer surfaces", () => {
+    render(
+      <>
+        <SessionNavigator activeSessionId="chat-active" sessions={sessions} />
+        <SessionNavigator
+          activeSessionId="chat-active"
+          sessions={sessions}
+          variant="panel"
+        />
+      </>,
+    );
+
+    const searches = screen.getAllByLabelText("搜索学习会话") as HTMLInputElement[];
+    expect(searches).toHaveLength(2);
+    fireEvent.change(searches[0], { target: { value: "证据充分性" } });
+
+    expect(searches[0].value).toBe("证据充分性");
+    expect(searches[1].value).toBe("证据充分性");
+    expect(screen.queryByText("索引激活学习")).toBeNull();
+    expect(screen.getAllByText("证据充分性", { exact: true })).toHaveLength(2);
+  });
 });
