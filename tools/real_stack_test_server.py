@@ -90,6 +90,16 @@ MATERIAL_REPLY = (
     "根据刚上传的资料，目标值大于中点值时，左边界更新为 mid + 1。"
     "请解释为什么不能仍把 mid 留在候选区间。"
 )
+INTERRUPT_QUESTION = "请生成一段可中断的二分查找边界讲解"
+INTERRUPT_REPLY = (
+    "第一部分：二分查找每轮先比较中点与目标值。"
+    "第二部分：目标值更大时左边界移动到 mid + 1，因为 mid 已被排除。"
+    "第三部分：持续缩小区间直到找到目标或区间为空。"
+)
+FAIL_ONCE_QUESTION = "请触发一次可重试的确定性失败"
+RETRY_REPLY = "重试成功：这次回答只提交一次，并保留失败父回合作为可审计记录。"
+
+_failure_attempts: dict[str, int] = {}
 
 
 def _test_runtime_modes() -> RuntimeModes:
@@ -168,8 +178,22 @@ def _last_user_message(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _continuation_partial(messages: list[dict[str, Any]]) -> str:
+    marker = "已输出内容：\n"
+    for message in reversed(messages):
+        content = str(message.get("content", ""))
+        if "[继续生成指令]" not in content or marker not in content:
+            continue
+        return content.split(marker, 1)[1].strip()
+    return ""
+
+
 def _reply_for(messages: list[dict[str, Any]]) -> str:
     user_input = _last_user_message(messages).strip()
+    if user_input == INTERRUPT_QUESTION:
+        return INTERRUPT_REPLY
+    if user_input == FAIL_ONCE_QUESTION:
+        return RETRY_REPLY
     if "刚上传" in user_input and "左边界" in user_input:
         return MATERIAL_REPLY
     if user_input.rstrip("。！？.! ") == "懂了":
@@ -201,8 +225,21 @@ def _stream_chat(
 async def _async_stream_chat(
     messages: list[dict[str, Any]], **_kwargs: Any
 ) -> AsyncIterator[str]:
-    for chunk in _chunks(_reply_for(messages)):
-        await asyncio.sleep(0.003)
+    user_input = _last_user_message(messages).strip()
+    if user_input == FAIL_ONCE_QUESTION:
+        attempts = _failure_attempts.get(user_input, 0) + 1
+        _failure_attempts[user_input] = attempts
+        if attempts == 1:
+            await asyncio.sleep(0.02)
+            raise RuntimeError("deterministic upstream failure before first token")
+
+    full_reply = _reply_for(messages)
+    partial = _continuation_partial(messages)
+    reply = full_reply[len(partial) :] if partial and full_reply.startswith(partial) else full_reply
+    delay = 0.18 if user_input == INTERRUPT_QUESTION and not partial else 0.003
+    size = 10 if user_input == INTERRUPT_QUESTION else 12
+    for chunk in _chunks(reply, size=size):
+        await asyncio.sleep(delay)
         yield chunk
 
 
@@ -313,6 +350,7 @@ def _reset_filesystem_state() -> None:
 def reset_real_stack_state() -> dict[str, Any]:
     """Reset all durable test state between isolated browser journeys."""
 
+    _failure_attempts.clear()
     _real_stack_chat_service.cache_clear()
     _real_stack_closure_service.cache_clear()
     reset_runtime_repository_cache()
