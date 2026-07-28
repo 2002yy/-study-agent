@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionRow } from "../../types";
 import { SessionNavigator } from "./SessionNavigator";
@@ -35,6 +35,8 @@ const sessions: SessionRow[] = [
     task_intent: "explain_back",
   } as SessionRow,
 ];
+
+afterEach(() => cleanup());
 
 describe("SessionNavigator", () => {
   it("owns search and restore behavior for both presentation variants", () => {
