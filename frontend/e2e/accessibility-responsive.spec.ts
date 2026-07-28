@@ -23,7 +23,7 @@ test("slide-over traps keyboard focus and restores the launcher", async ({ page 
   await settingsItem.press("Enter");
 
   const dialog = page.getByRole("dialog", { name: "设置" });
-  const close = page.getByRole("button", { name: "关闭设置" });
+  const close = page.getByRole("button", { name: "关闭设置", exact: true });
   await expect(dialog).toBeVisible();
   await expect(close).toBeFocused();
 
