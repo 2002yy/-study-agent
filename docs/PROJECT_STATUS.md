@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A8 已进入 `main`；暂停新增功能，当前进入独立功能评估与使用体验评估。**  
-> 当前代码切片：`docs/p0-a8-merged-status`，仅同步合并后状态。
+> 当前主线：**P0-A1–P0-A8 已进入 `main`；独立代码、CI 与浏览器产物评估已完成，下一步只补真实全栈门禁与可审查体验证据。**  
+> 当前代码切片：`agent/independent-function-ux-evaluation`，仅记录评估结论与下一阶段门禁。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -145,54 +145,92 @@ PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe2177
 - 新增浏览器门禁覆盖 SlideOver 焦点循环、无效上传不发请求、Clipboard 拒绝反馈、390×520 composer 可达、44px 触控目标和无横向溢出；
 - 未修改学习真值、TaskContract、RAG 排序、Provider 行为、服务端上传策略或顶级产品表面。
 
-## 8. 当前任务：独立功能评估与使用体验评估
+## 8. 独立功能与使用体验评估结论
 
-P0-A8 已全绿并进入 `main`。**现在暂停新增功能**，进行一次独立的功能评估与使用体验评估。不得直接恢复全部旧计划，也不得边评估边扩展功能。
+本轮独立检查覆盖当前 `main` 的架构 owner、持久化模型、生产路径测试、Playwright 旅程、CI #1546 及其浏览器/RAG产物。没有使用真实 Provider 密钥，也没有可供人工复核的成功旅程截图或视频，因此本节只确认已有证据能够支持的结论，不把自动化通过扩张为“真实产品体验已经完成”。
 
-### 功能评估
+### 8.1 成熟度判断
 
-1. 按核心学习闭环逐项核验：开始任务、持续学习、资料学习、联网研究、源码学习、理解验证、学习结束、刷新恢复、失败恢复；
-2. 核对每项能力的生产 owner、持久化真值、失败边界与自动测试覆盖；
-3. 区分“存在”“可用”“稳定”“达到产品目标”，不能只以接口或按钮存在判定完成；
-4. 输出 P0 / P1 / P2 功能缺口、重复能力、无 owner 能力和应继续冻结的能力。
+- **存在：通过。** 开始任务、持续学习、资料学习、联网研究、源码学习、理解验证、学习结束、刷新恢复和失败恢复均已有生产 owner 或明确的既有 owner 扩展边界。
+- **可用：有条件通过。** desktop / 390px 的固定 API fixture 旅程能够完成核心操作，首次回答无强制配置，关键失败有可见恢复路径。
+- **稳定：在确定性测试条件下通过。** CI #1546 的 pytest、RAG K1、前端单测、构建和 34/34 Playwright 全绿；committed truth、失败/中断不推进、retry/continuation 单次提交均有回归。
+- **达到产品目标：尚未证明。** 浏览器 E2E 只启动 Vite 并拦截 API；后端生产路径测试使用 TestClient 和受控 evaluator/provider。两层分别可信，但尚无 React -> FastAPI -> SQLite -> stream/recovery 的完整浏览器门禁，也没有真实 Provider 教学与 claim 质量基线。
 
-### 使用体验评估
+### 8.2 核心闭环逐项判断
 
-1. 复测 desktop 与 390px 核心 Golden Journeys；
-2. 记录必需点击、必需决策、产品 surface、恢复点击、键盘可达性、横向溢出和关键文本完整性；
-3. 检查首次进入、返回学习、资料与证据、结束学习、会话导航、设置和错误恢复的认知负担；
-4. 结合浏览器 trace、截图、视频和人工试玩，识别“功能正确但难以理解或难以推进”的问题。
+| 闭环 | 当前结论 | 主要限制 |
+|---|---|---|
+| 首次开始 | 可用、稳定 | 仅 fixture 浏览器旅程；键盘到输入框容许上限仍过宽 |
+| 返回与持续学习 | 可用 | “继续这里”先填入提示，再由用户发送；当前指标只记为一次选择，未完整反映动作成本 |
+| 上传资料学习 | 可用 | 浏览器层未走真实解析、revision、索引激活和失败不切换链路 |
+| 联网研究 | 基础恢复可用 | multi-step research 与完整 cancel propagation 仍为 partial owner |
+| 源码学习 | 展示与恢复可用 | GitHub replay 的 symbol mapping 与 CI association 精度仍不足以证明稳定理解源码关系 |
+| 理解验证 | 真值边界稳定 | 当前生产路径 E2E 注入受控 semantic evaluator；真实 Provider 质量尚未测量 |
+| 学习结束 | review-first 与 hash-confirm 边界成立 | 浏览器旅程没有覆盖保存后刷新、重新进入和长期记忆实际恢复 |
+| 刷新/失败/中断恢复 | 基础路径稳定 | 缺少同一真实全栈运行中的连续故障注入与恢复证明 |
 
-### 评估后的决策
+### 8.3 P0 评估缺口
 
-评估完成并写回本文件后，才决定下一批功能。首轮候选仅包括：
+这些不是“再加一个功能”的 P0，而是决定现有功能能否被认定为真实可用的证据缺口。
 
-1. 是否仍存在阻断普通学习闭环的 P0 缺口；
-2. 是否开始真实 Provider AnswerClaim replay；
-3. 是否推进生产 claim producer，或先做 RAG-K1f / K2；
-4. 是否继续保持自适应 LearningPlan 与可执行代理冻结。
+#### P0-E1：真实全栈确定性浏览器门禁
 
-## 9. 审计完成标准
+- CI 同时启动 React、FastAPI 与临时 SQLite；
+- Provider、Embedding 和外部网络使用服务端 fake gateway，浏览器不得通过 `page.route` 伪造核心业务 API；
+- 至少覆盖首次回答、返回学习、上传并学习、正确/错误理解验证、学习结束并刷新恢复、stream interruption continuation、failed retry；
+- 断言浏览器展示、API 返回、SQLite durable truth 和重新加载结果一致；
+- 失败、partial、planned 状态不得覆盖 committed truth。
 
-- 学习真值门禁成立；核心旅程在 desktop 和 390px 全部通过；
-- first answer 无强制配置；学习恢复、资料学习、联网研究不超过两层 surface；
-- 刷新、网络失败和 stream interruption 有明确恢复路径；
-- 首屏不依赖隐藏实验模块；普通证据层只显示 adopted evidence；
-- 默认结束流程不要求理解 Memory 文件；桌面/移动使用同一会话 owner；
-- 普通首次入口和设置不要求理解内部模式、Provider 或检索参数；
-- 键盘、焦点、复制、上传和窄屏问题有自动回归；全量 CI 通过。
+#### P0-E2：可审查的成功体验证据
 
-## 10. 评估期间冻结
+- 对选定的绿色 Golden Journeys 保留关键步骤截图，而不是只在失败时保留 trace/screenshot/video；
+- 点击、键盘操作、发送、滚动、surface 切换和恢复动作由测试辅助层实际采集，不再由用例手写常量；
+- `product_surfaces` 不只统计 `main` 与 dialog，还要反映抽屉、恢复卡、上传承接、证据层和 closure review；
+- 加入 360px/窄高度、长中文、长代码块、输入法 composition 和真实滚动位置检查；
+- 完成一次基于成功产物的人工试玩记录，专门识别“功能正确但难以理解或推进”的问题。
 
-真实 Provider claim replay、生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结。
+### 8.4 P1 / P2 缺口
 
-## 11. 当前执行状态
+**P1：**
+
+1. P0-E1 / P0-E2 通过后，解冻真实 Provider AnswerClaim replay，但保持 record-only，不接生产 ChatTurn；
+2. 根据真实 replay 暴露的问题决定先做 claim producer 还是 RAG-K1f / K2，不能依据 deterministic gold producer 的 1.0 自测分数直接接生产；
+3. 加强 GitHub replay 的 symbol mapping、CI association precision 和 partial-result 解释，再讨论源码学习的自动推进；
+4. 补 closure commit 后刷新/跨会话恢复，以及 multi-step research/cancel 的完整生命周期门禁。
+
+**P2：**
+
+1. 增加 Firefox/WebKit 与更小宽度的兼容抽样，但不把浏览器矩阵扩张为当前 P0；
+2. 清理 README 中 Streamlit“已移除”与“兼容入口仍存在”的表述差异，再决定 legacy 代码删除；
+3. 校准 Golden Journey 指标定义，使“点击、决策、surface、恢复”能够跨用例稳定比较。
+
+## 9. 评估后的阶段决策
+
+1. **未发现由现有自动化证据能够确认的普通学习闭环功能级 P0 阻断。**
+2. **暂不宣布产品闭环完成。** P0-E1 与 P0-E2 是下一阶段唯一优先工作，属于评估基础设施和验收证据，不新增顶级产品表面。
+3. P0-E1 / P0-E2 通过后，下一项优先解冻真实 Provider AnswerClaim replay；首次运行只产出基线、错误样本、延迟和成本，不修改生产 prompt、ChatTurn 或学习真值。
+4. 生产 claim producer、claim UI 在真实 replay 证明 schema、claim/evidence link 和 leakage 质量前继续冻结。
+5. 自适应 LearningPlan 与 G10-D 可执行代理继续冻结；当前系统最缺的不是更多自动规划，而是对现有闭环的真实证明。
+6. 若 Provider replay 显示主要失败来自检索或证据供给，先推进 RAG-K1f / K2；若检索充足而 claim 提取失败，再推进 producer。不得并行扩张两条生产路径。
+
+## 10. 下一阶段完成标准
+
+- 浏览器通过真实 FastAPI 与临时 SQLite 完成核心学习闭环，核心业务 API 无 `page.route` fixture；
+- 至少一条正确理解和一条错误/空泛理解从 UI 发起，并在刷新后验证 committed truth；
+- 上传、研究、closure、interruption 和 retry 的 UI、API、durable state 与恢复结果一致；
+- 选定成功旅程有可查看截图与实际采集的操作指标；
+- desktop、390px、360px/窄高度无关键文本截断、横向溢出或 composer 不可达；
+- 人工试玩明确记录阻断、困惑点和可接受项；
+- 全量既有 CI 不回退；评估结论再次写回本文件后，才允许解冻 Provider replay。
+
+## 11. 当前冻结与执行状态
 
 - `main` 当前 P0-A8 merge SHA：`911e83769c1b53849fe21772099bec0323357180`；
 - PR #74 已 closed / merged，最终 head `31bd2ff17178eb60d7cc6e4cbb83763250f8126c`，最终 CI #1546 完整全绿；
-- 当前状态分支：`docs/p0-a8-merged-status`，只负责将合并事实同步回唯一状态文档；
-- 当前阶段：P0-A1–P0-A8 功能切片全部完成，下一步只做独立功能评估与使用体验评估；
-- 新功能继续冻结，评估结论写回本文件后再决定下一批功能；
+- 当前评估分支：`agent/independent-function-ux-evaluation`；
+- 下一实现顺序：P0-E1 真实全栈确定性浏览器门禁 -> P0-E2 可审查体验证据；
+- 真实 Provider claim replay 在 P0-E1 / P0-E2 通过前继续冻结；
+- 生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略继续保持：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 12. 文档规则
