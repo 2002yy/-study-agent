@@ -10,43 +10,48 @@ import {
   seedWorkspaceRecovery,
 } from "./api-fixture";
 import {
+  captureSuccessStep,
   focusComposerWithKeyboard,
-  noHorizontalOverflow,
-  recordMetric,
+  installJourneyRecorder,
+  recordObservedMetric,
   requiredComposerDecisions,
-  visibleProductSurfaces,
 } from "./journey-metrics";
 
 test("first answer needs no configuration decision and survives refresh", async ({ page }, testInfo) => {
   const fixture = await installApiFixture(page);
+  await installJourneyRecorder(page);
   await page.goto("/");
 
+  const successArtifacts: string[] = [];
   await expect(page.getByRole("heading", { name: "学习工作台" })).toBeVisible();
-  const requiredDecisions = await requiredComposerDecisions(page);
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "first_answer", "ready"),
+  );
+  const composerDecisions = await requiredComposerDecisions(page);
   const tabPresses = await focusComposerWithKeyboard(page);
   expect(tabPresses).toBeLessThan(40);
   await page.keyboard.type(FIRST_QUESTION);
   await page.keyboard.press("Enter");
 
   await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "first_answer", "completed"),
+  );
   await page.waitForTimeout(350);
   await page.reload();
   await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "first_answer", "restored"),
+  );
 
   expect(fixture.chatAttempts).toBe(1);
   expect(fixture.unexpectedApiPaths).toEqual([]);
-  await recordMetric(testInfo, {
+  await recordObservedMetric(page, testInfo, {
     journey: "first_answer",
-    project: testInfo.project.name,
-    viewport: page.viewportSize(),
-    required_clicks: 0,
-    required_decisions: requiredDecisions,
-    product_surfaces: await visibleProductSurfaces(page),
-    recovery_clicks: 0,
-    has_actionable_failure: false,
-    keyboard_only: true,
+    composer_decisions: composerDecisions,
     refresh_restore: true,
-    no_horizontal_overflow: await noHorizontalOverflow(page),
+    has_actionable_failure: false,
+    success_artifacts: successArtifacts,
   });
 });
 
@@ -54,8 +59,10 @@ test("returning learner restores context and continues in one explicit choice", 
   const session = makeLearningSession();
   const fixture = await installApiFixture(page, { session });
   await seedWorkspaceRecovery(page, session.row.session_id);
+  await installJourneyRecorder(page);
   await page.goto("/");
 
+  const successArtifacts: string[] = [];
   const restoreCard = page.getByRole("region", { name: "继续当前任务" });
   await expect(restoreCard).toBeVisible();
   await expect(
@@ -70,16 +77,19 @@ test("returning learner restores context and continues in one explicit choice", 
   await expect(
     restoreCard.getByText("完成一次边界迁移练习", { exact: true }),
   ).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "returning_learning", "restored-context"),
+  );
 
-  let requiredClicks = 0;
-  let requiredDecisions = 0;
-  requiredClicks += 1;
-  requiredDecisions += 1;
+  const composerDecisions = await requiredComposerDecisions(page);
   await restoreCard.getByRole("button", { name: "继续这里" }).click();
   const composer = page.getByLabel("输入学习问题");
   await expect(composer).toHaveValue(/继续当前任务/);
   await composer.press("Enter");
   await expect(page.getByText(CONTINUE_REPLY, { exact: true })).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "returning_learning", "continued"),
+  );
 
   await page.waitForTimeout(350);
   await page.reload();
@@ -88,28 +98,28 @@ test("returning learner restores context and continues in one explicit choice", 
   await expect(
     restoredCard.getByText("理解二分查找边界条件", { exact: true }),
   ).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "returning_learning", "continued-restored"),
+  );
 
   expect(fixture.chatAttempts).toBe(1);
   expect(fixture.unexpectedApiPaths).toEqual([]);
-  await recordMetric(testInfo, {
+  await recordObservedMetric(page, testInfo, {
     journey: "returning_learning",
-    project: testInfo.project.name,
-    viewport: page.viewportSize(),
-    required_clicks: requiredClicks,
-    required_decisions: requiredDecisions,
-    product_surfaces: await visibleProductSurfaces(page),
-    recovery_clicks: 1,
-    has_actionable_failure: false,
-    keyboard_only: false,
+    composer_decisions: composerDecisions,
     refresh_restore: true,
-    no_horizontal_overflow: await noHorizontalOverflow(page),
+    has_actionable_failure: false,
+    success_artifacts: successArtifacts,
   });
 });
 
 test("chat failure exposes one-click retry and restores the answer", async ({ page }, testInfo) => {
   const fixture = await installApiFixture(page, { failNextChat: true });
+  await installJourneyRecorder(page);
   await page.goto("/");
 
+  const successArtifacts: string[] = [];
+  const composerDecisions = await requiredComposerDecisions(page);
   const composer = page.getByLabel("输入学习问题");
   await composer.fill(FIRST_QUESTION);
   await composer.press("Enter");
@@ -117,26 +127,29 @@ test("chat failure exposes one-click retry and restores the answer", async ({ pa
   await expect(page.getByText(/聊天请求失败：503/).first()).toBeVisible();
   const retry = page.getByRole("button", { name: "重新生成" });
   await expect(retry).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "chat_failure_recovery", "failure-visible"),
+  );
   await retry.click();
   await expect(page.getByText(RETRY_REPLY, { exact: true })).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "chat_failure_recovery", "recovered"),
+  );
 
   await page.waitForTimeout(350);
   await page.reload();
   await expect(page.getByText(RETRY_REPLY, { exact: true })).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "chat_failure_recovery", "recovered-restored"),
+  );
 
   expect(fixture.chatAttempts).toBe(2);
   expect(fixture.unexpectedApiPaths).toEqual([]);
-  await recordMetric(testInfo, {
+  await recordObservedMetric(page, testInfo, {
     journey: "chat_failure_recovery",
-    project: testInfo.project.name,
-    viewport: page.viewportSize(),
-    required_clicks: 1,
-    required_decisions: 0,
-    product_surfaces: await visibleProductSurfaces(page),
-    recovery_clicks: 1,
-    has_actionable_failure: true,
-    keyboard_only: false,
+    composer_decisions: composerDecisions,
     refresh_restore: true,
-    no_horizontal_overflow: await noHorizontalOverflow(page),
+    has_actionable_failure: true,
+    success_artifacts: successArtifacts,
   });
 });
