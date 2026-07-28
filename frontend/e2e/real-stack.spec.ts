@@ -16,7 +16,7 @@ const MATERIAL_FILE = "binary-search-boundaries.md";
 const MATERIAL_HEADING = "二分查找边界条件";
 const MATERIAL_SOURCE_TITLE = "binary-search-boundaries";
 const MATERIAL_QUESTION =
-  "请根据刚上传的资料，带我系统学习二分查找边界：目标值大于中点值时左边界如何更新？";
+  "请根据刚上传的资料，带我系统学习二分查找边界，并先完整讲解：目标值大于中点值时左边界如何更新？";
 const MATERIAL_REPLY =
   "根据刚上传的资料，目标值大于中点值时，左边界更新为 mid + 1。请解释为什么不能仍把 mid 留在候选区间。";
 
@@ -293,7 +293,14 @@ test("real Markdown upload activates an index and grounds restored learning", as
   const sessionId = await activeSessionId(page);
   const stored = await durableState(page, sessionId);
   const ragSnapshot = stored.turns.at(-1)?.rag_snapshot ?? {};
-  expect(ragSnapshot).toMatchObject({ status: "found", result_count: 1 });
+  expect(ragSnapshot).toMatchObject({
+    status: "found",
+    result_count: 1,
+    evidence_snapshot: {
+      disclosure_policy: "full",
+      refs: [{ title: MATERIAL_SOURCE_TITLE, lifecycle_status: "selected" }],
+    },
+  });
 
   const adopted = await openEvidence(page);
   await expect(
