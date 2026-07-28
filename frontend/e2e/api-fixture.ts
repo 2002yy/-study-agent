@@ -98,6 +98,7 @@ export type SessionDetail = {
 export type ApiFixtureState = {
   sessions: SessionRow[];
   details: Map<string, SessionDetail>;
+  closureRuns: Map<string, Record<string, unknown>>;
   failNextChat: boolean;
   chatAttempts: number;
   unexpectedApiPaths: string[];
@@ -237,6 +238,99 @@ function taskIntentFor(question: string, current?: SessionRow) {
   return "quick_answer";
 }
 
+function closureResponse(
+  sessionId: string,
+  status: "preview_ready" | "completed",
+): Record<string, unknown> {
+  const runId = `closure-${sessionId}`;
+  const completed = status === "completed";
+  const updates = [
+    {
+      target: "progress",
+      content: "已确认：每轮会缩小搜索区间",
+      append: true,
+      learner_pending: false,
+    },
+    {
+      target: "revision_notes",
+      content: "还需解释左右边界更新时机",
+      append: true,
+      learner_pending: true,
+    },
+    {
+      target: "current_focus",
+      content: "下一步完成一次边界迁移练习",
+      append: false,
+      learner_pending: false,
+    },
+  ];
+  const now = new Date().toISOString();
+  return {
+    id: runId,
+    thread_id: sessionId,
+    source_thread_version: 2,
+    last_completed_turn_id: "turn-returning-1",
+    source_hash: "browser-closure-source",
+    closure_eligibility: "learning_summary",
+    status,
+    committed_snapshot: {},
+    generated_result: { candidates: updates },
+    memory_run_id: `memory-${sessionId}`,
+    memory_run: {
+      id: `memory-${sessionId}`,
+      status: completed ? "succeeded" : "previewed",
+      updates,
+      updates_hash: "browser-memory-updates",
+      preview: {
+        writable: true,
+        memory_mode: "confirm_write",
+        safe_mode: false,
+        updates: updates.map((update) => ({
+          target: update.target,
+          path: `${update.target}.md`,
+          action: update.append ? "append" : "replace",
+          allowed: true,
+          preview: update.content,
+        })),
+      },
+      result: completed
+        ? {
+            results: updates.map((update) => ({
+              target: update.target,
+              action: update.append ? "append" : "replace",
+              path: `${update.target}.md`,
+            })),
+            errors: [],
+          }
+        : {},
+      reason: "",
+      version: completed ? 2 : 1,
+      created_at: now,
+      updated_at: now,
+      completed_at: completed ? now : null,
+    },
+    thread_summary: {
+      thread_id: sessionId,
+      status: completed ? "summarized" : "not_summarized",
+      source_thread_version: completed ? 2 : null,
+      last_completed_turn_id: completed ? "turn-returning-1" : null,
+      current_last_completed_turn_id: "turn-returning-1",
+      closure_run_id: completed ? runId : null,
+      summarized_at: completed ? now : null,
+      can_summarize: !completed,
+    },
+    error: "",
+    reason: "",
+    active_operation_id: null,
+    active_operation_started_at: null,
+    cancel_requested_at: null,
+    created_at: now,
+    updated_at: now,
+    completed_at: completed ? now : null,
+    version: completed ? 2 : 1,
+  };
+}
+
 export async function installApiFixture(
   page: Page,
   options: {
@@ -251,6 +345,7 @@ export async function installApiFixture(
         ? [[options.session.row.session_id, structuredClone(options.session.detail)]]
         : [],
     ),
+    closureRuns: new Map(),
     failNextChat: options.failNextChat ?? false,
     chatAttempts: 0,
     unexpectedApiPaths: [],
@@ -338,6 +433,80 @@ export async function installApiFixture(
     }
     if (path === "/sessions" && request.method() === "GET") {
       await fulfillJson(route, { sessions: state.sessions });
+      return;
+    }
+    if (path === "/sessions/new" && request.method() === "POST") {
+      const sessionId = `browser-new-session-${state.sessions.length + 1}`;
+      const row: SessionRow = {
+        session_id: sessionId,
+        kind: "current",
+        name: `${sessionId}.md`,
+        path: "",
+        size_bytes: 0,
+        mtime_ns: Date.now(),
+        title: "新学习会话",
+        task_intent: "",
+        objective: "",
+        confirmed_points: [],
+        unresolved_gap: "",
+        next_action: "",
+        has_completed_turns: false,
+      };
+      state.sessions = [
+        row,
+        ...state.sessions.filter((session) => session.kind !== "current"),
+      ];
+      await fulfillJson(route, {
+        session_id: sessionId,
+        settings: RUNTIME_SETTINGS.settings,
+      });
+      return;
+    }
+    const closureCreateMatch = path.match(
+      /^\/sessions\/([^/]+)\/learning-closure-runs$/,
+    );
+    if (closureCreateMatch && request.method() === "POST") {
+      const sessionId = decodeURIComponent(closureCreateMatch[1]);
+      const closure = closureResponse(sessionId, "preview_ready");
+      state.closureRuns.set(String(closure.id), closure);
+      await fulfillJson(route, closure);
+      return;
+    }
+    const closureMatch = path.match(
+      /^\/learning-closure-runs\/([^/]+)(?:\/(commit|retry|cancel))?$/,
+    );
+    if (closureMatch) {
+      const runId = decodeURIComponent(closureMatch[1]);
+      const existing = state.closureRuns.get(runId);
+      if (!existing) {
+        await fulfillJson(route, { detail: "closure run not found" }, 404);
+        return;
+      }
+      if (request.method() === "GET") {
+        await fulfillJson(route, existing);
+        return;
+      }
+      if (request.method() === "POST" && closureMatch[2] === "commit") {
+        const completed = closureResponse(String(existing.thread_id), "completed");
+        state.closureRuns.set(runId, completed);
+        await fulfillJson(route, completed);
+        return;
+      }
+    }
+    const archiveMatch = path.match(/^\/sessions\/([^/]+)\/archive$/);
+    if (archiveMatch && request.method() === "POST") {
+      const sessionId = decodeURIComponent(archiveMatch[1]);
+      state.sessions = state.sessions.map((session) =>
+        session.session_id === sessionId
+          ? { ...session, kind: "archived" }
+          : session,
+      );
+      await fulfillJson(route, {
+        session_id: sessionId,
+        kind: "archived",
+        path: `${sessionId}.md`,
+        archived: true,
+      });
       return;
     }
     if (path.startsWith("/sessions/") && request.method() === "GET") {

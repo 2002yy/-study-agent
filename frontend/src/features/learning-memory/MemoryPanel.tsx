@@ -2,6 +2,7 @@ import { AlertTriangle, Archive, CheckCircle2, Loader2, MessageCircle, Plus, Rot
 import { StatusDot } from "../../components/StatusDot";
 import type { MemoryStatusResponse } from "../../types";
 import type { SessionSummary } from "../sessions/sessionSummary";
+import { LearningClosureReview } from "./LearningClosureReview";
 import type { LearningClosureRunResponse, LearningClosureStatus } from "./closureTypes";
 import type { useMemoryController } from "./memoryController";
 export {
@@ -109,6 +110,7 @@ export function MemoryPanel({
 }: MemoryPanelProps) {
   const {
     drafts,
+    run,
     preview,
     commitResult,
     closureRun,
@@ -191,7 +193,9 @@ export function MemoryPanel({
               </div>
             </div>
           ) : null}
-          {closureRun && closureStatus ? (
+          {closureRun &&
+          closureStatus &&
+          !(hasCompletedSummary && closureRun.status === "completed") ? (
             <div className={`memory-note closure-status ${closureRun.status}`}>
               {closureBusy ? <Loader2 className="spin" size={16} /> : <StatusDot tone={closureStatus.tone} />}
               <div>
@@ -217,6 +221,15 @@ export function MemoryPanel({
               </div>
             </div>
           ) : null}
+          {isClosurePreview && closureRun ? (
+            <LearningClosureReview
+              isCommitting={isCommitting}
+              memoryRun={run}
+              onConfirm={commitRun}
+              onContinue={onContinueCurrent}
+              run={closureRun}
+            />
+          ) : null}
           <div className="memory-grid">
             {[focus, progress, summary].map((file) =>
               file ? (
@@ -227,6 +240,15 @@ export function MemoryPanel({
               ) : null
             )}
           </div>
+          <details
+            className={`memory-advanced ${closureRun ? "closure-detail" : "manual-workbench"}`}
+            open={closureRun ? undefined : true}
+          >
+            <summary>
+              {closureRun
+                ? "高级写入明细"
+                : "手动整理长期学习记录"}
+            </summary>
           <form className="memory-workbench" onSubmit={(event) => { event.preventDefault(); void previewUpdates(); }}>
             <div className="memory-workbench-heading">
               <strong>{isClosurePreview ? "学习整理候选" : "写入候选"}</strong>
@@ -336,19 +358,21 @@ export function MemoryPanel({
               <Plus size={14} />
               添加候选
             </button>
-            <div className="memory-actions">
-              <button disabled={isClosurePreview || isPreviewing || !canPreview} type="submit">
-                {isPreviewing ? "预览中..." : "生成预览"}
-              </button>
-              <button
-                className="secondary"
-                disabled={isCommitting || !preview || !preview.writable || closureRun?.status === "completed"}
-                onClick={() => void commitRun()}
-                type="button"
-              >
-                {isCommitting ? "提交中..." : isClosurePreview ? "确认并完成本次整理" : "确认写入选中候选"}
-              </button>
-            </div>
+            {!isClosurePreview ? (
+              <div className="memory-actions">
+                <button disabled={isPreviewing || !canPreview} type="submit">
+                  {isPreviewing ? "预览中..." : "生成预览"}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={isCommitting || !preview || !preview.writable || closureRun?.status === "completed"}
+                  onClick={() => void commitRun()}
+                  type="button"
+                >
+                  {isCommitting ? "提交中..." : "确认写入选中候选"}
+                </button>
+              </div>
+            ) : null}
           </form>
           {preview ? (
             <div className={`memory-preview ${preview.writable ? "" : "blocked"}`}>
@@ -366,6 +390,7 @@ export function MemoryPanel({
               ))}
             </div>
           ) : null}
+          </details>
           {commitResult ? (
             <div className="memory-result">
               <CheckCircle2 size={16} />

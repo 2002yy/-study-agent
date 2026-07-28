@@ -47,6 +47,24 @@
   overflow-wrap: anywhere;
 }
 
+.session-navigator.panel-mode .session-sidebar-list {
+  display: grid;
+  gap: 12px;
+  overflow: visible;
+  padding: 0;
+}
+
+.session-navigator.panel-mode .session-sidebar-row {
+  min-height: 74px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.session-navigator.panel-mode .session-sidebar-row-main {
+  min-height: 72px;
+  padding: 12px 72px 12px 12px;
+}
+
 .session-nav-group,
 .session-history-group {
   display: grid;
@@ -224,5 +242,9 @@
   .session-sidebar-meta {
     white-space: normal;
     line-height: 1.35;
+  }
+
+  .session-navigator.panel-mode .session-sidebar-row-main {
+    padding-right: 58px;
   }
 }

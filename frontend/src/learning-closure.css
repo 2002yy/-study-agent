@@ -84,6 +84,166 @@
   color: var(--muted);
 }
 
+.closure-review {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--accent));
+}
+
+.closure-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.closure-review-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.closure-review-header h2,
+.closure-review-section h3 {
+  margin: 0;
+}
+
+.closure-review-header h2 {
+  font-size: 18px;
+}
+
+.closure-review-header p,
+.closure-save-impact p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.closure-review-kicker {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.closure-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.closure-review-section {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.closure-review-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.closure-review-section-title h3 {
+  font-size: 13px;
+}
+
+.closure-review-section ul,
+.closure-save-impact ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.closure-review-section li {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.closure-review-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.closure-save-impact {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.closure-save-impact strong {
+  font-size: 13px;
+}
+
+.closure-save-impact ul {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  padding: 0;
+}
+
+.closure-save-impact li {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--text);
+  font-size: 12px;
+}
+
+.closure-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.closure-review-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.memory-advanced {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.memory-advanced > summary {
+  cursor: pointer;
+  padding: 11px 13px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.memory-advanced.manual-workbench {
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.memory-advanced.manual-workbench > summary {
+  display: none;
+}
+
+.memory-advanced.closure-detail > .memory-workbench,
+.memory-advanced.closure-detail > .memory-preview {
+  margin: 0 12px 12px;
+}
+
 @media (max-width: 620px) {
   .closure-status,
   .session-summary-card {
@@ -94,5 +254,23 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
     padding-left: 26px;
+  }
+
+  .closure-review {
+    padding: 14px;
+  }
+
+  .closure-review-grid,
+  .closure-save-impact ul {
+    grid-template-columns: 1fr;
+  }
+
+  .closure-review-actions {
+    display: grid;
+  }
+
+  .closure-review-actions button {
+    justify-content: center;
+    width: 100%;
   }
 }
