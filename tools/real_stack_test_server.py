@@ -37,25 +37,27 @@ os.environ.setdefault(
     "STUDY_AGENT_ARCHIVE_EXPORT_DIR", str(E2E_ROOT / "archive")
 )
 
-from fastapi import HTTPException
+from fastapi import HTTPException  # noqa: E402
 
-from src.api.app import app
-from src.application.chat_service import ChatDependencies
-from src.application.policy_chat_service import ExternalDataPolicyChatService
-from src.application.runtime_repository import (
+from src.api.app import app  # noqa: E402
+from src.application.chat_service import ChatDependencies  # noqa: E402
+from src.application.policy_chat_service import (  # noqa: E402
+    ExternalDataPolicyChatService,
+)
+from src.application.runtime_repository import (  # noqa: E402
     get_chat_service,
     get_runtime_repository,
     runtime_database_path,
 )
-from src.context_builder import build_messages
-from src.mode_manager import RuntimeModes
-from src.pedagogy.evaluation import SemanticEvaluation
-from src.task_contract import (
+from src.context_builder import build_messages  # noqa: E402
+from src.mode_manager import RuntimeModes  # noqa: E402
+from src.pedagogy.evaluation import SemanticEvaluation  # noqa: E402
+from src.task_contract import (  # noqa: E402
     TaskAwarePedagogyEngine,
     TaskAwarePedagogyEvaluationService,
     route_request_with_task_contract,
 )
-from src.tools.web_agent import WebToolTrace
+from src.tools.web_agent import WebToolTrace  # noqa: E402
 
 FIRST_REPLY = (
     "我们先建立目标：理解为什么二分查找是 O(log n)。"
