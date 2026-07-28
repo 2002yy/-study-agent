@@ -36,6 +36,15 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBe(true);
 });
 
+function assistantMessage(page: Page, text: string) {
+  return page
+    .getByRole("region", { name: "学习对话" })
+    .locator("article.message.assistant")
+    .filter({ hasText: text })
+    .last()
+    .getByText(text, { exact: true });
+}
+
 async function activeSessionId(page: Page): Promise<string> {
   await page.waitForFunction(
     ({ key }) => {
@@ -86,7 +95,7 @@ test("first learning turn crosses React, FastAPI and SQLite then restores", asyn
   await expect(page.getByRole("heading", { name: "学习工作台" })).toBeVisible();
 
   await send(page, FIRST_QUESTION);
-  await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, FIRST_REPLY)).toBeVisible();
 
   const sessionId = await activeSessionId(page);
   const stored = await durableState(page, sessionId);
@@ -99,9 +108,10 @@ test("first learning turn crosses React, FastAPI and SQLite then restores", asyn
     assistant_message: FIRST_REPLY,
   });
   expect(stored.thread.learning_state.confirmed_points ?? []).toEqual([]);
+  expect(stored.thread.learning_state.phase).not.toBe("answer");
 
   await page.reload();
-  await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, FIRST_REPLY)).toBeVisible();
   await expect(page.getByRole("region", { name: "继续当前任务" })).toBeVisible();
 
   const restored = await durableState(page, sessionId);
@@ -114,11 +124,11 @@ test("bare understanding is rejected before a reasoned claim commits", async ({
 }) => {
   await page.goto("/");
   await send(page, FIRST_QUESTION);
-  await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, FIRST_REPLY)).toBeVisible();
 
   const sessionId = await activeSessionId(page);
   await send(page, "懂了");
-  await expect(page.getByText(BARE_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, BARE_REPLY)).toBeVisible();
 
   const rejected = await durableState(page, sessionId);
   expect(rejected.turns).toHaveLength(2);
@@ -131,7 +141,7 @@ test("bare understanding is rejected before a reasoned claim commits", async ({
   expect(rejected.thread.learning_state.payload?.state_advance_blocked).toBe(true);
 
   await send(page, CORRECT_EXPLANATION);
-  await expect(page.getByText(CORRECT_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, CORRECT_REPLY)).toBeVisible();
 
   const accepted = await durableState(page, sessionId);
   expect(accepted.turns).toHaveLength(3);
@@ -146,7 +156,7 @@ test("bare understanding is rejected before a reasoned claim commits", async ({
   );
 
   await page.reload();
-  await expect(page.getByText(CORRECT_REPLY, { exact: true })).toBeVisible();
+  await expect(assistantMessage(page, CORRECT_REPLY)).toBeVisible();
   const restoreCard = page.getByRole("region", { name: "继续当前任务" });
   await expect(restoreCard.getByText(CORRECT_EXPLANATION, { exact: true })).toBeVisible();
 
