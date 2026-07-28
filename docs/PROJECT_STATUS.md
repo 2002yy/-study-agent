@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A7 已进入 `main`；P0-A8 已完成实现与实现-head 全量门禁，正在通过 PR #74 做最终状态同步与合并收口。**  
-> 当前代码切片：`a11y/focus-feedback-responsive`；Draft PR #74。
+> 当前主线：**P0-A1–P0-A8 已进入 `main`；暂停新增功能，当前进入独立功能评估与使用体验评估。**  
+> 当前代码切片：`docs/p0-a8-merged-status`，仅同步合并后状态。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -50,7 +50,8 @@
 - PR #70 `ccdea493d8d0119e9ba0b9c203a06b5f14de1229`，CI #1462；
 - PR #71 `cca4bdfac775909956f90aeaddc5bcfc96597e12`，CI #1481；
 - PR #72 `3796bfe3bbc7c83feac9eeb9f195803a5ed57228`，最终 CI #1496；
-- PR #73 `676fe23a0f26d500712b71c6e175d99d953f1e80`，最终 CI #1520。
+- PR #73 `676fe23a0f26d500712b71c6e175d99d953f1e80`，最终 CI #1520；
+- PR #74 `911e83769c1b53849fe21772099bec0323357180`，最终 head CI #1546。
 
 ## 3. 当前真实指标
 
@@ -102,9 +103,9 @@ PR #72 在用户提交 `fae13fc90345a9147a3f08b9c8f156dc43300ab9` 基础上完�
 - `progressive_onboarding` 在 desktop / 390px 均为 0 必需点击、0 配置决策、1 个 product surface、无横向溢出；
 - `progressive_settings` 在 desktop / 390px 均为 3 次点击、0 配置决策、2 个 product surface、无横向溢出。
 
-## 7. P0-A8 已完成实现：焦点、反馈与窄屏体验
+## 7. P0-A8 已完成并进入 main：焦点、反馈与窄屏体验
 
-PR #74 在分支 `a11y/focus-feedback-responsive` 完成 P0-A8。实现 head `e3eb406c2e1c65da244dc797c212171a34fcb7fc` 的 CI #1544 已完整全绿。
+PR #74 已于 2026-07-28 squash merge，main commit 为 `911e83769c1b53849fe21772099bec0323357180`。实现 head `e3eb406c2e1c65da244dc797c212171a34fcb7fc` 的 CI #1544 与最终 status-sync head `31bd2ff17178eb60d7cc6e4cbb83763250f8126c` 的 CI #1546 均完整全绿。
 
 ### P0-A8.1 焦点与键盘
 
@@ -139,13 +140,14 @@ PR #74 在分支 `a11y/focus-feedback-responsive` 完成 P0-A8。实现 head `e3
 - CI #1538 暴露 SlideOver 两个关闭入口同名的真实可访问性歧义，产品代码修正为唯一关闭控件名称；
 - CI #1542 已通过后端和 62 files / 217 Vitest、TypeScript、Vite build，并通过 32/34 浏览器用例；剩余 2 项仅为 Playwright 模糊定位同时命中背景按钮；
 - CI #1544 在精确定位修正后完整全绿；
+- 最终 status-sync head 的 CI #1546 再次完整全绿；
 - pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy、62 files / 217 Vitest、TypeScript、Vite build 和 34/34 desktop / 390px Playwright 全部通过；
 - 新增浏览器门禁覆盖 SlideOver 焦点循环、无效上传不发请求、Clipboard 拒绝反馈、390×520 composer 可达、44px 触控目标和无横向溢出；
 - 未修改学习真值、TaskContract、RAG 排序、Provider 行为、服务端上传策略或顶级产品表面。
 
-## 8. P0-A8 完成后的独立评估
+## 8. 当前任务：独立功能评估与使用体验评估
 
-P0-A8 全绿并合并后，**先暂停新增功能**，立即进行一次独立的功能评估与使用体验评估。不得直接恢复全部旧计划，也不得边评估边扩展功能。
+P0-A8 已全绿并进入 `main`。**现在暂停新增功能**，进行一次独立的功能评估与使用体验评估。不得直接恢复全部旧计划，也不得边评估边扩展功能。
 
 ### 功能评估
 
@@ -180,19 +182,18 @@ P0-A8 全绿并合并后，**先暂停新增功能**，立即进行一次独立�
 - 普通首次入口和设置不要求理解内部模式、Provider 或检索参数；
 - 键盘、焦点、复制、上传和窄屏问题有自动回归；全量 CI 通过。
 
-## 10. 审计期间冻结
+## 10. 评估期间冻结
 
 真实 Provider claim replay、生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结。
 
 ## 11. 当前执行状态
 
-- 当前分支：`a11y/focus-feedback-responsive`；Draft PR #74；
-- 基线：PR #73 merge SHA `676fe23a0f26d500712b71c6e175d99d953f1e80`；
-- P0-A8 实现 head：`e3eb406c2e1c65da244dc797c212171a34fcb7fc`；实现 CI #1544 完整全绿；
-- 当前阶段：状态文档已同步 P0-A8 实现事实，等待本次 status-sync commit 的最终 head 完整 CI；
-- 收口动作：最终 head CI 全绿 -> PR #74 转 Ready -> 按最新 head squash merge；
-- PR #74 合并后：先做独立功能评估与使用体验评估，再决定下一批功能；
-- 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
+- `main` 当前 P0-A8 merge SHA：`911e83769c1b53849fe21772099bec0323357180`；
+- PR #74 已 closed / merged，最终 head `31bd2ff17178eb60d7cc6e4cbb83763250f8126c`，最终 CI #1546 完整全绿；
+- 当前状态分支：`docs/p0-a8-merged-status`，只负责将合并事实同步回唯一状态文档；
+- 当前阶段：P0-A1–P0-A8 功能切片全部完成，下一步只做独立功能评估与使用体验评估；
+- 新功能继续冻结，评估结论写回本文件后再决定下一批功能；
+- 合并策略继续保持：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 12. 文档规则
 
