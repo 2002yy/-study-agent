@@ -41,6 +41,24 @@ rules:
     model: pro
     reason: 用户明确要求通过引导完成知识再发现
 
+  - name: system_learning
+    priority: 100
+    keywords:
+      - 带我系统学习
+      - 系统学习
+      - 带我学
+      - 我想学习
+      - 我想学
+      - 从零学
+      - 零基础学
+      - 学习路径
+      - 一步步学
+      - 教我学习
+    role: nahida
+    mode: 苏格拉底
+    model: pro
+    reason: 用户要求持续学习闭环 → 纳西妲用苏格拉底协议建立目标并验证理解
+
   - name: mechanism_explanation
     priority: 80
     keywords:
