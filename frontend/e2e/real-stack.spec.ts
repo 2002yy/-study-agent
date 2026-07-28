@@ -12,6 +12,12 @@ const CORRECT_EXPLANATION =
   "所以二分查找每轮把候选范围减半，因此问题规模按一半递减，查找次数是对数级，因为只需重复减半直到剩一个元素。";
 const CORRECT_REPLY =
   "这段解释已经通过理解验证；下一步把减半过程迁移到查找次数估算。";
+const MATERIAL_FILE = "binary-search-boundaries.md";
+const MATERIAL_TITLE = "二分查找边界条件";
+const MATERIAL_QUESTION =
+  "请根据刚上传的资料，带我系统学习二分查找边界：目标值大于中点值时左边界如何更新？";
+const MATERIAL_REPLY =
+  "根据刚上传的资料，目标值大于中点值时，左边界更新为 mid + 1。请解释为什么不能仍把 mid 留在候选区间。";
 
 type DurableState = {
   database_path: string;
@@ -28,7 +34,50 @@ type DurableState = {
     status: string;
     user_message: string;
     assistant_message: string;
+    rag_snapshot?: Record<string, unknown>;
   }>;
+  summary: {
+    status?: string;
+    closure_run_id?: string;
+  };
+};
+
+type RagStatus = {
+  index_path: string;
+  index_exists: boolean;
+  documents: number;
+  chunks: number;
+  index_version: number;
+};
+
+type KnowledgeDocuments = {
+  index_path: string;
+  index_exists: boolean;
+  index_version: number;
+  chunks: number;
+  documents: Array<{
+    document_id: string;
+    revision_id: string;
+    title: string;
+    source_path: string;
+    chunks: number;
+    evidence_status: string;
+  }>;
+};
+
+type ClosureList = {
+  runs: Array<{
+    id: string;
+    thread_id: string;
+    status: string;
+    memory_run?: { status: string; preview: { writable: boolean } } | null;
+    thread_summary?: { status?: string };
+  }>;
+};
+
+type MemoryStatus = {
+  writable: boolean;
+  files: Array<{ name: string; exists: boolean; preview: string }>;
 };
 
 test.beforeEach(async ({ request }) => {
@@ -74,18 +123,39 @@ async function activeSessionId(page: Page): Promise<string> {
   }, { key: STORAGE_KEY });
 }
 
-async function durableState(page: Page, sessionId: string): Promise<DurableState> {
-  const response = await page.request.get(
-    `${API_BASE}/__e2e__/state/${encodeURIComponent(sessionId)}`,
-  );
+async function jsonFrom<T>(page: Page, path: string): Promise<T> {
+  const response = await page.request.get(`${API_BASE}${path}`);
   expect(response.ok()).toBe(true);
-  return (await response.json()) as DurableState;
+  return (await response.json()) as T;
+}
+
+async function durableState(page: Page, sessionId: string): Promise<DurableState> {
+  return jsonFrom<DurableState>(
+    page,
+    `/__e2e__/state/${encodeURIComponent(sessionId)}`,
+  );
 }
 
 async function send(page: Page, text: string) {
   const composer = page.getByLabel("输入学习问题");
   await composer.fill(text);
   await composer.press("Enter");
+}
+
+async function openEvidence(page: Page) {
+  const toggle = page.getByRole("button", { name: /证据轨迹/ }).last();
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  return page.getByRole("region", { name: "回答采用的证据" });
+}
+
+async function completeReasonedLearning(page: Page): Promise<string> {
+  await send(page, FIRST_QUESTION);
+  await expect(assistantMessage(page, FIRST_REPLY)).toBeVisible();
+  const sessionId = await activeSessionId(page);
+  await send(page, CORRECT_EXPLANATION);
+  await expect(assistantMessage(page, CORRECT_REPLY)).toBeVisible();
+  return sessionId;
 }
 
 test("first learning turn crosses React, FastAPI and SQLite then restores", async ({
@@ -167,4 +237,145 @@ test("bare understanding is rejected before a reasoned claim commits", async ({
   const restored = await durableState(page, sessionId);
   expect(restored.thread.learning_state).toEqual(accepted.thread.learning_state);
   expect(restored.turns).toEqual(accepted.turns);
+});
+
+test("real Markdown upload activates an index and grounds restored learning", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.locator(".topbar").getByRole("button", { name: "上传学习资料" }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: MATERIAL_FILE,
+    mimeType: "text/markdown",
+    buffer: Buffer.from(
+      [
+        `# ${MATERIAL_TITLE}`,
+        "",
+        "二分查找用于升序数组，每轮比较中点并缩小候选区间。",
+        "当目标值大于中点值时，左边界更新为 mid + 1。",
+        "当目标值小于中点值时，右边界更新为 mid - 1。",
+        "mid 已经比较过，因此不能继续留在下一轮候选区间。",
+      ].join("\n"),
+    ),
+  });
+
+  await expect(page.getByText(/资料已准备好/)).toBeVisible();
+  await expect(page.getByText(/已索引 1 个文档、\d+ 个片段 · 索引版本 v1/)).toBeVisible();
+
+  const status = await jsonFrom<RagStatus>(page, "/rag/status");
+  expect(status.index_exists).toBe(true);
+  expect(status.index_path).toContain("real-stack-runtime");
+  expect(status.documents).toBe(1);
+  expect(status.chunks).toBeGreaterThan(0);
+  expect(status.index_version).toBe(1);
+
+  const knowledge = await jsonFrom<KnowledgeDocuments>(
+    page,
+    "/knowledge-base/documents",
+  );
+  expect(knowledge.index_exists).toBe(true);
+  expect(knowledge.documents).toHaveLength(1);
+  expect(knowledge.documents[0]).toMatchObject({
+    title: MATERIAL_TITLE,
+    evidence_status: "active",
+  });
+  expect(knowledge.documents[0].revision_id).not.toBe("");
+
+  await page.getByRole("button", { name: "开始系统学习" }).click();
+  const composer = page.getByLabel("输入学习问题");
+  await expect(composer).toHaveValue(/请基于刚上传的资料开始系统学习/);
+  await send(page, MATERIAL_QUESTION);
+  await expect(assistantMessage(page, MATERIAL_REPLY)).toBeVisible();
+
+  const sessionId = await activeSessionId(page);
+  const stored = await durableState(page, sessionId);
+  const ragSnapshot = stored.turns.at(-1)?.rag_snapshot ?? {};
+  expect(ragSnapshot).toMatchObject({ status: "found", result_count: 1 });
+
+  const adopted = await openEvidence(page);
+  await expect(adopted.getByText(MATERIAL_TITLE, { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(assistantMessage(page, MATERIAL_REPLY)).toBeVisible();
+  const restoredAdopted = await openEvidence(page);
+  await expect(restoredAdopted.getByText(MATERIAL_TITLE, { exact: true })).toBeVisible();
+
+  const restored = await durableState(page, sessionId);
+  expect(restored.turns).toEqual(stored.turns);
+});
+
+test("learning closure previews, hash-commits and restores before archive", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const sessionId = await completeReasonedLearning(page);
+
+  await page.getByRole("button", { name: "整理学习" }).click();
+  const review = page.getByTestId("learning-closure-review");
+  await expect(review.getByRole("heading", { name: "回顾这次学习" })).toBeVisible();
+  await expect(review.getByText(CORRECT_EXPLANATION, { exact: true })).toBeVisible();
+  await expect(
+    review.getByText("下一步练习二分查找边界迁移", { exact: true }),
+  ).toBeVisible();
+
+  const previewClosures = await jsonFrom<ClosureList>(
+    page,
+    "/learning-closure-runs",
+  );
+  expect(previewClosures.runs).toHaveLength(1);
+  expect(previewClosures.runs[0]).toMatchObject({
+    thread_id: sessionId,
+    status: "preview_ready",
+    memory_run: { status: "previewed", preview: { writable: true } },
+  });
+
+  await review.getByRole("button", { name: "确认并保存学习成果" }).click();
+  await expect(page.getByText("本次已整理", { exact: true })).toBeVisible();
+
+  const committed = await durableState(page, sessionId);
+  expect(committed.summary).toMatchObject({
+    status: "summarized",
+    closure_run_id: previewClosures.runs[0].id,
+  });
+  const completedClosures = await jsonFrom<ClosureList>(
+    page,
+    "/learning-closure-runs",
+  );
+  expect(completedClosures.runs[0]).toMatchObject({
+    status: "completed",
+    memory_run: { status: "succeeded" },
+    thread_summary: { status: "summarized" },
+  });
+
+  const memory = await jsonFrom<MemoryStatus>(page, "/memory");
+  expect(memory.writable).toBe(true);
+  expect(
+    memory.files.find((file) => file.name === "current_focus.md"),
+  ).toMatchObject({
+    exists: true,
+    preview: "下一步练习二分查找边界迁移\n",
+  });
+  expect(
+    memory.files.find((file) => file.name === "progress.md")?.preview,
+  ).toContain(CORRECT_EXPLANATION);
+
+  await page.reload();
+  await expect(assistantMessage(page, CORRECT_REPLY)).toBeVisible();
+  await page.getByLabel("打开更多学习工具").click();
+  await page.getByRole("menuitem", { name: /学习成果/ }).click();
+  const resultsDialog = page.getByRole("dialog", { name: "学习成果" });
+  await expect(resultsDialog.getByText("本次已整理", { exact: true })).toBeVisible();
+
+  await resultsDialog.getByRole("button", { name: "归档并新建" }).click();
+  await expect(resultsDialog).toBeHidden();
+  await expect(page.getByRole("region", { name: "开始新任务" })).toBeVisible();
+
+  const sessionsResponse = await jsonFrom<{
+    sessions: Array<{ session_id: string; kind: string }>;
+  }>(page, "/sessions");
+  expect(
+    sessionsResponse.sessions.find((session) => session.session_id === sessionId),
+  ).toMatchObject({ kind: "archived" });
 });
