@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-A1–P0-A6 已完成并进入 `main`；当前执行 P0-A7 新手与设置渐进披露。**  
-> 当前代码切片：`ux/onboarding-settings-progressive-disclosure`。
+> 当前主线：**P0-A1–P0-A6 已进入 `main`；P0-A7 新手与设置渐进披露已通过实现 head 的完整门禁，状态同步后重跑最终 CI。**  
+> 当前代码切片：`ux/onboarding-settings-progressive-disclosure`，Draft PR #73。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -90,58 +90,54 @@ PR #72 在用户提交 `fae13fc90345a9147a3f08b9c8f156dc43300ab9` 基础上完�
 
 ## 6. 当前任务：P0-A7 新手与设置渐进披露
 
-### 已确认问题
-
-1. 新会话恢复卡当前同时展示快速问答、系统学习、联网研究、项目推进和上传资料五个等权入口；
-2. 输入框本身已能承接快速问答，额外模式选择增加首次回答前的认知负担；
-3. 普通设置当前暴露角色、强制角色、本会话提示词、完整角色提示词、模型档位、上下文深度和检索算法；
-4. 普通用户需要的是学习方式、资料使用、外部数据/隐私和互动氛围，而不是内部运行参数。
-
-### 本切片范围
+### 已实现
 
 #### 首次打开
 
-- 输入框保持视觉和交互主入口，用户直接输入即可获得回答；
-- 恢复卡不再展示“快速问答”按钮；
-- 默认只保留两个轻量快捷入口：**系统学习**、**上传资料**；
-- 联网研究和项目推进继续由 TaskContract 根据输入自动识别；
-- 为需要显式控制的用户，在次级“更多开始方式”中保留联网研究和项目推进；
-- 不增加新的模式栏、顶级页面或首次配置向导。
+- 输入框继续承担默认直接问答，用户不需要先选择模式；
+- 新会话恢复卡不再展示冗余的“快速问答”按钮；
+- 默认只显示 **系统学习** 与 **上传资料** 两个轻量快捷入口；
+- 联网研究和项目推进仍可由 TaskContract 根据输入自动识别；
+- 显式固定任务类型的入口进入次级“更多开始方式”；
+- 未增加模式栏、顶级页面或首次配置向导。
 
-#### 普通设置
+#### 设置
 
-默认只展示：
+普通层只显示：
 
 1. 学习方式；
-2. 回答时是否使用我的资料；
-3. 外部数据与隐私策略；
-4. 互动氛围；
+2. 互动氛围；
+3. 回答时是否使用我的资料；
+4. 联网与模型上下文隐私策略；
 5. 保存为后续新会话默认值。
 
-进入“高级设置”后才展示：
+“高级设置”展开后继续提供：
 
 - 角色选择与强制保持角色；
 - 本会话微调提示；
 - 角色说明和完整提示词；
 - 模型档位；
 - 上下文深度；
-- 检索方式、候选数、回答引用数和最低相关度。
+- 检索方式、候选来源数、回答引用数和最低相关度。
 
 ### 边界
 
-- 不改 TaskContract 分类、ChatService 路由或运行设置 API；
-- 不删除任何高级能力，只调整默认可见层级；
+- 未修改 TaskContract 分类、ChatService 路由或运行设置 API；
+- 未删除高级能力，只调整默认可见层级；
 - 已保存设置和恢复语义保持兼容；
-- 不在本切片修改 SlideOver focus trap、复制失败反馈、上传校验或软键盘行为，这些属于 P0-A8。
+- SlideOver focus trap、复制失败反馈、上传校验和软键盘仍属于 P0-A8。
 
-### 门禁
+### 门禁与修正记录
 
-- Vitest 验证新用户默认层只有系统学习和上传资料，直接输入无需模式决策；
-- Vitest 验证联网研究/项目推进只在次级展开层；
-- Vitest 验证普通设置不含角色、提示词、模型、上下文和检索参数，高级设置展开后全部可达；
-- Playwright desktop / 390px 验证首次回答 0 配置决策、快捷入口、设置展开和无横向溢出；
-- 原有 closure、session、evidence、lazy-load 和 Golden Journey 浏览器用例继续通过；
-- pytest、RAG K1、Ruff、package、detect-secrets、mypy、Vitest、TypeScript 和 Vite 全绿。
+- PR #73：`Progressively disclose onboarding and settings`，当前保持 Draft；
+- CI #1512：pytest、RAG K1、Ruff、package、detect-secrets、mypy 通过；前端 5 项失败均为测试适配：两个新增测试文件未 cleanup、jsdom 对关闭 details 的查询语义、旧 Sidebar 测试仍要求旧标题；浏览器阶段被跳过；
+- 只修复测试隔离、隐藏/可见断言和新分层文案，没有回退产品实现；
+- 实现 head `d4e2c15bbf5dd2b852d4165561bff0ab20f61a53`；
+- CI #1518：pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy、59 files / 208 Vitest、TypeScript、Vite build 和 26 个 Playwright 用例全部通过；
+- `progressive_onboarding`：desktop 与 390px 均为 0 必需点击、0 配置决策、1 个产品 surface、无横向溢出；
+- `progressive_settings`：desktop 与 390px 均为 3 次点击、0 配置决策、2 个产品 surface、无横向溢出；
+- 原有 bootstrap、closure、session、evidence、错误恢复和 Sources 三层旅程全部继续通过；
+- 本状态提交后必须对最新 head 重跑完整 CI，未全绿前 PR #73 保持 Draft。
 
 ## 7. 后续顺序
 
@@ -164,10 +160,11 @@ PR #72 在用户提交 `fae13fc90345a9147a3f08b9c8f156dc43300ab9` 基础上完�
 
 ## 10. 当前执行状态
 
-- 当前分支：`ux/onboarding-settings-progressive-disclosure`；
+- 当前分支：`ux/onboarding-settings-progressive-disclosure`，Draft PR #73；
 - 基线：PR #72 merge SHA `3796bfe3bbc7c83feac9eeb9f195803a5ed57228`；
-- 当前阶段：P0-A7 范围已锁定，准备修改 RestoreCard 与 SettingsPanel；
-- 下一动作：实现组件分层、组件测试和 desktop/390px 浏览器门禁，建立 Draft PR；
+- 实现 head：`d4e2c15bbf5dd2b852d4165561bff0ab20f61a53`，CI #1518 全绿；
+- 当前阶段：状态同步后验证最终 head；
+- 下一动作：最终 CI 全绿后 Ready + squash merge，再从最新 `main` 进入 P0-A8；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 11. 文档规则
