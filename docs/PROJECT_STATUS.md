@@ -1,10 +1,10 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-07-27  
+> 更新：2026-07-28  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**学习真值、浏览器旅程、核心首屏和资料三层收口已进入 `main`；P0-A5 review-first 与 P0-A6 唯一 SessionNavigator 已在当前分支完成。**
-> 当前代码切片：`codex/p0-a5-a6-review-session-owner`。
+> 当前主线：**P0-A5 学习结束 review-first 与 P0-A6 SessionNavigator 单一 owner 已通过实现 head 的完整门禁；PR #72 状态同步后重跑最终 CI。**  
+> 当前代码切片：`codex/p0-a5-a6-review-session-owner`，Draft PR #72。
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -22,7 +22,7 @@
 - planned / attempted / failed 不得覆盖 committed truth。
 - 当前冻结横向扩展，以核心学习闭环是否真实可用为判断标准。
 
-## 2. 已完成
+## 2. 已完成主链
 
 - TaskContract、LearningClosureRun、ThreadSummaryState、结构化恢复卡；
 - RAG K1a-K1e、EvidenceSnapshot、ResearchRun source truth；
@@ -30,7 +30,8 @@
 - AnswerClaimSnapshot v1 与 record-only 离线评测；
 - 生产路径学习验证 E2E；
 - Chromium desktop / 390px 五类 Golden Journey；
-- 核心首屏按需加载与隐藏功能错误隔离。
+- 核心首屏按需加载与隐藏功能错误隔离；
+- 资料与来源三层收口。
 
 已合并：
 
@@ -44,7 +45,7 @@
 - PR #68 `4da85690043e9144b18dabaf0b4d2359c16eaeb8`，CI #1437；
 - PR #69 `04ac7d59c2f7ed76eee7192c3500ebbb6bc6d286`，CI #1449；
 - PR #70 `ccdea493d8d0119e9ba0b9c203a06b5f14de1229`，CI #1462；
-- PR #71 `cca4bdfac775909956f90aeaddc5bcfc96597e12`，main CI #30263505859。
+- PR #71 `cca4bdfac775909956f90aeaddc5bcfc96597e12`，CI #1481，main CI #30263505859。
 
 ## 3. 当前真实指标
 
@@ -100,52 +101,50 @@ G10-D 可执行代理继续冻结。
 
 单一 Sources 抽屉内部现在分为：
 
-1. **本次回答依据**：默认层，只读取当前回答的 server-owned EvidenceSnapshot；只显示 lifecycle `selected` 或 pedagogy 明确引用的证据；
+1. **本次回答依据**：只读取当前回答的 server-owned EvidenceSnapshot；只显示 lifecycle `selected` 或 pedagogy 明确引用的证据；
 2. **我的资料**：只显示知识库文档、active/superseded/excluded 状态、恢复、删除和重建；
 3. **检索诊断**：显示 candidate/read/rejected/selected 生命周期、排序、相关度、命中词、评分明细、来源片段和模型上下文。
 
-已验证边界：
+已验证：前端不根据检索排序产生 selected evidence；手动 `ragSearch` 只进入诊断；无 selected evidence 时不回退展示候选；desktop 与 390px tab 切换和无横向溢出通过。
 
-- 前端没有根据检索排序自行产生 selected evidence；
-- 手动 `ragSearch` 结果只进入诊断层；
-- 默认层不含 candidate、score、context 或 document management；
-- 没有 selected evidence 时显示明确空状态，不回退展示候选；
-- 资料层不显示检索候选与分数；
-- 诊断层包含完整证据生命周期和检索内部信息；
-- desktop 与 390px 真实 Sources 抽屉 tab 切换、server-owned adopted evidence 和无横向溢出均通过。
+## 8. 当前任务：P0-A5 / P0-A6
 
-### 门禁与修正
+分支：`codex/p0-a5-a6-review-session-owner`。Draft PR #72。
 
-- CI #1473：后端/RAG/类型全绿；旧资料资格测试仍假设文档管理默认展开，新测试未 cleanup，浏览器未执行；只更新测试操作与隔离；
-- CI #1477：所有组件、类型与构建全绿，原有 16 个浏览器用例通过；新增两项只因测试错误地在聊天页等待证据标题而失败；
-- CI #1479：全部后端、RAG、Ruff、package、secrets、mypy、Vitest、Vite 和 18 个 desktop/mobile Chromium 用例全绿；
-- 实现 head `8d8e25ddf80985a5dedd90d33f1bfc5ef62f1aa3`；
-- PR #71 已合并，merge SHA `cca4bdfac775909956f90aeaddc5bcfc96597e12`；main CI #30263505859 全绿。
+### P0-A5 学习结束 review-first
 
-## 8. P0-A5 / P0-A6 已完成：学习结束 review-first + 唯一 SessionNavigator
+- 默认流程先展示本次确认、剩余缺口、建议下一步和保存影响；
+- `LearningClosureRun` 与 hash-locked `MemoryRun` 仍是唯一写入边界；
+- 用户确认后才提交，暂不保存只关闭成果抽屉并继续学习；
+- Memory target、append/replace、evidence refs、confidence 和 pending observation 进入折叠的高级明细；
+- 完成态只保留学习者可理解的摘要和“继续当前 / 归档并新建”。
 
-分支：`codex/p0-a5-a6-review-session-owner`。
+审计修正：
 
-已实现：
+- “本次确认”优先读取 `committed_snapshot.structured_input.committed_learning_state.confirmed_points`；
+- “还需继续”优先读取 committed `unresolved_gap`，项目闭环读取 committed blockers / failed tests；
+- 不再因为模型生成候选的 target 是 `progress` 就把内容包装成 committed truth；
+- 建议下一步与保存范围仍来自冻结候选和 linked MemoryRun，不在前端重算写入内容；
+- 旧版缺少 structured input 的闭包只使用明确的兼容 fallback。
 
-1. 默认结束流程先展示本次确认、剩余缺口、建议下一步和确认后的保存影响；
-2. 长期学习成果仍由冻结的 `LearningClosureRun` / `MemoryRun` 驱动，只有用户确认后才提交；
-3. Memory target、append/replace、evidence refs 和 pending observation 只留在折叠的高级明细；
-4. 提交完成态只保留一张学习者可理解的摘要卡，高级写入工作台不会自动展开；
-5. “继续当前”只关闭成果抽屉，“归档并新建”明确归档旧会话后创建新会话；
-6. `useSessionNavigator` 统一拥有搜索、分组、重命名、恢复确认和归档确认；
-7. desktop sidebar 与移动抽屉都渲染同一 `SessionNavigator` / `SessionNavigatorBody`；
-8. `SessionSidebar` 与 `SessionsPanel` 只保留薄兼容包装，不再拥有交互状态或 API 调用；
-9. Playwright 测试依赖已进入项目 devDependencies，本地可显式使用系统 Chrome，CI 默认浏览器行为不变。
+### P0-A6 SessionNavigator 单一 owner
 
-验证：
+- desktop sidebar 与 mobile drawer 复用同一 `SessionNavigator` / `SessionNavigatorBody`；
+- `SessionSidebar` 与 `SessionsPanel` 仅保留薄兼容包装；
+- 搜索、分组、重命名、恢复保护和归档确认由共享 interaction store 唯一拥有；
+- 两个视图同时挂载时 query、rename 和 archive-confirm state 不再分叉；
+- 组件 API 和现有 WorkspaceView 组合边界保持不变。
 
-- 前端 Vitest：58 files / 203 tests 全绿；
-- 后端学习闭环、会话导航与 summary status：21 tests 全绿；
-- Vite production build 通过，保留既有单 chunk 大于 500 kB 警告；
-- review -> confirm -> archive/new 在 desktop Chromium 与 390px mobile Chromium 全绿；
-- 共享 SessionNavigator 的 desktop sidebar 与 mobile drawer 搜索旅程全绿；
-- 两条浏览器旅程均无横向溢出。
+### 门禁与修正记录
+
+- 用户原始提交：`fae13fc90345a9147a3f08b9c8f156dc43300ab9`；
+- 审计发现并修复 committed-truth 展示边界与双 SessionNavigator 状态 owner；
+- CI #1492：pytest、RAG、Ruff、package、secrets、mypy 通过；前端测试因新增共享 store 测试未 cleanup，两个用例发生 DOM/状态残留，浏览器阶段被跳过；
+- 只增加测试 `cleanup()`，未修改产品规则；
+- 实现 head `f3c2b715cb2f755240068d393e7397b11af832a8`；
+- CI #1494：pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy、58 files / 205 Vitest、TypeScript、Vite build、全部 desktop/390px Playwright journeys 全绿；
+- closure review -> confirm -> archive/new 与共享 SessionNavigator 搜索旅程均通过，无横向溢出和未处理 fixture API；
+- 本状态提交后必须对最新 head 重跑完整 CI，未全绿前 PR #72 保持 Draft。
 
 ## 9. 后续顺序
 
@@ -167,10 +166,11 @@ G10-D 可执行代理继续冻结。
 
 ## 12. 当前执行状态
 
-- 当前分支：`codex/p0-a5-a6-review-session-owner`；
-- 基线：PR #71 merge SHA `cca4bdfac775909956f90aeaddc5bcfc96597e12`，main CI #30263505859 全绿；
-- 当前阶段：P0-A5 review-first 与 P0-A6 SessionNavigator single owner 已完成并通过本地门禁；
-- 下一动作：进入 P0-A7 新手与设置渐进披露；提交前再运行完整 browser suite；
+- 当前分支：`codex/p0-a5-a6-review-session-owner`，Draft PR #72；
+- 基线：PR #71 merge SHA `cca4bdfac775909956f90aeaddc5bcfc96597e12`；
+- 实现 head：`f3c2b715cb2f755240068d393e7397b11af832a8`，CI #1494 全绿；
+- 当前阶段：状态同步后验证最终 head；
+- 下一动作：最终 CI 全绿后 Ready + squash merge，再从最新 `main` 进入 P0-A7；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 13. 文档规则
