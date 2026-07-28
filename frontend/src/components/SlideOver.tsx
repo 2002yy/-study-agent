@@ -89,7 +89,13 @@ export function SlideOver({
   if (!open) return null;
   return (
     <div className="slide-over-root" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <button className="slide-over-backdrop" onClick={onClose} aria-label={`关闭${title}`} type="button" tabIndex={-1} />
+      <button
+        className="slide-over-backdrop"
+        onClick={onClose}
+        aria-label={`点击背景关闭${title}`}
+        type="button"
+        tabIndex={-1}
+      />
       <aside className="slide-over" ref={panelRef} tabIndex={-1}>
         <header className="slide-over-header">
           <strong id={titleId}>{title}</strong>
