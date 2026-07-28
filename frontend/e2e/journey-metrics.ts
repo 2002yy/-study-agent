@@ -59,6 +59,7 @@ export type SuccessArtifact = {
   step: string;
   file: string;
   viewport: { width: number; height: number } | null;
+  product_surfaces: string[];
 };
 
 export async function installJourneyRecorder(page: Page) {
@@ -84,7 +85,7 @@ export async function installJourneyRecorder(page: Page) {
       try {
         window.sessionStorage.setItem(storageKey, JSON.stringify(actions));
       } catch {
-        // The recorder is diagnostic-only and must not break the journey.
+        // Diagnostic-only recorder: never block the product journey.
       }
     };
     const push = (action: BrowserAction) => write([...read(), action]);
@@ -237,6 +238,12 @@ function safeSegment(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function successManifest(): SuccessArtifact[] {
+  return existsSync(GOLDEN_JOURNEY_SUCCESS_MANIFEST_PATH)
+    ? JSON.parse(readFileSync(GOLDEN_JOURNEY_SUCCESS_MANIFEST_PATH, "utf8")) as SuccessArtifact[]
+    : [];
+}
+
 export async function captureSuccessStep(
   page: Page,
   testInfo: TestInfo,
@@ -246,6 +253,7 @@ export async function captureSuccessStep(
   const filename = `${safeSegment(journey)}--${safeSegment(testInfo.project.name)}--${safeSegment(step)}.png`;
   const path = resolve(GOLDEN_JOURNEY_SUCCESS_DIR, filename);
   mkdirSync(dirname(path), { recursive: true });
+  const surfaces = await visibleProductSurfaceNames(page);
   await page.screenshot({ path, fullPage: true, animations: "disabled" });
   const artifact: SuccessArtifact = {
     journey,
@@ -253,11 +261,9 @@ export async function captureSuccessStep(
     step,
     file: filename,
     viewport: page.viewportSize(),
+    product_surfaces: surfaces,
   };
-  const current: SuccessArtifact[] = existsSync(GOLDEN_JOURNEY_SUCCESS_MANIFEST_PATH)
-    ? JSON.parse(readFileSync(GOLDEN_JOURNEY_SUCCESS_MANIFEST_PATH, "utf8")) as SuccessArtifact[]
-    : [];
-  const next = current
+  const next = successManifest()
     .filter((item) => !(item.journey === journey && item.project === testInfo.project.name && item.step === step))
     .concat(artifact)
     .sort((left, right) =>
@@ -288,7 +294,15 @@ export async function recordObservedMetric(
   },
 ) {
   const actionSummary = await journeyActionSummary(page);
-  const surfaceNames = await visibleProductSurfaceNames(page);
+  const currentSurfaceNames = await visibleProductSurfaceNames(page);
+  const artifactSurfaceNames = successManifest()
+    .filter((item) =>
+      item.journey === input.journey
+      && item.project === testInfo.project.name
+      && input.success_artifacts.includes(item.file),
+    )
+    .flatMap((item) => item.product_surfaces);
+  const surfaceNames = [...new Set([...currentSurfaceNames, ...artifactSurfaceNames])].sort();
   await recordMetric(testInfo, {
     journey: input.journey,
     project: testInfo.project.name,
