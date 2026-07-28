@@ -42,40 +42,88 @@ function candidatesFrom(run: LearningClosureRunResponse): ClosureCandidate[] {
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
 export function buildClosureReviewModel(
   run: LearningClosureRunResponse,
   memoryRun: MemoryRunResponse | null,
 ): ClosureReviewModel {
-  const model: ClosureReviewModel = {
-    confirmed: [],
-    unresolved: [],
-    next: [],
-    impactLabels: [],
-  };
+  const candidates = candidatesFrom(run);
+  const committedSnapshot = asRecord(run.committed_snapshot);
+  const structuredInput = asRecord(committedSnapshot.structured_input);
+  const committedLearning = asRecord(structuredInput.committed_learning_state);
+  const committedProject = asRecord(structuredInput.committed_project_state);
+  const hasCommittedState =
+    Object.keys(committedLearning).length > 0 || Object.keys(committedProject).length > 0;
 
-  for (const candidate of candidatesFrom(run)) {
-    const content = candidate.content.trim();
-    if (candidate.target === "current_focus") {
-      model.next.push(content);
-    } else if (
-      candidate.target === "revision_notes" ||
-      candidate.target === "learner_profile" ||
-      candidate.learner_pending
-    ) {
-      model.unresolved.push(content);
-    } else {
-      model.confirmed.push(content);
-    }
-  }
+  const confirmed = hasCommittedState
+    ? unique([
+        ...stringList(committedLearning.confirmed_points),
+        ...stringList(committedProject.completed_deliverables),
+        ...stringList(committedProject.milestones),
+      ])
+    : unique(
+        candidates
+          .filter(
+            (candidate) =>
+              candidate.target !== "current_focus" &&
+              candidate.target !== "revision_notes" &&
+              candidate.target !== "learner_profile" &&
+              !candidate.learner_pending,
+          )
+          .map((candidate) => candidate.content.trim()),
+      );
 
-  model.impactLabels = Array.from(
+  const unresolved = hasCommittedState
+    ? unique([
+        stringValue(committedLearning.unresolved_gap),
+        ...stringList(committedProject.blockers),
+        ...stringList(committedProject.failed_tests),
+      ])
+    : unique(
+        candidates
+          .filter(
+            (candidate) =>
+              candidate.target === "revision_notes" ||
+              candidate.target === "learner_profile" ||
+              candidate.learner_pending,
+          )
+          .map((candidate) => candidate.content.trim()),
+      );
+
+  const next = unique([
+    stringValue(committedProject.next_action),
+    ...candidates
+      .filter((candidate) => candidate.target === "current_focus")
+      .map((candidate) => candidate.content.trim()),
+  ]);
+
+  const impactLabels = Array.from(
     new Set(
       (memoryRun?.updates ?? []).map(
         (update) => IMPACT_LABELS[update.target] ?? "长期学习记录",
       ),
     ),
   );
-  return model;
+
+  return { confirmed, unresolved, next, impactLabels };
 }
 
 function ReviewSection({
@@ -137,7 +185,7 @@ export function LearningClosureReview({
         <div>
           <span className="closure-review-kicker">保存前确认</span>
           <h2 id="closure-review-title">回顾这次学习</h2>
-          <p>下面只包含已经提交的学习事实。确认后才会写入长期学习记录。</p>
+          <p>确认内容与缺口来自已提交状态；建议下一步和保存范围来自冻结的整理候选。</p>
         </div>
         <ShieldCheck aria-hidden="true" size={22} />
       </header>
