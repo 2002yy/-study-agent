@@ -26,6 +26,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
+      testIgnore: ["complex-content.spec.ts"],
       use: {
         browserName: "chromium",
         viewport: { width: 1440, height: 900 },
@@ -33,9 +34,20 @@ export default defineConfig({
     },
     {
       name: "mobile-chromium",
+      testIgnore: ["complex-content.spec.ts"],
       use: {
         browserName: "chromium",
         viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
+    {
+      name: "narrow-chromium",
+      testMatch: ["complex-content.spec.ts"],
+      use: {
+        browserName: "chromium",
+        viewport: { width: 360, height: 520 },
         isMobile: true,
         hasTouch: true,
       },
