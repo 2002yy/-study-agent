@@ -47,6 +47,7 @@ from src.application.policy_chat_service import (  # noqa: E402
 from src.application.runtime_repository import (  # noqa: E402
     get_chat_service,
     get_runtime_repository,
+    reset_runtime_repository_cache,
     runtime_database_path,
 )
 from src.context_builder import build_messages  # noqa: E402
@@ -189,6 +190,24 @@ def _real_stack_chat_service() -> ExternalDataPolicyChatService:
 
 
 app.dependency_overrides[get_chat_service] = _real_stack_chat_service
+
+
+def _remove_runtime_database() -> None:
+    database_path = runtime_database_path()
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{database_path}{suffix}").unlink(missing_ok=True)
+
+
+@app.post("/__e2e__/reset")
+def reset_real_stack_state() -> dict[str, Any]:
+    """Reset all durable test state between isolated browser journeys."""
+
+    _real_stack_chat_service.cache_clear()
+    reset_runtime_repository_cache()
+    _remove_runtime_database()
+    for directory in (E2E_ROOT / "current", E2E_ROOT / "archive"):
+        shutil.rmtree(directory, ignore_errors=True)
+    return {"reset": True, "database_path": str(runtime_database_path())}
 
 
 @app.get("/__e2e__/state/{session_id}")
