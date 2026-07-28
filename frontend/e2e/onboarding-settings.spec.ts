@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { FIRST_QUESTION, FIRST_REPLY, installApiFixture } from "./api-fixture";
-import { noHorizontalOverflow, recordMetric } from "./journey-metrics";
+import {
+  noHorizontalOverflow,
+  recordMetric,
+  visibleProductSurfaces,
+} from "./journey-metrics";
 
 test("new session keeps direct input primary and progressively reveals explicit task overrides", async ({ page }, testInfo) => {
   const fixture = await installApiFixture(page);
@@ -32,7 +36,7 @@ test("new session keeps direct input primary and progressively reveals explicit 
     viewport: page.viewportSize(),
     required_clicks: 0,
     required_decisions: 0,
-    product_surfaces: 1,
+    product_surfaces: await visibleProductSurfaces(page),
     recovery_clicks: 0,
     has_actionable_failure: false,
     keyboard_only: false,
@@ -72,18 +76,19 @@ test("ordinary settings hide engineering controls until advanced disclosure", as
   await expect(settings.getByRole("spinbutton", { name: "最低相关度" })).toBeVisible();
 
   expect(fixture.unexpectedApiPaths).toEqual([]);
-  expect(await noHorizontalOverflow(page)).toBe(true);
+  const noOverflow = await noHorizontalOverflow(page);
+  expect(noOverflow).toBe(true);
   await recordMetric(testInfo, {
     journey: "progressive_settings",
     project: testInfo.project.name,
     viewport: page.viewportSize(),
-    required_clicks: 2,
+    required_clicks: 3,
     required_decisions: 0,
-    product_surfaces: 1,
+    product_surfaces: await visibleProductSurfaces(page),
     recovery_clicks: 0,
     has_actionable_failure: false,
     keyboard_only: false,
     refresh_restore: false,
-    no_horizontal_overflow: true,
+    no_horizontal_overflow: noOverflow,
   });
 });
