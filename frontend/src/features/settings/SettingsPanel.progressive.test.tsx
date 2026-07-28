@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiSnapshot, ChatSettings, RagSettings } from "../../types";
 import { SettingsPanel } from "./SettingsPanel";
@@ -66,36 +66,38 @@ function renderPanel() {
   );
 }
 
+afterEach(() => cleanup());
+
 describe("SettingsPanel progressive disclosure", () => {
   it("keeps ordinary settings focused on learning, material, privacy and tone", () => {
     renderPanel();
 
-    expect(screen.getByRole("combobox", { name: "学习方式" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "互动氛围" })).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "回答时使用我的资料" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "联网策略" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "模型上下文" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "设为全局默认" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "学习方式" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "互动氛围" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "回答时使用我的资料" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "联网策略" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "模型上下文" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "设为全局默认" })).toBeVisible();
 
-    expect(screen.queryByRole("combobox", { name: "角色" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "模型档位" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "上下文深度" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "检索方式" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "本会话微调" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "角色", hidden: true })).not.toBeVisible();
+    expect(screen.getByRole("combobox", { name: "模型档位", hidden: true })).not.toBeVisible();
+    expect(screen.getByRole("combobox", { name: "上下文深度", hidden: true })).not.toBeVisible();
+    expect(screen.getByRole("combobox", { name: "检索方式", hidden: true })).not.toBeVisible();
+    expect(screen.getByRole("textbox", { name: "本会话微调", hidden: true })).not.toBeVisible();
   });
 
   it("keeps all existing engineering controls reachable after opening advanced settings", () => {
     renderPanel();
-    fireEvent.click(screen.getByText("高级设置"));
+    fireEvent.click(screen.getByText("高级设置", { exact: true }));
 
-    expect(screen.getByRole("combobox", { name: "角色" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "强制保持当前角色" })).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "本会话微调" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "模型档位" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "上下文深度" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "检索方式" })).toBeTruthy();
-    expect(screen.getByRole("spinbutton", { name: "候选来源" })).toBeTruthy();
-    expect(screen.getByRole("spinbutton", { name: "回答引用" })).toBeTruthy();
-    expect(screen.getByRole("spinbutton", { name: "最低相关度" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "角色" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "强制保持当前角色" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "本会话微调" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "模型档位" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "上下文深度" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "检索方式" })).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: "候选来源" })).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: "回答引用" })).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: "最低相关度" })).toBeVisible();
   });
 });
