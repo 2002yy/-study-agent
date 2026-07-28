@@ -13,6 +13,7 @@ import "./trustworthy-learning-status.css";
 import "./restore-card.css";
 import "./progressive-disclosure.css";
 import "./features/rag/sourcesPanel.css";
+import "./accessibility-responsive.css";
 
 type AppErrorBoundaryState = {
   error: Error | null;
