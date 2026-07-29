@@ -1,10 +1,10 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-07-28  
+> 更新：2026-07-29  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-E1 已完成；P0-E2 第一切片“成功截图与真实动作指标”已进入 `main`，当前推进 360px / 窄高度与复杂内容门禁。**  
-> 解冻条件：**P0-E2 完成前，真实 Provider AnswerClaim replay 与生产 claim/agent 扩张继续冻结。**
+> 当前主线：**P0-E1 与 P0-E2 已完成并进入 `main`；下一阶段解冻真实 Provider AnswerClaim replay，但继续保持 record-only。**  
+> 冻结边界：**生产 claim producer / claim UI、生产 ChatTurn 接入与可执行 agent 扩张继续冻结，必须由真实 replay 结果决定后续顺序。**
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -20,7 +20,7 @@
 - Memory 是连续性基础设施；Workflow 只属于高级诊断。
 - React 是交互和可重建缓存；SQLite durable entities 是运行真值。
 - planned / attempted / partial / failed 不得覆盖 committed truth。
-- 当前冻结横向扩展，以核心学习闭环是否真实可用为判断标准。
+- 当前仍冻结横向产品扩张，以真实 replay、质量门禁和核心学习闭环为判断标准。
 
 ## 2. 已完成主链
 
@@ -28,7 +28,7 @@
 - RAG K1a-K1e、EvidenceSnapshot、ResearchRun source truth；
 - AnswerClaimSnapshot v1 与 record-only 离线评测；
 - 生产路径学习验证 E2E；
-- desktop / 390px Golden Journeys；
+- desktop / 390px / 定向 360×520 Golden Journeys；
 - 核心首屏按需加载与隐藏功能错误隔离；
 - 资料与来源三层收口；
 - 学习结束 review-first；
@@ -37,7 +37,8 @@
 - SlideOver 键盘焦点闭环、复制反馈、上传前置合同和窄屏/软键盘体验门禁；
 - React -> FastAPI -> SQLite 的确定性真实全栈浏览器运行时；
 - 首次学习、理解验证、真实上传/索引/证据、learning closure、中断续写和失败重试的真实组合门禁；
-- 选定绿色旅程的命名成功截图、manifest、真实动作 recorder 与证据完整性 teardown。
+- 命名成功截图、manifest、浏览器真实动作 recorder、对话滚动几何与证据完整性 teardown；
+- 长中文、长 URL、宽代码、IME composition、真实 wheel 滚动、回到最新与刷新恢复的 360×520 门禁。
 
 近期已进入 `main`：
 
@@ -51,7 +52,9 @@
 - PR #80 `56b584c1a9ab28eeb997e5636015270be501d32a`，第二切片状态同步，CI #1599；
 - PR #81 `2ed83b57d49b8057a128b9e3df62da62a7be133e`，最终 head CI #1609；
 - PR #82 `b2d178777e43a2c165e9b4229b0531db855bfe8e`，P0-E1 完成状态同步，CI #1613；
-- PR #83 `c90bc39ad3bbe9137e035d0892122b3b86755749`，最终 head CI #1626。
+- PR #83 `c90bc39ad3bbe9137e035d0892122b3b86755749`，最终 head CI #1626；
+- PR #84 `28176449373d9819a40ad35768741095d3b888c5`，P0-E2 第一切片状态同步，CI #1630；
+- PR #85 `fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`，最终 head CI #1659。
 
 ## 3. 当前真实指标
 
@@ -72,17 +75,28 @@
 
 G10-D 可执行代理继续冻结。
 
-### P0-E2 首批 observed journey metrics
+### P0-E2 observed journey metrics
 
-以下数字来自浏览器事件 recorder，而不是用例手写常量；desktop 与 390px 结果一致：
+以下数字来自浏览器事件 recorder，而不是用例手写常量；前三条 desktop 与 390px 结果一致：
 
 | 旅程 | 点击 | 配置/推进决策 | 恢复动作 | 发送 | 用户滚动 | 表面并集 |
 |---|---:|---:|---:|---:|---:|---|
 | 首次回答 | 0 | 0 | 0 | 1 | 0 | main、returning restore |
 | 返回学习 | 1 | 1 | 1 | 1 | 0 | main、returning restore |
 | 失败重试 | 1 | 0 | 1 | 1 | 0 | main、interrupted recovery、returning restore |
+| 360×520 复杂内容 | 1 | 0 | 0 | 1 | 1 | main、returning restore |
 
-三条旅程均无横向溢出。首次回答为 keyboard-only 路径。
+- 四条旅程均无页面级横向溢出；首次回答为 keyboard-only 路径。
+- 复杂内容旅程中的一次点击为“回到最新”；真实 wheel 记录为 `wheel:-700`。
+- IME 组合期间的 Enter 不提交；composition end 后 Enter 只提交一次。
+
+### P0-E2 成功证据包
+
+- 23 张真实 viewport PNG：desktop 1440×900 共 9 张、mobile 390×844 共 9 张、narrow 360×520 共 5 张；
+- 360×520 对话可视高度 251px；
+- 用户滚动后距底部 700px；点击“回到最新”后距底部 0；刷新后仍为 0；
+- 宽代码只在代码块内部横向滚动；长 URL 在消息边界内换行；
+- global teardown 强制校验截图数量、尺寸、manifest、observed metrics、文件非空和交叉引用。
 
 ## 4. 已验证的产品闭环
 
@@ -97,6 +111,7 @@ G10-D 可执行代理继续冻结。
 | 学习结束 | 真实全栈通过 | closure preview、冻结候选、MemoryRun hash、确认写入、summary、刷新、归档并新建 |
 | 中断恢复 | 真实全栈通过 | Stop 后 partial 保存为 interrupted；刷新恢复；同 turn id 续写；前缀不重复；只提交一次 |
 | 失败重试 | 真实全栈通过、成功证据可审查 | 零-token failed / fixture failure 均有明确 retry；一次恢复点击；刷新恢复最终结果 |
+| 窄屏复杂内容 | 通过、成功证据可审查 | 360×520 长文/URL/代码、IME、真实滚动、回到最新、主动发送定位与刷新恢复 |
 
 ## 5. P0-E1 第一切片：首次学习与理解验证
 
@@ -184,46 +199,84 @@ committed learning state
 
 CI #1609 通过全部基础门禁、34/34 fixture Golden Journeys 与 12/12 real-stack cases。
 
-## 8. P0-E2：可审查成功体验证据
+## 8. P0-E2：可审查成功体验证据——已完成
 
-### 8.1 第一切片已完成：成功产物与真实动作指标
+### 8.1 第一切片：成功产物与真实动作指标
 
-PR #83 建立了稳定证据合同：
+PR #83 建立稳定证据合同：
 
 - browser recorder 自动采集 click、Tab/Enter/Escape、composer submit、wheel/touch/滚动键、明确决策、恢复动作和 surface switch；
 - recorder 使用 session storage 跨刷新保留完整旅程，而不依赖用例手写计数；
 - 首次回答、返回学习、失败重试各保留 3 个命名步骤，覆盖 desktop 与 390px，共 18 张 PNG；
-- 所有截图为真实 viewport 尺寸：desktop 1440×900、mobile 390×844；不使用 full-page，避免固定 composer 覆盖页面中段和截图过程污染滚动指标；
+- 截图使用真实 viewport，不使用 full-page，避免固定 composer 覆盖页面中段和截图过程污染滚动指标；
 - manifest 记录 journey、project、step、viewport、scroll position、document height 和可见 product surfaces；
-- `product_surfaces` 按所有成功步骤取并集，不再只统计结束页面的 main/dialog；
-- global teardown 强制校验 18 张截图、manifest、6 条 observed metric、文件非空和交叉引用；
-- CI #1626 通过全部后端/静态/前端门禁、34/34 fixture Golden Journeys、evidence completeness teardown 与 12/12 real-stack cases。
+- `product_surfaces` 按所有成功步骤取并集，不再只统计结束页面；
+- CI #1626 通过全部门禁。
 
-人工初步查看产物时已记录一个待 P0-E2 最终试玩复核的表达问题：fixture 的 503 失败恢复卡仍使用“上次回答在生成过程中中断”这一泛化标题，功能路径正确，但 failed 与 interrupted 的用户语义可能不够清楚。当前切片不扩张产品修改，保留为人工试玩输入。
+### 8.2 第二切片：360×520、复杂内容、IME 与真实滚动
 
-### 8.2 当前执行项：360px / 窄高度与复杂内容
+PR #85 增加一个定向 `narrow-chromium` 项目，而不是把全部旅程扩成三倍：
 
-1. 增加 360px 与 360×520 窄高度项目，不扩大到新浏览器引擎；
-2. 覆盖长中文连续文本、长 URL、长代码块和多段列表；
-3. 使用真实 compositionstart / compositionupdate / compositionend 验证输入法组合期间 Enter 不误发送，组合结束后可正常发送；
-4. 使用 wheel/touch 手势产生真实滚动指标，并验证刷新后消息位置、恢复卡和 composer 仍可达；
-5. 检查关键文字截断、横向溢出、代码块内部滚动、固定元素遮挡和安全区；
-6. 将代表性绿色步骤加入成功证据包与 manifest，而不是只保留失败截图。
+- 覆盖长中文连续文本、长 URL、宽代码和多段列表；
+- 验证长 URL 不撑破消息，宽代码由代码块内部滚动承接；
+- compositionstart / compositionupdate / compositionend 期间 Enter 不误发送；
+- 使用真实 wheel 产生滚动，验证“回到最新”和刷新恢复；
+- manifest 增加 conversation scrollTop / scrollHeight / clientHeight / distance-from-bottom；
+- evidence completeness 从 18 张扩展到 23 张；
+- Playwright 明确分离 34 条 fixture、1 条 narrow 和 12 条 real-stack。
 
-### 8.3 后续：人工试玩记录
+真实门禁连续暴露并修复：
 
-- 基于成功截图、manifest 和 observed metrics，而不是只看测试通过；
-- 记录阻断、困惑点、可接受项和需要进入修复切片的问题；
-- P0-E2 结论写回本文件后，才允许解冻 Provider replay。
+1. 移动端 chat 可能按内容高度扩张，conversation 不是真正 scroll owner；
+2. 长 Markdown 刷新恢复可能停在中段；
+3. 用户在旧内容位置主动发送后，新问题和回答不可见；
+4. “回到最新”可能被 composer 覆盖或被 sticky header 拦截；
+5. 在 360×520 下，学习状态、topbar 与单列 composer 一度只给对话留下约 10px。
 
-## 9. P1 / P2 缺口
+最终结构：conversation 拥有独立 viewport shell；短手机窗口只保留目标与验证状态，topbar 操作保持单行，composer 使用紧凑横向发送。390×844 正常移动布局不受短高度规则影响。CI #1659 通过全部门禁、35/35 fixture+narrow 与 12/12 real-stack。
+
+### 8.3 基于成功证据的人工复核记录
+
+本次人工复核基于 23 张成功截图、manifest 与 observed metrics；不是实体手机和真实操作系统输入法的实机测试。
+
+**已消除的阻断：**
+
+- 360×520 对话区不再坍缩，稳定保留 251px 阅读高度；
+- composer、顶部操作和“回到最新”互不遮挡；
+- 主动发送后回到最新，后台新增内容仍尊重用户旧阅读位置；
+- 刷新后恢复到最终回答；
+- 长 URL、代码块和列表未造成页面横向溢出。
+
+**可接受项：**
+
+- 短高度下隐藏阶段与下一步等次要状态，只保留目标和验证状态，符合渐进披露原则；
+- “回到最新”浮在对话右下角，会覆盖小块正文，但只在离开底部时出现，且可立即恢复；
+- 宽代码依赖代码块内横向滑动，没有额外提示，当前不构成阻断。
+
+**仍需后续处理：**
+
+- fixture 503 恢复卡的泛化标题仍可能让 failed 与 interrupted 语义不够清楚，列入 P1 文案校准；
+- 浏览器 composition 事件已覆盖，但实体安卓/iOS 输入法、软键盘安全区和真实触摸惯性仍需实机抽样；
+- Firefox/WebKit 未进入当前门禁。
+
+**P0-E2 结论：通过。** 当前 Chromium desktop、390×844 与定向 360×520 范围内，成功过程已经可查看、可度量、可人工复核。允许解冻真实 Provider AnswerClaim replay，但只能 record-only，不得直接接入生产 ChatTurn。
+
+## 9. 下一阶段与 P1 / P2 缺口
+
+**当前下一阶段：真实 Provider AnswerClaim replay（record-only）**
+
+1. 固定 replay 数据集、Provider 配置、成本/延迟记录与失败分类；
+2. 运行真实 replay，不写入生产 ChatTurn，不影响 committed truth；
+3. 比较 claim coverage、unsupported claim、citation alignment、稳定性和成本；
+4. 根据结果决定先做 claim producer，还是先补 RAG-K1f / K2；
+5. 结论回写本文件，未经证据不得解冻 claim UI 或生产写入。
 
 **P1：**
 
-1. P0-E2 通过后，解冻真实 Provider AnswerClaim replay，但保持 record-only，不接生产 ChatTurn；
-2. 根据真实 replay 决定先做 claim producer 还是 RAG-K1f / K2；
-3. 加强 GitHub replay 的 symbol mapping、CI association precision 和 partial-result 解释；
-4. 补 multi-step research / cancel 的完整生命周期门禁。
+1. failed / interrupted 恢复卡文案语义校准；
+2. 加强 GitHub replay 的 symbol mapping、CI association precision 和 partial-result 解释；
+3. 补 multi-step research / cancel 的完整生命周期门禁；
+4. 实体手机输入法、软键盘安全区与触摸滚动抽样。
 
 **P2：**
 
@@ -233,12 +286,12 @@ PR #83 建立了稳定证据合同：
 
 ## 10. 当前冻结与执行状态
 
-- `main` 当前 P0-E2 第一切片 merge SHA：`c90bc39ad3bbe9137e035d0892122b3b86755749`；
-- PR #83 已 closed / merged，最终 feature head `f95796bd1126cb2ea1329ef94cfe1630834da731`，CI #1626 完整全绿；
-- 当前状态分支：`docs/p0-e2-success-evidence-status`；
-- 下一实现顺序：360px/复杂内容 -> 人工试玩记录 -> P0-E2 总结；
-- 真实 Provider claim replay 在 P0-E2 通过前继续冻结；
-- 生产 claim producer、claim UI、Streamlit 清理、RAG-K1f、RAG-K2、自适应 LearningPlan、G10-D 可执行代理继续冻结；
+- `main` 当前 P0-E2 完成 merge SHA：`fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`；
+- PR #85 已 closed / merged，最终 feature head `17bde7b3f2484de6002dbb3d704fc9b39bfc3f63`，CI #1659 完整全绿；
+- 当前状态分支：`docs/p0-e2-complete-status`；
+- 下一实现顺序：Provider replay 运行合同 -> 真实 record-only replay -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
+- 真实 Provider claim replay 已解冻，但仅限 record-only；
+- 生产 claim producer、claim UI、生产 ChatTurn 接入、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 11. 文档规则
