@@ -29,6 +29,10 @@ on:
         description: "Optional OpenAI-compatible base URL override"
         required: false
         type: string
+      cost_cny:
+        description: "Optional billed cost in CNY; recorded exactly and never inferred"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +50,7 @@ jobs:
       SELECTED_MODEL_PROFILE: ${{ inputs.model_profile }}
       SELECTED_MODEL_NAME: ${{ inputs.model_name }}
       SELECTED_BASE_URL: ${{ inputs.base_url }}
+      SELECTED_COST_CNY: ${{ inputs.cost_cny }}
 
     steps:
       - name: Check out repository
@@ -133,58 +138,112 @@ jobs:
           echo "exit_code=$replay_status" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Run record-only AnswerClaim replay
+        id: claim_replay
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cost_args=()
+          if [ -n "$SELECTED_COST_CNY" ]; then
+            if ! [[ "$SELECTED_COST_CNY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+              echo "cost_cny must be a non-negative decimal." >&2
+              exit 2
+            fi
+            cost_args=(--cost-cny "$SELECTED_COST_CNY")
+          fi
+
+          set +e
+          python tools/run_answer_claim_provider_replay.py \
+            --provider-report output/rag-provider-replay.json \
+            --output output/answer-claim-provider-replay.json \
+            --run-label "github-actions-${GITHUB_RUN_ID}" \
+            "${cost_args[@]}"
+          claim_status=$?
+          set -e
+          echo "exit_code=$claim_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
       - name: Validate completed real-provider provenance
         shell: python
         run: |
           import json
           from pathlib import Path
 
-          report_path = Path("output/rag-provider-replay.json")
-          if not report_path.is_file():
-              raise SystemExit("Replay report was not created.")
+          provider_path = Path("output/rag-provider-replay.json")
+          claim_path = Path("output/answer-claim-provider-replay.json")
+          if not provider_path.is_file():
+              raise SystemExit("Provider replay report was not created.")
+          if not claim_path.is_file():
+              raise SystemExit("AnswerClaim replay report was not created.")
 
-          report = json.loads(report_path.read_text(encoding="utf-8"))
-          if report.get("replay_kind") != "real_provider":
+          provider_report = json.loads(provider_path.read_text(encoding="utf-8"))
+          if provider_report.get("replay_kind") != "real_provider":
               raise SystemExit("Replay provenance is not real_provider.")
-          if report.get("status") != "completed":
-              raise SystemExit(f"Replay did not complete: {report.get('status')}")
-          if report.get("completed_cases") != report.get("cases"):
+          if provider_report.get("status") != "completed":
+              raise SystemExit(f"Replay did not complete: {provider_report.get('status')}")
+          if provider_report.get("completed_cases") != provider_report.get("cases"):
               raise SystemExit("Not all requested replay cases completed.")
-          if not isinstance(report.get("answer_quality"), dict):
+          if not isinstance(provider_report.get("answer_quality"), dict):
               raise SystemExit("Completed replay is missing answer-quality metrics.")
 
-          provider = report.get("provider") or {}
+          claim_report = json.loads(claim_path.read_text(encoding="utf-8"))
+          if claim_report.get("evaluation_kind") != "answer_claim_recorded_provider":
+              raise SystemExit("Unexpected AnswerClaim evaluation kind.")
+          if claim_report.get("replay_kind") != "real_provider":
+              raise SystemExit("AnswerClaim provenance is not real_provider.")
+          if claim_report.get("gating") != "record_only":
+              raise SystemExit("AnswerClaim replay must remain record_only.")
+          if claim_report.get("status") != "completed":
+              raise SystemExit("AnswerClaim evaluation did not complete.")
+          boundaries = claim_report.get("boundaries") or {}
+          if boundaries.get("chat_turn_written") is not False:
+              raise SystemExit("AnswerClaim replay crossed the ChatTurn boundary.")
+          if boundaries.get("committed_truth_changed") is not False:
+              raise SystemExit("AnswerClaim replay crossed committed truth.")
+
+          provider = provider_report.get("provider") or {}
+          quality = dict(claim_report.get("quality") or {})
+          quality.pop("results", None)
           print(
               json.dumps(
                   {
-                      "status": report.get("status"),
-                      "cases": report.get("cases"),
+                      "status": provider_report.get("status"),
+                      "cases": provider_report.get("cases"),
                       "provider_profile": provider.get("provider_profile"),
                       "model_name": provider.get("model_name"),
-                      "corpus_fingerprint": report.get("corpus_fingerprint"),
-                      "answer_quality": report.get("answer_quality"),
-                      "usage": report.get("usage"),
-                      "latency": report.get("latency"),
+                      "corpus_fingerprint": provider_report.get("corpus_fingerprint"),
+                      "answer_quality": provider_report.get("answer_quality"),
+                      "answer_claim_quality": quality,
+                      "cost": claim_report.get("cost"),
+                      "usage": provider_report.get("usage"),
+                      "latency": provider_report.get("latency"),
                   },
                   ensure_ascii=False,
                   indent=2,
               )
           )
 
-      - name: Upload replay artifact
+      - name: Upload replay artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rag-provider-replay-${{ github.run_id }}
-          path: output/rag-provider-replay.json
+          path: |
+            output/rag-provider-replay.json
+            output/answer-claim-provider-replay.json
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Enforce replay command result
+      - name: Enforce replay command results
         if: always()
         shell: bash
         run: |
           if [ "${{ steps.replay.outputs.exit_code }}" != "0" ]; then
             echo "Provider replay command failed with exit code ${{ steps.replay.outputs.exit_code }}." >&2
+            exit 1
+          fi
+          if [ "${{ steps.claim_replay.outputs.exit_code }}" != "0" ]; then
+            echo "AnswerClaim replay command failed with exit code ${{ steps.claim_replay.outputs.exit_code }}." >&2
             exit 1
           fi
