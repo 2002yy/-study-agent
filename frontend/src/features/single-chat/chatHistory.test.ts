@@ -3,6 +3,7 @@ import {
   buildContinuationHistory,
   buildRetryHistory,
   buildWorkspaceState,
+  hasPartialRecoveryReply,
   sanitizeSingleChatMessages,
   seedMessages,
   tailInterruptedTurn,
@@ -104,8 +105,8 @@ describe("buildContinuationHistory", () => {
 describe("tailInterruptedTurn", () => {
   it("does not revive an older interruption after a later retry completed", () => {
     const turns = [
-      { turn_id: "old", status: "interrupted" },
-      { turn_id: "retry", status: "completed" },
+      { turn_id: "old", status: "interrupted", assistant_message: "partial" },
+      { turn_id: "retry", status: "completed", assistant_message: "done" },
     ];
 
     expect(tailInterruptedTurn(turns)).toBeUndefined();
@@ -113,17 +114,31 @@ describe("tailInterruptedTurn", () => {
 
   it("restores the latest turn when that turn is interrupted", () => {
     const turns = [
-      { turn_id: "old", status: "superseded" },
-      { turn_id: "retry", status: "interrupted" },
+      { turn_id: "old", status: "superseded", assistant_message: "old" },
+      { turn_id: "retry", status: "interrupted", assistant_message: "partial" },
     ];
 
     expect(tailInterruptedTurn(turns)?.turn_id).toBe("retry");
+    expect(hasPartialRecoveryReply(tailInterruptedTurn(turns)?.assistant_message)).toBe(true);
+  });
+
+  it("restores a latest zero-token failure as retry-only recovery", () => {
+    const turns = [
+      { turn_id: "old", status: "completed", assistant_message: "done" },
+      { turn_id: "failed", status: "failed", assistant_message: "" },
+    ];
+
+    const recovery = tailInterruptedTurn(turns);
+    expect(recovery?.turn_id).toBe("failed");
+    expect(recovery?.status).toBe("failed");
+    expect(recovery?.assistant_message).toBeTruthy();
+    expect(hasPartialRecoveryReply(recovery?.assistant_message)).toBe(false);
   });
 
   it("does not revive a durably abandoned interruption", () => {
     const turns = [
-      { turn_id: "old", status: "completed" },
-      { turn_id: "abandoned", status: "abandoned" },
+      { turn_id: "old", status: "completed", assistant_message: "done" },
+      { turn_id: "abandoned", status: "abandoned", assistant_message: "" },
     ];
 
     expect(tailInterruptedTurn(turns)).toBeUndefined();
