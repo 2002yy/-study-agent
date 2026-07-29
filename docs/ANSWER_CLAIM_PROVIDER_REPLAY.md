@@ -102,15 +102,36 @@ python tools/run_answer_claim_provider_replay.py \
 
 ## 6. Manual real-provider workflow
 
-`.github/workflows/rag-provider-replay.yml` 仍是唯一手动真实运行入口。操作者需要明确选择：
+`.github/workflows/rag-provider-replay.yml` 是唯一手动真实运行入口。操作者需要明确选择：
 
+- `replay_scope`：`smoke` 或 `full`；
 - Provider profile；
 - model profile；
 - exact model name；
 - 可选 base URL override；
-- 可选、已核实的 CNY cost。
+- full run 可选填写已核实的 CNY cost。
 
-workflow 依次：
+### 6.1 Smoke
+
+`smoke` 是默认模式，只运行固定 answerable case：
+
+```text
+clean_requests_session
+```
+
+它验证：
+
+- credential 与 endpoint 可达；
+- exact model / endpoint ID 可用；
+- Provider 能返回可解析 JSON object；
+- response identity、finish reason、latency 和 token usage 能进入 artifact；
+- 报告明确标记 `full_gold_suite=false`。
+
+Smoke 不运行 AnswerClaim 离线评测，不产生完整质量结论，也不记录推测成本。
+
+### 6.2 Full
+
+`full` 运行全部 10 条 K1 answer-quality gold，然后：
 
 1. 运行 K1e real-provider replay；
 2. 运行离线 AnswerClaim replay；
@@ -118,9 +139,33 @@ workflow 依次：
 4. 上传两个 JSON artifact；
 5. 任一阶段失败则整次 workflow 失败。
 
+只有 full artifact 才能进入 claim coverage、unsupported claim、citation alignment、refusal leakage 和稳定性比较。
+
+## 7. Volcengine Ark replay boundary
+
+P0-E3 提供 `VolcengineArkReplayProvider`，仅用于真实 replay，不注册到生产聊天 Provider owner。
+
+标准配置：
+
+```text
+provider_profile = volcengine
+base_url = https://ark.cn-beijing.volces.com/api/v3
+model_name = exact Model ID or Endpoint ID
+credential = VOLCENGINE_API_KEY, fallback ARK_API_KEY
+```
+
+该 adapter 使用 OpenAI-compatible `chat.completions` 与 `response_format={"type":"json_object"}`。它明确拒绝：
+
+- OpenCode Agent Plan `/api/plan/v3`；
+- Coding Plan `/api/coding/v3`；
+- 多行 model/base URL；
+- 缺失的 key 或 model/endpoint ID。
+
+先通过 smoke，再运行 full；在两次 full 结果被审查前，不把方舟扩展为生产聊天 Provider。
+
 普通 PR CI 不使用 Provider secret，只运行 synthetic in-memory contract tests。
 
-## 7. Decision gate
+## 8. Decision gate
 
 一次真实 run 只能说明该 Provider/model/语料/prompt fingerprint 下的观察结果。至少要比较：
 
