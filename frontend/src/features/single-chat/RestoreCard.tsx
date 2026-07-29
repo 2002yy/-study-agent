@@ -19,6 +19,7 @@ import {
   taskLabel,
 } from "../sessions/sessionNavigation";
 import type { TaskIntent } from "../task/taskContract";
+import { hasPartialRecoveryReply } from "./chatHistory";
 
 const PRIMARY_ENTRY = {
   intent: "learn" as const,
@@ -73,26 +74,38 @@ export function RestoreCard({
   onAbandonInterrupted: () => Promise<void> | void;
 }) {
   if (streamRecovery) {
+    const hasPartialReply = hasPartialRecoveryReply(streamRecovery.reply);
     return (
-      <section className="restore-card interrupted-restore-card" aria-label="中断任务恢复">
+      <section
+        className={`restore-card interrupted-restore-card ${hasPartialReply ? "has-partial-reply" : "failed-before-reply"}`}
+        aria-label="中断任务恢复"
+      >
         <div className="restore-card-heading">
           <div>
-            <span className="restore-card-kicker">未完成任务</span>
-            <h3>上次回答在生成过程中中断</h3>
+            <span className="restore-card-kicker">
+              {hasPartialReply ? "未完成任务" : "失败任务"}
+            </span>
+            <h3>
+              {hasPartialReply
+                ? "上次回答在生成过程中中断"
+                : "上次回答未能开始生成"}
+            </h3>
           </div>
           <RotateCcw size={18} />
         </div>
         <p className="restore-card-preview">
-          {streamRecovery.reply || "尚未保存可继续的部分回答，可以重新生成。"}
+          {hasPartialReply
+            ? streamRecovery.reply
+            : "没有收到可继续的部分回答，可以安全地重新生成原问题。"}
         </p>
         <div className="restore-card-actions">
-          {streamRecovery.reply ? (
+          {hasPartialReply ? (
             <button className="primary-action compact" onClick={onContinueInterrupted} type="button">
               <Play size={14} />
               从断点继续
             </button>
           ) : null}
-          <button className="ghost-action compact" onClick={onRetryInterrupted} type="button">
+          <button className={hasPartialReply ? "ghost-action compact" : "primary-action compact"} onClick={onRetryInterrupted} type="button">
             <RotateCcw size={14} />
             重新生成
           </button>
