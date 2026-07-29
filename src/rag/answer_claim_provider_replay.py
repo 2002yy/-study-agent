@@ -44,12 +44,12 @@ class RecordedProviderAnswerClaimProducer:
         self,
         *,
         recorded_cases: tuple[RecordedProviderCase, ...],
-        provider_identity: dict[str, Any],
+        provider_identity: dict[str, str],
         prompt_template_fingerprint: str,
     ) -> None:
         self._cases = {case.case_id: case for case in recorded_cases}
-        profile = _clean_text(provider_identity.get("provider_profile")) or "unknown"
-        model = _clean_text(provider_identity.get("model_name")) or "unknown"
+        profile = provider_identity["provider_profile"]
+        model = provider_identity["model_name"]
         self.producer_id = f"recorded-provider:{profile}:{model}"
         self.producer_version = _fingerprint_text(
             ANSWER_CLAIM_PROVIDER_ADAPTER_VERSION,
@@ -122,7 +122,7 @@ def evaluate_recorded_provider_answer_claims(
             f"missing={missing_ids}, extra={extra_ids}"
         )
 
-    provider_identity = _object(provider_report.get("provider"))
+    provider_identity = _provider_identity(provider_report)
     prompt_fingerprint = _required_text(
         provider_report.get("prompt_template_fingerprint"),
         "source prompt template fingerprint",
@@ -164,7 +164,10 @@ def evaluate_recorded_provider_answer_claims(
         "source_report": {
             "fingerprint_sha256": provider_report_fingerprint,
             "schema_version": provider_report.get("schema_version"),
-            "corpus_fingerprint": provider_report.get("corpus_fingerprint"),
+            "corpus_fingerprint": _required_text(
+                provider_report.get("corpus_fingerprint"),
+                "source corpus fingerprint",
+            ),
             "prompt_template_fingerprint": prompt_fingerprint,
             "provider": provider_identity,
             "latency": provider_report.get("latency"),
@@ -225,6 +228,15 @@ def _load_recorded_cases(report: dict[str, Any]) -> tuple[RecordedProviderCase, 
         raise ValueError("AnswerClaim replay requires real_provider provenance")
     if report.get("status") != "completed":
         raise ValueError("AnswerClaim replay requires a completed Provider report")
+    if not isinstance(report.get("answer_quality"), dict):
+        raise ValueError("Completed Provider report requires answer_quality")
+    scope = _object(report.get("scope"))
+    if scope.get("full_gold_suite") is not True:
+        raise ValueError("AnswerClaim replay requires the full Provider gold suite")
+    failed_cases = report.get("failed_cases")
+    if failed_cases != []:
+        raise ValueError("Completed Provider report must not contain failed cases")
+
     raw_results = report.get("results")
     if not isinstance(raw_results, list):
         raise ValueError("Provider replay report requires results")
@@ -240,7 +252,7 @@ def _load_recorded_cases(report: dict[str, Any]) -> tuple[RecordedProviderCase, 
         if raw_row.get("status") != "completed":
             raise ValueError(f"Recorded Provider case is not completed: {case_id}")
         candidate = _object(raw_row.get("candidate"))
-        answer = _required_text(candidate.get("answer"), f"answer for {case_id}")
+        answer = _recorded_answer(candidate.get("answer"))
         refused = candidate.get("refused")
         assertions = candidate.get("assertions")
         if not isinstance(refused, bool):
@@ -260,7 +272,29 @@ def _load_recorded_cases(report: dict[str, Any]) -> tuple[RecordedProviderCase, 
     completed_cases = report.get("completed_cases")
     if declared_cases != len(recorded) or completed_cases != len(recorded):
         raise ValueError("Provider replay case counts do not match completed results")
+    scope_ids = scope.get("case_ids")
+    if not isinstance(scope_ids, list) or set(map(str, scope_ids)) != seen:
+        raise ValueError("Provider replay scope does not match completed results")
     return tuple(recorded)
+
+
+def _provider_identity(report: dict[str, Any]) -> dict[str, str]:
+    raw = _object(report.get("provider"))
+    return {
+        "provider_profile": _required_text(
+            raw.get("provider_profile"),
+            "Provider profile",
+        ),
+        "model_name": _required_text(raw.get("model_name"), "Provider model name"),
+        "endpoint_fingerprint": _required_text(
+            raw.get("endpoint_fingerprint"),
+            "Provider endpoint fingerprint",
+        ),
+    }
+
+
+def _recorded_answer(value: Any) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _fingerprint_json(payload: Any) -> str:
