@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-07-29  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-E1、P0-E2 与 P0-E3 第一切片“真实 Provider AnswerClaim replay 运行合同”已进入 `main`；当前等待显式选择 Provider / 精确模型并执行真实 record-only replay。**  
-> 冻结边界：**生产 claim producer / claim UI、生产 ChatTurn 接入与可执行 agent 扩张继续冻结，必须由真实 replay 结果决定后续顺序。**
+> 当前主线：**P0-E1、P0-E2 与 P0-E3 前两切片已进入 `main`；方舟 replay-only 适配及 smoke/full 合同已完成，当前等待配置 credential 与精确 Model/Endpoint ID 后手动执行真实 smoke。**  
+> 冻结边界：**生产 claim producer / claim UI、生产 ChatTurn 接入、方舟生产聊天 Provider 与可执行 agent 扩张继续冻结，必须由真实 replay 结果决定后续顺序。**
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -28,6 +28,7 @@
 - RAG K1a-K1e、EvidenceSnapshot、ResearchRun source truth；
 - AnswerClaimSnapshot v1、deterministic evaluator self-test 与 record-only real-provider replay adapter；
 - 真实 Provider 回答报告 -> 离线 AnswerClaim 严格校验 -> 双 artifact 的手动 workflow 合同；
+- 方舟标准 OpenAI-compatible replay-only adapter、固定单 case smoke 与完整 10-case full 合同；
 - 生产路径学习验证 E2E；
 - desktop / 390px / 定向 360×520 Golden Journeys；
 - 核心首屏按需加载与隐藏功能错误隔离；
@@ -57,7 +58,9 @@
 - PR #84 `28176449373d9819a40ad35768741095d3b888c5`，P0-E2 第一切片状态同步，CI #1630；
 - PR #85 `fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`，最终 head CI #1659；
 - PR #86 `a974efdf712df4a4dd6b0ef5690327c558c932a4`，P0-E2 完成状态同步；
-- PR #87 `97bd0a02b6738d7d34aac112ccbc756a851bd14c`，P0-E3 replay 运行合同，最终 head CI #1680。
+- PR #87 `97bd0a02b6738d7d34aac112ccbc756a851bd14c`，P0-E3 replay 运行合同，最终 head CI #1680；
+- PR #88 `42e036a189f28c7561731c5fdc0da04c861407bf`，P0-E3 第一切片状态同步；
+- PR #89 `b1fac061f390cf224fe9288e7786474c3d1d1f6e`，方舟 smoke/full replay 合同，最终 head CI #1696。
 
 ## 3. 当前真实指标
 
@@ -73,8 +76,11 @@
 ### AnswerClaim real-provider replay
 
 - 固定输入：完整 10 条 K1 answer-quality gold；
-- 运行合同：已完成并进入 `main`；
-- 实际 real-provider artifact：**尚未执行**；
+- record-only AnswerClaim 运行合同：已进入 `main`；
+- 方舟 replay-only adapter：已进入 `main`；
+- smoke：固定 `clean_requests_session` 单 case，只验证 credential、endpoint、精确模型、JSON、usage 与 artifact；
+- full：固定完整 10-case，并执行离线 AnswerClaim 严格评测；
+- 实际 real-provider smoke / full artifact：**均尚未执行**；
 - claim coverage、unsupported-claim rate、link alignment、refusal leakage、稳定性、latency、usage 与成本：**暂无真实数字**；
 - deterministic / synthetic 测试只证明合同可执行，不得冒充真实模型质量。
 
@@ -299,15 +305,31 @@ fixed 10-case K1 gold
 - 手动 workflow 上传 K1e 与 AnswerClaim 两个 JSON artifact；
 - CI #1680 通过 897 pytest、全部静态/前端/浏览器与 12/12 real-stack 门禁。
 
-### 9.2 当前下一步：执行真实 replay
+### 9.2 第二切片：方舟 replay-only 与 smoke/full——已完成
 
-1. 明确一个仓库已配置 credential 的 Provider；
-2. 明确 exact model name 与 pro/flash 档位；
-3. 可选填写已核实的人民币成本，不得从 token 数猜测；
-4. 手动执行 `.github/workflows/rag-provider-replay.yml`；
-5. 下载并审查两个 artifact；
-6. 至少重复运行，比较 claim coverage、unsupported claim、citation alignment、refusal leakage、latency、usage、成本与输出稳定性；
-7. 根据失败分布决定先做 claim producer 改进，还是 RAG-K1f / K2。
+PR #89 建立以下边界：
+
+- `VolcengineArkReplayProvider` 继承 provenance-approved real-provider replay adapter；
+- 仅使用标准方舟 OpenAI-compatible `/api/v3`；
+- credential 优先读取 `VOLCENGINE_API_KEY`，兼容 `ARK_API_KEY`；
+- `model_name` 必须是精确 Model ID 或 Endpoint ID；
+- `/api/plan/v3` 与 `/api/coding/v3` 在代码、测试和文档中明确拒绝；
+- `smoke` 默认只运行 `clean_requests_session`，验证 credential、endpoint、JSON object、usage 和 artifact；
+- `full` 才运行完整 10-case，并执行离线 AnswerClaim 评测；
+- smoke 不能生成完整模型质量结论；
+- 方舟没有注册到生产聊天 Provider owner；
+- CI #1696 通过全部后端、RAG、静态、安全、mypy、前端、35/35 fixture+narrow 与 12/12 real-stack 门禁。
+
+### 9.3 当前下一步：执行真实方舟 smoke
+
+1. 在仓库 Secret 中配置 `VOLCENGINE_API_KEY` 或 `ARK_API_KEY`；
+2. 获取并填写精确 Model ID 或 Endpoint ID；
+3. 手动执行 `.github/workflows/rag-provider-replay.yml`：`replay_scope=smoke`、`provider_profile=volcengine`；
+4. smoke 的 base URL 留空，使用标准方舟 `/api/v3`；成本留空；
+5. 审查单 case artifact 的 provider identity、JSON parse、latency 与 usage；
+6. 只有绿色 smoke 才允许连续执行两次完整 10-case full；
+7. 比较 claim coverage、unsupported claim、citation alignment、refusal leakage、latency、usage、核实成本与输出稳定性；
+8. 根据失败分布决定先做 claim producer 改进，还是 RAG-K1f / K2。
 
 在真实 artifact 产生前，不存在可报告的真实 AnswerClaim 模型指标。
 
@@ -328,12 +350,12 @@ fixed 10-case K1 gold
 
 ## 11. 当前冻结与执行状态
 
-- `main` 当前 P0-E3 replay 合同 merge SHA：`97bd0a02b6738d7d34aac112ccbc756a851bd14c`；
-- PR #87 已 closed / merged，最终 feature head `1b86e92ce53b650139f4c80ea4e32e4cac41f77b`，CI #1680 完整全绿；
-- 当前状态分支：`docs/p0-e3-contract-status`；
-- 下一实现顺序：真实 record-only replay -> 重复稳定性 replay -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
+- `main` 当前 P0-E3 方舟 replay 合同 merge SHA：`b1fac061f390cf224fe9288e7786474c3d1d1f6e`；
+- PR #89 已 closed / merged，最终 feature head `898cb0599e941830dd16e48185584719acceb7da`，CI #1696 完整全绿；
+- 当前状态分支：`docs/p0-e3-volcengine-status`；
+- 下一执行顺序：真实方舟 smoke -> 两次完整 full -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
 - 真实 Provider replay workflow 需要 workflow_dispatch；当前连接器未暴露该写操作；
-- 生产 claim producer、claim UI、生产 ChatTurn 接入、自适应 LearningPlan、G10-D 可执行代理继续冻结；
+- 生产方舟聊天 Provider、claim producer、claim UI、生产 ChatTurn 接入、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
 ## 12. 文档规则
