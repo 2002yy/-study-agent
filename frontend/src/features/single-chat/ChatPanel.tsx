@@ -226,6 +226,7 @@ export function ChatPanel(props: ChatPanelProps) {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (isSending || !input.trim()) return;
+    setIsAtBottom(true);
     setPendingTaskIntentOverride(taskIntentOverride || undefined);
     try {
       await onSubmit(event);
