@@ -16,7 +16,13 @@ import {
   Upload,
   Wrench,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { MarkdownMessage } from "../../components/MarkdownMessage";
@@ -137,7 +143,6 @@ export function ChatPanel(props: ChatPanelProps) {
   } = props;
 
   const conversationRef = useRef<HTMLElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [messageCopy, setMessageCopy] = useState<{ index: number; state: CopyState } | null>(null);
   const [interruptedCopy, setInterruptedCopy] = useState<CopyState>("idle");
@@ -181,8 +186,10 @@ export function ChatPanel(props: ChatPanelProps) {
   };
 
   const scrollToLatest = () => {
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    const element = conversationRef.current;
+    if (!element) return;
     setIsAtBottom(true);
+    element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
   };
 
   const copyMessage = async (content: string, index: number) => {
@@ -219,6 +226,7 @@ export function ChatPanel(props: ChatPanelProps) {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (isSending || !input.trim()) return;
+    setIsAtBottom(true);
     setPendingTaskIntentOverride(taskIntentOverride || undefined);
     try {
       await onSubmit(event);
@@ -249,8 +257,24 @@ export function ChatPanel(props: ChatPanelProps) {
     closeDetailsMenu(target);
   };
 
-  useEffect(() => {
-    if (isAtBottom) bottomRef.current?.scrollIntoView({ block: "end" });
+  useLayoutEffect(() => {
+    if (!isAtBottom) return;
+    const element = conversationRef.current;
+    if (!element) return;
+
+    const pinToLatest = () => {
+      element.scrollTop = element.scrollHeight;
+    };
+    pinToLatest();
+    let followupFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      pinToLatest();
+      followupFrame = window.requestAnimationFrame(pinToLatest);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (followupFrame) window.cancelAnimationFrame(followupFrame);
+    };
   }, [messages, streamRecovery, isAtBottom]);
 
   useEffect(() => {
@@ -347,53 +371,54 @@ export function ChatPanel(props: ChatPanelProps) {
         </div>
       </header>
 
-      <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>
-        <RestoreCard
-          session={sessionNavigation}
-          streamRecovery={streamRecovery}
-          onSelectEntry={handleRestoreEntry}
-          onUpload={onUploadClick}
-          onContinueHere={onQuickPrompt}
-          onStartNewTopic={onStartNewTopic}
-          onContinueInterrupted={onContinueInterruptedReply}
-          onRetryInterrupted={onRetry}
-          onAbandonInterrupted={onAbandonInterruptedReply}
-        />
-        {displayMessages.map((message, index) => {
-          const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
-          const label = message.role === "user" ? "你" : roleLabel(avatarRole);
-          const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
-          return (
-            <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-              <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
-              <div className="message-body">
-                <span>{label}</span>
-                {message.role === "assistant" && message.content ? (
-                  <button
-                    aria-label="复制回答正文"
-                    className={`ghost-action compact message-copy-button${currentCopyState === "error" ? " copy-error" : ""}`}
-                    onClick={() => void copyMessage(message.content, index)}
-                    type="button"
-                  >
-                    <Clipboard size={13} />
-                    {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
-                  </button>
-                ) : null}
-                <MarkdownMessage content={message.content} />
-                {message.role === "assistant" && message.evidence ? <EvidenceTrail evidence={message.evidence} /> : null}
-              </div>
-            </article>
-          );
-        })}
-        <div ref={bottomRef} />
-      </section>
-
-      {!isAtBottom ? (
-        <button className="back-to-latest" onClick={scrollToLatest} type="button">
-          <ArrowDown size={14} />
-          回到最新
-        </button>
-      ) : null}
+      <div className="conversation-shell">
+        <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>
+          <RestoreCard
+            session={sessionNavigation}
+            streamRecovery={streamRecovery}
+            onSelectEntry={handleRestoreEntry}
+            onUpload={onUploadClick}
+            onContinueHere={onQuickPrompt}
+            onStartNewTopic={onStartNewTopic}
+            onContinueInterrupted={onContinueInterruptedReply}
+            onRetryInterrupted={onRetry}
+            onAbandonInterrupted={onAbandonInterruptedReply}
+          />
+          {displayMessages.map((message, index) => {
+            const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
+            const label = message.role === "user" ? "你" : roleLabel(avatarRole);
+            const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
+            return (
+              <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
+                <div className="message-body">
+                  <span>{label}</span>
+                  {message.role === "assistant" && message.content ? (
+                    <button
+                      aria-label="复制回答正文"
+                      className={`ghost-action compact message-copy-button${currentCopyState === "error" ? " copy-error" : ""}`}
+                      onClick={() => void copyMessage(message.content, index)}
+                      type="button"
+                    >
+                      <Clipboard size={13} />
+                      {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
+                    </button>
+                  ) : null}
+                  <MarkdownMessage content={message.content} />
+                  {message.role === "assistant" && message.evidence ? <EvidenceTrail evidence={message.evidence} /> : null}
+                </div>
+              </article>
+            );
+          })}
+          <div />
+        </section>
+        {!isAtBottom ? (
+          <button className="back-to-latest" onClick={scrollToLatest} type="button">
+            <ArrowDown size={14} />
+            回到最新
+          </button>
+        ) : null}
+      </div>
 
       {streamRecovery?.reply ? (
         <div className="interrupted-copy-shortcut">
