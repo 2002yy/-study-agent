@@ -87,6 +87,18 @@
   width: 100%;
 }
 
+.conversation .back-to-latest {
+  position: sticky;
+  inset: auto;
+  bottom: 12px;
+  left: auto;
+  right: auto;
+  z-index: 3;
+  width: max-content;
+  margin: 12px 0 0 auto;
+  transform: none;
+}
+
 @supports (height: 100dvh) {
   html,
   body,
