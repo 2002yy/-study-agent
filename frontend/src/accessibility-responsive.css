@@ -14,6 +14,7 @@
 .app-shell,
 .chat-column,
 .chat-panel,
+.conversation-shell,
 .conversation,
 .message,
 .message-body,
@@ -87,15 +88,23 @@
   width: 100%;
 }
 
-.conversation .back-to-latest {
-  position: sticky;
-  inset: auto;
-  bottom: 12px;
-  left: auto;
-  right: auto;
+.conversation-shell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.conversation-shell .conversation {
+  height: 100%;
+  min-height: 0;
+}
+
+.conversation-shell .back-to-latest {
+  position: absolute;
+  inset: auto 16px 12px auto;
   z-index: 3;
   width: max-content;
-  margin: 12px 0 0 auto;
+  margin: 0;
   transform: none;
 }
 
