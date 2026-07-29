@@ -409,15 +409,14 @@ export function ChatPanel(props: ChatPanelProps) {
             </article>
           );
         })}
+        {!isAtBottom ? (
+          <button className="back-to-latest" onClick={scrollToLatest} type="button">
+            <ArrowDown size={14} />
+            回到最新
+          </button>
+        ) : null}
         <div />
       </section>
-
-      {!isAtBottom ? (
-        <button className="back-to-latest" onClick={scrollToLatest} type="button">
-          <ArrowDown size={14} />
-          回到最新
-        </button>
-      ) : null}
 
       {streamRecovery?.reply ? (
         <div className="interrupted-copy-shortcut">
