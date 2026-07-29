@@ -3,7 +3,7 @@
 > **唯一进度入口**  
 > 更新：2026-07-29  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-E1 与 P0-E2 已完成并进入 `main`；下一阶段解冻真实 Provider AnswerClaim replay，但继续保持 record-only。**  
+> 当前主线：**P0-E1、P0-E2 与 P0-E3 第一切片“真实 Provider AnswerClaim replay 运行合同”已进入 `main`；当前等待显式选择 Provider / 精确模型并执行真实 record-only replay。**  
 > 冻结边界：**生产 claim producer / claim UI、生产 ChatTurn 接入与可执行 agent 扩张继续冻结，必须由真实 replay 结果决定后续顺序。**
 
 本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -26,7 +26,8 @@
 
 - TaskContract、LearningClosureRun、ThreadSummaryState、结构化恢复卡；
 - RAG K1a-K1e、EvidenceSnapshot、ResearchRun source truth；
-- AnswerClaimSnapshot v1 与 record-only 离线评测；
+- AnswerClaimSnapshot v1、deterministic evaluator self-test 与 record-only real-provider replay adapter；
+- 真实 Provider 回答报告 -> 离线 AnswerClaim 严格校验 -> 双 artifact 的手动 workflow 合同；
 - 生产路径学习验证 E2E；
 - desktop / 390px / 定向 360×520 Golden Journeys；
 - 核心首屏按需加载与隐藏功能错误隔离；
@@ -54,7 +55,9 @@
 - PR #82 `b2d178777e43a2c165e9b4229b0531db855bfe8e`，P0-E1 完成状态同步，CI #1613；
 - PR #83 `c90bc39ad3bbe9137e035d0892122b3b86755749`，最终 head CI #1626；
 - PR #84 `28176449373d9819a40ad35768741095d3b888c5`，P0-E2 第一切片状态同步，CI #1630；
-- PR #85 `fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`，最终 head CI #1659。
+- PR #85 `fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`，最终 head CI #1659；
+- PR #86 `a974efdf712df4a4dd6b0ef5690327c558c932a4`，P0-E2 完成状态同步；
+- PR #87 `97bd0a02b6738d7d34aac112ccbc756a851bd14c`，P0-E3 replay 运行合同，最终 head CI #1680。
 
 ## 3. 当前真实指标
 
@@ -66,6 +69,14 @@
 - deterministic answerable 26/26；unanswerable block 4/4。
 
 这些是固定 corpus 回归合同，不代表真实模型最终质量。
+
+### AnswerClaim real-provider replay
+
+- 固定输入：完整 10 条 K1 answer-quality gold；
+- 运行合同：已完成并进入 `main`；
+- 实际 real-provider artifact：**尚未执行**；
+- claim coverage、unsupported-claim rate、link alignment、refusal leakage、稳定性、latency、usage 与成本：**暂无真实数字**；
+- deterministic / synthetic 测试只证明合同可执行，不得冒充真实模型质量。
 
 ### GitHub replay
 
@@ -261,15 +272,46 @@ PR #85 增加一个定向 `narrow-chromium` 项目，而不是把全部旅程扩
 
 **P0-E2 结论：通过。** 当前 Chromium desktop、390×844 与定向 360×520 范围内，成功过程已经可查看、可度量、可人工复核。允许解冻真实 Provider AnswerClaim replay，但只能 record-only，不得直接接入生产 ChatTurn。
 
-## 9. 下一阶段与 P1 / P2 缺口
+## 9. P0-E3：真实 Provider AnswerClaim replay（record-only）
 
-**当前下一阶段：真实 Provider AnswerClaim replay（record-only）**
+### 9.1 第一切片：运行合同——已完成
 
-1. 固定 replay 数据集、Provider 配置、成本/延迟记录与失败分类；
-2. 运行真实 replay，不写入生产 ChatTurn，不影响 committed truth；
-3. 比较 claim coverage、unsupported claim、citation alignment、稳定性和成本；
-4. 根据结果决定先做 claim producer，还是先补 RAG-K1f / K2；
-5. 结论回写本文件，未经证据不得解冻 claim UI 或生产写入。
+PR #87 已建立以下合同：
+
+```text
+fixed 10-case K1 gold
+-> production K1e real-provider answer replay
+-> Provider-authored answer / assertions / cited_sources
+-> immutable raw report
+-> offline AnswerClaim adapter
+-> AnswerClaimSnapshotV1 strict validation
+-> record-only quality report
+```
+
+- 第二阶段不再次调用 Provider；
+- 不从自然语言回答重新抽取或补写 claim；
+- Provider assertion 映射为 `factual / asserted / provider_structured`；
+- citation 映射为 strict known-evidence `direct_support` link；
+- 保留最终回答换行用于稳定 `answer_hash`；
+- 要求完整 10-case scope、零 failed case、Provider/model/endpoint fingerprints；
+- 记录 source report fingerprint、latency、usage 与可选操作者核实的人民币成本；
+- 未知 evidence、重复 claim、空最终回答等错误只暴露失败，不伪造补分；
+- 手动 workflow 上传 K1e 与 AnswerClaim 两个 JSON artifact；
+- CI #1680 通过 897 pytest、全部静态/前端/浏览器与 12/12 real-stack 门禁。
+
+### 9.2 当前下一步：执行真实 replay
+
+1. 明确一个仓库已配置 credential 的 Provider；
+2. 明确 exact model name 与 pro/flash 档位；
+3. 可选填写已核实的人民币成本，不得从 token 数猜测；
+4. 手动执行 `.github/workflows/rag-provider-replay.yml`；
+5. 下载并审查两个 artifact；
+6. 至少重复运行，比较 claim coverage、unsupported claim、citation alignment、refusal leakage、latency、usage、成本与输出稳定性；
+7. 根据失败分布决定先做 claim producer 改进，还是 RAG-K1f / K2。
+
+在真实 artifact 产生前，不存在可报告的真实 AnswerClaim 模型指标。
+
+## 10. P1 / P2 缺口
 
 **P1：**
 
@@ -284,17 +326,17 @@ PR #85 增加一个定向 `narrow-chromium` 项目，而不是把全部旅程扩
 2. 清理 README 中 Streamlit“已移除”与“兼容入口仍存在”的表述差异；
 3. 继续校准 Golden Journey 指标，使点击、决策、surface、恢复能够跨用例比较。
 
-## 10. 当前冻结与执行状态
+## 11. 当前冻结与执行状态
 
-- `main` 当前 P0-E2 完成 merge SHA：`fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`；
-- PR #85 已 closed / merged，最终 feature head `17bde7b3f2484de6002dbb3d704fc9b39bfc3f63`，CI #1659 完整全绿；
-- 当前状态分支：`docs/p0-e2-complete-status`；
-- 下一实现顺序：Provider replay 运行合同 -> 真实 record-only replay -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
-- 真实 Provider claim replay 已解冻，但仅限 record-only；
+- `main` 当前 P0-E3 replay 合同 merge SHA：`97bd0a02b6738d7d34aac112ccbc756a851bd14c`；
+- PR #87 已 closed / merged，最终 feature head `1b86e92ce53b650139f4c80ea4e32e4cac41f77b`，CI #1680 完整全绿；
+- 当前状态分支：`docs/p0-e3-contract-status`；
+- 下一实现顺序：真实 record-only replay -> 重复稳定性 replay -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
+- 真实 Provider replay workflow 需要 workflow_dispatch；当前连接器未暴露该写操作；
 - 生产 claim producer、claim UI、生产 ChatTurn 接入、自适应 LearningPlan、G10-D 可执行代理继续冻结；
 - 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
 
-## 11. 文档规则
+## 12. 文档规则
 
 - 当前状态只更新本文件；status-only 更新留在 active branch；
 - `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；`STATE_MODEL.md` 只维护稳定数据模型；
