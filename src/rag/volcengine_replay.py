@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+from typing import cast
 
+from src.llm_client import ModelProfile
 from src.rag.provider_replay import OpenAICompatibleReplayProvider
 
 VOLCENGINE_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+_FORBIDDEN_PLAN_PATHS = ("/api/plan/v3", "/api/coding/v3")
 
 
 class VolcengineArkReplayProvider(OpenAICompatibleReplayProvider):
@@ -19,7 +22,7 @@ class VolcengineArkReplayProvider(OpenAICompatibleReplayProvider):
     def __init__(
         self,
         *,
-        model_profile: str = "pro",
+        model_profile: ModelProfile = "pro",
         temperature: float = 0.0,
         max_tokens: int = 700,
         timeout: float = 60.0,
@@ -34,19 +37,21 @@ class VolcengineArkReplayProvider(OpenAICompatibleReplayProvider):
             os.getenv("VOLCENGINE_API_KEY"),
             os.getenv("ARK_API_KEY"),
         )
-        resolved_base_url = _single_line(
+        resolved_base_url = _validated_base_url(
             _first_value(
                 base_url,
                 os.getenv("VOLCENGINE_BASE_URL"),
                 os.getenv("ARK_BASE_URL"),
                 VOLCENGINE_ARK_BASE_URL,
-            ),
-            "Volcengine base URL",
-        ).rstrip("/")
-        profile = str(model_profile or "pro").strip().lower()
-        if profile not in {"flash", "pro"}:
-            raise RuntimeError(f"Unsupported model profile: {profile}")
-        model_env_suffix = "MODEL_PRO_NAME" if profile == "pro" else "MODEL_FLASH_NAME"
+            )
+        )
+        normalized_profile = str(model_profile or "pro").strip().lower()
+        if normalized_profile not in {"flash", "pro"}:
+            raise RuntimeError(f"Unsupported model profile: {normalized_profile}")
+        profile = cast(ModelProfile, normalized_profile)
+        model_env_suffix = (
+            "MODEL_PRO_NAME" if profile == "pro" else "MODEL_FLASH_NAME"
+        )
         resolved_model = _single_line(
             _first_value(
                 model_name,
@@ -82,6 +87,16 @@ def _first_value(*values: str | None) -> str:
         if normalized:
             return normalized
     return ""
+
+
+def _validated_base_url(value: str) -> str:
+    normalized = _single_line(value, "Volcengine base URL").rstrip("/")
+    if any(path in normalized for path in _FORBIDDEN_PLAN_PATHS):
+        raise RuntimeError(
+            "Volcengine replay requires the standard Ark /api/v3 endpoint, "
+            "not an Agent/Coding Plan endpoint."
+        )
+    return normalized
 
 
 def _single_line(value: str, label: str) -> str:
