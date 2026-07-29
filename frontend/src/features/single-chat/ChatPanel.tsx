@@ -16,7 +16,13 @@ import {
   Upload,
   Wrench,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { MarkdownMessage } from "../../components/MarkdownMessage";
@@ -137,7 +143,6 @@ export function ChatPanel(props: ChatPanelProps) {
   } = props;
 
   const conversationRef = useRef<HTMLElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [messageCopy, setMessageCopy] = useState<{ index: number; state: CopyState } | null>(null);
   const [interruptedCopy, setInterruptedCopy] = useState<CopyState>("idle");
@@ -181,8 +186,10 @@ export function ChatPanel(props: ChatPanelProps) {
   };
 
   const scrollToLatest = () => {
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    const element = conversationRef.current;
+    if (!element) return;
     setIsAtBottom(true);
+    element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
   };
 
   const copyMessage = async (content: string, index: number) => {
@@ -249,8 +256,24 @@ export function ChatPanel(props: ChatPanelProps) {
     closeDetailsMenu(target);
   };
 
-  useEffect(() => {
-    if (isAtBottom) bottomRef.current?.scrollIntoView({ block: "end" });
+  useLayoutEffect(() => {
+    if (!isAtBottom) return;
+    const element = conversationRef.current;
+    if (!element) return;
+
+    const pinToLatest = () => {
+      element.scrollTop = element.scrollHeight;
+    };
+    pinToLatest();
+    let followupFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      pinToLatest();
+      followupFrame = window.requestAnimationFrame(pinToLatest);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (followupFrame) window.cancelAnimationFrame(followupFrame);
+    };
   }, [messages, streamRecovery, isAtBottom]);
 
   useEffect(() => {
@@ -385,7 +408,7 @@ export function ChatPanel(props: ChatPanelProps) {
             </article>
           );
         })}
-        <div ref={bottomRef} />
+        <div />
       </section>
 
       {!isAtBottom ? (
