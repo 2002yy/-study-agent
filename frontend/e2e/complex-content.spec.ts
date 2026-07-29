@@ -160,7 +160,8 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
 
   await composer.dispatchEvent("compositionend", { data: COMPOSED_QUESTION });
   await composer.press("Enter");
-  await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  const latestReply = page.getByText(FIRST_REPLY, { exact: true });
+  await expect(latestReply).toBeVisible();
   expect(fixture.chatAttempts).toBe(1);
 
   const initialScroll = await conversation.evaluate((element) => ({
@@ -172,7 +173,7 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight + 300);
   expect(initialScroll.top).toBeGreaterThan(initialScroll.max - 100);
 
-  await conversation.hover();
+  await latestReply.hover();
   await page.mouse.wheel(0, -700);
   await expect
     .poll(() => conversation.evaluate((element) => element.scrollTop))
