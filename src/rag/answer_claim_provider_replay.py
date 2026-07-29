@@ -274,7 +274,9 @@ def _load_recorded_cases(report: dict[str, Any]) -> tuple[RecordedProviderCase, 
         raise ValueError("Provider replay case counts do not match completed results")
     scope_ids = scope.get("case_ids")
     if not isinstance(scope_ids, list) or set(map(str, scope_ids)) != seen:
-        raise ValueError("Provider replay scope does not match completed results")
+        raise ValueError(
+            "Provider replay case set mismatch: scope does not match completed results"
+        )
     return tuple(recorded)
 
 
