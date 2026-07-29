@@ -86,7 +86,7 @@ def test_volcengine_specific_key_wins_over_ark_alias(monkeypatch):
     assert captured["client"]["api_key"] == "volcengine-secret"
 
 
-def test_volcengine_replay_rejects_missing_key_and_multiline_identity(monkeypatch):
+def test_volcengine_replay_rejects_missing_key_and_invalid_identity(monkeypatch):
     captured: dict = {}
     _install_fake_openai(monkeypatch, captured)
     monkeypatch.delenv("VOLCENGINE_API_KEY", raising=False)
@@ -98,6 +98,16 @@ def test_volcengine_replay_rejects_missing_key_and_multiline_identity(monkeypatc
     monkeypatch.setenv("ARK_API_KEY", "ark-secret")
     with pytest.raises(RuntimeError, match="single line"):
         VolcengineArkReplayProvider(model_name="ep-model\nother")
+    with pytest.raises(RuntimeError, match="standard Ark"):
+        VolcengineArkReplayProvider(
+            model_name="ep-model",
+            base_url="https://ark.cn-beijing.volces.com/api/plan/v3",
+        )
+    with pytest.raises(RuntimeError, match="standard Ark"):
+        VolcengineArkReplayProvider(
+            model_name="ep-model",
+            base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
+        )
 
 
 def test_runner_routes_only_volcengine_to_replay_specific_adapter(monkeypatch):
