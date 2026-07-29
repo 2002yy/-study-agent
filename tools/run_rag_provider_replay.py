@@ -16,6 +16,7 @@ from src.rag.provider_replay import (
     run_provider_answer_replay,
 )
 from src.rag.eval import load_eval_cases
+from src.rag.volcengine_replay import VolcengineArkReplayProvider
 from src.tools.local_knowledge import retrieve_local_knowledge
 from tools.run_rag_quality_baseline import (
     FIXTURE_DOCS,
@@ -44,12 +45,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider-profile",
         default=None,
-        help="Study Agent provider profile. Defaults to LLM_PROVIDER_PROFILE/openai.",
+        help=(
+            "Study Agent provider profile. Defaults to LLM_PROVIDER_PROFILE/openai; "
+            "volcengine is available only in this replay command."
+        ),
     )
     parser.add_argument(
         "--model-profile",
         choices=("flash", "pro"),
         default="pro",
+    )
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Exact model or endpoint ID. Used directly by the Volcengine replay adapter.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Optional OpenAI-compatible base URL override for replay-only adapters.",
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=700)
@@ -85,6 +99,25 @@ def _resolved_provider_profile(value: str | None) -> str:
     return (value or os.getenv("LLM_PROVIDER_PROFILE") or "openai").strip().lower()
 
 
+def _build_provider(args: argparse.Namespace, provider_profile: str):
+    common = {
+        "model_profile": args.model_profile,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        "timeout": args.timeout,
+    }
+    if provider_profile == "volcengine":
+        return VolcengineArkReplayProvider(
+            **common,
+            model_name=args.model_name,
+            base_url=args.base_url,
+        )
+    return OpenAICompatibleReplayProvider(
+        provider_profile=provider_profile,
+        **common,
+    )
+
+
 def main() -> int:
     args = _parser().parse_args()
     fixture_dir = Path(args.fixture_dir)
@@ -111,19 +144,17 @@ def main() -> int:
 
     provider_profile = _resolved_provider_profile(args.provider_profile)
     try:
-        provider = OpenAICompatibleReplayProvider(
-            provider_profile=provider_profile,
-            model_profile=args.model_profile,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            timeout=args.timeout,
-        )
+        provider = _build_provider(args, provider_profile)
     except Exception as exc:
         report = provider_unavailable_report(
             corpus_fingerprint=corpus_fingerprint,
             provider_profile=provider_profile,
             reason=f"provider_initialization_failed:{type(exc).__name__}",
         )
+        report["scope"] = {
+            "case_ids": [case.case_id for case in answer_cases],
+            "full_gold_suite": not bool(args.case_id),
+        }
         _write_report(Path(args.output), report)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 2
@@ -175,6 +206,7 @@ def main() -> int:
     compact = {
         "replay_kind": report["replay_kind"],
         "status": report["status"],
+        "scope": report["scope"],
         "corpus_fingerprint": report["corpus_fingerprint"],
         "provider": report["provider"],
         "cases": report["cases"],
