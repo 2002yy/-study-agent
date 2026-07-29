@@ -1,8 +1,17 @@
 import { defineConfig } from "@playwright/test";
 
+const REAL_STACK_TESTS = [
+  "**/real-stack.spec.ts",
+  "**/real-stack-recovery.spec.ts",
+];
+const STANDARD_FIXTURE_IGNORES = [
+  ...REAL_STACK_TESTS,
+  "**/complex-content.spec.ts",
+];
+
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: ["real-stack.spec.ts", "real-stack-recovery.spec.ts"],
+  testIgnore: REAL_STACK_TESTS,
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
@@ -26,7 +35,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testIgnore: ["complex-content.spec.ts"],
+      testIgnore: STANDARD_FIXTURE_IGNORES,
       use: {
         browserName: "chromium",
         viewport: { width: 1440, height: 900 },
@@ -34,7 +43,7 @@ export default defineConfig({
     },
     {
       name: "mobile-chromium",
-      testIgnore: ["complex-content.spec.ts"],
+      testIgnore: STANDARD_FIXTURE_IGNORES,
       use: {
         browserName: "chromium",
         viewport: { width: 390, height: 844 },
@@ -44,7 +53,8 @@ export default defineConfig({
     },
     {
       name: "narrow-chromium",
-      testMatch: ["complex-content.spec.ts"],
+      testMatch: "**/complex-content.spec.ts",
+      testIgnore: REAL_STACK_TESTS,
       use: {
         browserName: "chromium",
         viewport: { width: 360, height: 520 },
