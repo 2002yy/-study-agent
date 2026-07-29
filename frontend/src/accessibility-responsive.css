@@ -103,13 +103,25 @@
 }
 
 @media (max-width: 760px) {
-  .app-shell,
+  .app-shell {
+    min-height: 0;
+    height: 100dvh;
+  }
+
+  .chat-column,
   .chat-panel {
-    min-height: 100dvh;
-    height: auto;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .chat-panel {
+    overflow: hidden;
   }
 
   .conversation {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     scroll-padding-bottom: calc(150px + env(safe-area-inset-bottom));
   }
 
