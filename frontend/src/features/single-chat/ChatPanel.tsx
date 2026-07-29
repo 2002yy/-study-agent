@@ -371,52 +371,54 @@ export function ChatPanel(props: ChatPanelProps) {
         </div>
       </header>
 
-      <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>
-        <RestoreCard
-          session={sessionNavigation}
-          streamRecovery={streamRecovery}
-          onSelectEntry={handleRestoreEntry}
-          onUpload={onUploadClick}
-          onContinueHere={onQuickPrompt}
-          onStartNewTopic={onStartNewTopic}
-          onContinueInterrupted={onContinueInterruptedReply}
-          onRetryInterrupted={onRetry}
-          onAbandonInterrupted={onAbandonInterruptedReply}
-        />
-        {displayMessages.map((message, index) => {
-          const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
-          const label = message.role === "user" ? "你" : roleLabel(avatarRole);
-          const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
-          return (
-            <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-              <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
-              <div className="message-body">
-                <span>{label}</span>
-                {message.role === "assistant" && message.content ? (
-                  <button
-                    aria-label="复制回答正文"
-                    className={`ghost-action compact message-copy-button${currentCopyState === "error" ? " copy-error" : ""}`}
-                    onClick={() => void copyMessage(message.content, index)}
-                    type="button"
-                  >
-                    <Clipboard size={13} />
-                    {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
-                  </button>
-                ) : null}
-                <MarkdownMessage content={message.content} />
-                {message.role === "assistant" && message.evidence ? <EvidenceTrail evidence={message.evidence} /> : null}
-              </div>
-            </article>
-          );
-        })}
+      <div className="conversation-shell">
+        <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>
+          <RestoreCard
+            session={sessionNavigation}
+            streamRecovery={streamRecovery}
+            onSelectEntry={handleRestoreEntry}
+            onUpload={onUploadClick}
+            onContinueHere={onQuickPrompt}
+            onStartNewTopic={onStartNewTopic}
+            onContinueInterrupted={onContinueInterruptedReply}
+            onRetryInterrupted={onRetry}
+            onAbandonInterrupted={onAbandonInterruptedReply}
+          />
+          {displayMessages.map((message, index) => {
+            const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
+            const label = message.role === "user" ? "你" : roleLabel(avatarRole);
+            const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
+            return (
+              <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
+                <div className="message-body">
+                  <span>{label}</span>
+                  {message.role === "assistant" && message.content ? (
+                    <button
+                      aria-label="复制回答正文"
+                      className={`ghost-action compact message-copy-button${currentCopyState === "error" ? " copy-error" : ""}`}
+                      onClick={() => void copyMessage(message.content, index)}
+                      type="button"
+                    >
+                      <Clipboard size={13} />
+                      {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
+                    </button>
+                  ) : null}
+                  <MarkdownMessage content={message.content} />
+                  {message.role === "assistant" && message.evidence ? <EvidenceTrail evidence={message.evidence} /> : null}
+                </div>
+              </article>
+            );
+          })}
+          <div />
+        </section>
         {!isAtBottom ? (
           <button className="back-to-latest" onClick={scrollToLatest} type="button">
             <ArrowDown size={14} />
             回到最新
           </button>
         ) : null}
-        <div />
-      </section>
+      </div>
 
       {streamRecovery?.reply ? (
         <div className="interrupted-copy-shortcut">
