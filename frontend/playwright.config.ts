@@ -53,7 +53,10 @@ export default defineConfig({
     },
     {
       name: "narrow-chromium",
-      testMatch: "**/complex-content.spec.ts",
+      testMatch: [
+        "**/complex-content.spec.ts",
+        "**/recovery-visibility.spec.ts",
+      ],
       testIgnore: REAL_STACK_TESTS,
       use: {
         browserName: "chromium",

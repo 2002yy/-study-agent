@@ -14,6 +14,7 @@ import "./restore-card.css";
 import "./progressive-disclosure.css";
 import "./features/rag/sourcesPanel.css";
 import "./accessibility-responsive.css";
+import "./recovery-visibility.css";
 
 type AppErrorBoundaryState = {
   error: Error | null;

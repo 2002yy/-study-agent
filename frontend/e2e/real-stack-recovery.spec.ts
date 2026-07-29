@@ -146,7 +146,7 @@ test("stopped stream restores partial truth and completes the same turn once", a
   await expect(page.getByRole("region", { name: "中断任务恢复" })).toHaveCount(0);
 });
 
-test("zero-token failure retries as one child commit and supersedes its parent", async ({
+test("zero-token failure survives reload then retries as one child commit", async ({
   page,
 }) => {
   await page.goto("/");
@@ -175,7 +175,14 @@ test("zero-token failure retries as one child commit and supersedes its parent",
     "committed_learning_state",
   );
 
-  await recovery.getByRole("button", { name: "重新生成" }).click();
+  await page.reload();
+  const restoredRecovery = page.getByRole("region", { name: "中断任务恢复" });
+  await expect(restoredRecovery).toBeVisible();
+  await expect(restoredRecovery.getByText("上次回答未能开始生成", { exact: true })).toBeVisible();
+  await expect(restoredRecovery.getByRole("button", { name: "从断点继续" })).toHaveCount(0);
+  await expect(restoredRecovery.getByRole("button", { name: "重新生成" })).toBeVisible();
+
+  await restoredRecovery.getByRole("button", { name: "重新生成" }).click();
   await expect(assistantMessage(page, RETRY_REPLY)).toBeVisible();
 
   await expect

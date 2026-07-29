@@ -1,6 +1,11 @@
 import type { ChatMessage, WorkspaceState } from "../../types";
 
-type RestoredTurn = { status: string };
+type RestoredTurn = {
+  status: string;
+  assistant_message?: string;
+};
+
+const FAILED_RECOVERY_PLACEHOLDER = " ";
 
 export const SESSION_STORAGE_KEY = "study-agent-react-session";
 
@@ -120,9 +125,19 @@ export function buildContinuationHistory(
   });
 }
 
+export function hasPartialRecoveryReply(reply: string | null | undefined): boolean {
+  return Boolean(reply?.trim());
+}
+
 export function tailInterruptedTurn<T extends RestoredTurn>(turns: T[] | undefined): T | undefined {
   const latest = turns?.length ? turns[turns.length - 1] : undefined;
-  return latest?.status === "interrupted" ? latest : undefined;
+  if (latest?.status === "interrupted") return latest;
+  if (latest?.status !== "failed") return undefined;
+
+  const assistantMessage = hasPartialRecoveryReply(latest.assistant_message)
+    ? latest.assistant_message
+    : FAILED_RECOVERY_PLACEHOLDER;
+  return { ...latest, assistant_message: assistantMessage } as T;
 }
 
 export function buildRetryHistory(
