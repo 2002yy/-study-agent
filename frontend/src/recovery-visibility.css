@@ -1,0 +1,20 @@
+/* Keep the single recovery owner next to the latest conversation context. */
+.conversation > .interrupted-restore-card {
+  order: 100;
+  position: sticky;
+  bottom: 12px;
+  z-index: 4;
+  box-shadow: 0 16px 36px rgba(23, 32, 36, 0.14);
+}
+
+/* A failed-before-first-token turn has no partial answer to copy. */
+.conversation-shell:has(.interrupted-restore-card.failed-before-reply)
+  + .interrupted-copy-shortcut {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .conversation > .interrupted-restore-card {
+    bottom: 10px;
+  }
+}
