@@ -2,7 +2,11 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["real-stack.spec.ts", "real-stack-recovery.spec.ts"],
+  testMatch: [
+    "real-stack.spec.ts",
+    "real-stack-recovery.spec.ts",
+    "real-stack-research.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,
@@ -42,7 +46,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "python -m uvicorn tools.real_stack_test_server:app --host 127.0.0.1 --port 8000",
+        "python -m uvicorn tools.real_stack_research_test_server:app --host 127.0.0.1 --port 8000",
       cwd: "..",
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: false,

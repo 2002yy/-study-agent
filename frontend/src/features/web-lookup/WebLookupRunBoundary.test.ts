@@ -10,16 +10,19 @@ function read(path: string): string {
 
 describe("recoverable web research composition", () => {
   it("creates a durable run before execution and keeps same-query retry/resume", () => {
-    const controller = read("features/web-lookup/webLookupController.ts");
+    const entry = read("features/web-lookup/webLookupController.ts");
+    const controller = read("features/web-lookup/webLookupControllerCore.ts");
     const createPosition = controller.indexOf("createResearchRun");
     const executePosition = controller.indexOf("executeResearchRun");
 
+    expect(entry).toContain('export { useWebLookupController } from "./webLookupControllerCore"');
     expect(createPosition).toBeGreaterThanOrEqual(0);
     expect(executePosition).toBeGreaterThan(createPosition);
     expect(controller).toContain("const sameQuery");
     expect(controller).toContain("sameQuery && isResumable");
     expect(controller).toContain("sameQuery && isRetryable");
     expect(controller).toContain("cancelResearchRun");
+    expect(controller).toContain('operationRegistry.abort("web_lookup")');
   });
 
   it("keeps all recoverable research HTTP calls in the focused adapter", () => {
@@ -30,6 +33,7 @@ describe("recoverable web research composition", () => {
     expect(researchApi).toContain("/retry");
     expect(researchApi).toContain("/resume");
     expect(researchApi).toContain("/cancel");
+    expect(researchApi).toContain("while (current.status === \"running\")");
   });
 
   it("proxies recoverable research routes to FastAPI in development", () => {

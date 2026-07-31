@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 const REAL_STACK_TESTS = [
   "**/real-stack.spec.ts",
   "**/real-stack-recovery.spec.ts",
+  "**/real-stack-research.spec.ts",
 ];
 const STANDARD_FIXTURE_IGNORES = [
   ...REAL_STACK_TESTS,
