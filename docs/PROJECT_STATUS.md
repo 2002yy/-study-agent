@@ -27,9 +27,9 @@
 - planned / attempted / partial / failed 不得覆盖 committed learning truth。
 - 当前冻结横向功能扩张，以主学习闭环是否清晰、可恢复、可验证、可在窄屏操作为判断标准。
 
-## 2. 当前 `main`
+## 2. 当前核心功能基线
 
-- 当前 merge SHA：`b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
+- 当前核心功能基线 merge SHA：`b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
 - PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
 - PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
 - 两批均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
