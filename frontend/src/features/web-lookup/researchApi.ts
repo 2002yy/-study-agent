@@ -70,6 +70,15 @@ type ResearchRunPayload = {
   completed_at?: string | null;
 };
 
+type ResearchRequestOptions = {
+  signal?: AbortSignal;
+};
+
+type ResearchCancelOptions = ResearchRequestOptions & {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+};
+
 function authHeaders(): HeadersInit {
   return API_TOKEN ? { "X-Study-Agent-Token": API_TOKEN } : {};
 }
@@ -119,10 +128,30 @@ function toResponse(run: ResearchRunPayload): ResearchLookupResponse {
   };
 }
 
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, Math.max(0, milliseconds));
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export async function createResearchRun(
   query: string,
   maxItems = 8,
-  requestOptions: { signal?: AbortSignal } = {},
+  requestOptions: ResearchRequestOptions = {},
 ): Promise<ResearchLookupResponse> {
   const run = await requestJson<ResearchRunPayload>("/research-runs", {
     method: "POST",
@@ -134,7 +163,7 @@ export async function createResearchRun(
 
 export async function executeResearchRun(
   runId: string,
-  requestOptions: { signal?: AbortSignal } = {},
+  requestOptions: ResearchRequestOptions = {},
 ): Promise<ResearchLookupResponse> {
   const run = await requestJson<ResearchRunPayload>(
     `/research-runs/${encodeURIComponent(runId)}/search`,
@@ -145,7 +174,7 @@ export async function executeResearchRun(
 
 export async function retryResearchRun(
   runId: string,
-  requestOptions: { signal?: AbortSignal } = {},
+  requestOptions: ResearchRequestOptions = {},
 ): Promise<ResearchLookupResponse> {
   const run = await requestJson<ResearchRunPayload>(
     `/research-runs/${encodeURIComponent(runId)}/retry`,
@@ -156,7 +185,7 @@ export async function retryResearchRun(
 
 export async function resumeResearchRun(
   runId: string,
-  requestOptions: { signal?: AbortSignal } = {},
+  requestOptions: ResearchRequestOptions = {},
 ): Promise<ResearchLookupResponse> {
   const run = await requestJson<ResearchRunPayload>(
     `/research-runs/${encodeURIComponent(runId)}/resume`,
@@ -165,17 +194,41 @@ export async function resumeResearchRun(
   return toResponse(run);
 }
 
-export async function cancelResearchRun(runId: string): Promise<ResearchLookupResponse> {
+export async function loadResearchRun(
+  runId: string,
+  requestOptions: ResearchRequestOptions = {},
+): Promise<ResearchLookupResponse> {
   const run = await requestJson<ResearchRunPayload>(
-    `/research-runs/${encodeURIComponent(runId)}/cancel`,
-    { method: "POST" },
+    `/research-runs/${encodeURIComponent(runId)}`,
+    { signal: requestOptions.signal },
   );
   return toResponse(run);
 }
 
-export async function loadResearchRun(runId: string): Promise<ResearchLookupResponse> {
-  const run = await requestJson<ResearchRunPayload>(
-    `/research-runs/${encodeURIComponent(runId)}`,
+export async function cancelResearchRun(
+  runId: string,
+  requestOptions: ResearchCancelOptions = {},
+): Promise<ResearchLookupResponse> {
+  let current = toResponse(
+    await requestJson<ResearchRunPayload>(
+      `/research-runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", signal: requestOptions.signal },
+    ),
   );
-  return toResponse(run);
+  if (current.status !== "running") return current;
+
+  const pollIntervalMs = Math.max(0, requestOptions.pollIntervalMs ?? 100);
+  const timeoutMs = Math.max(0, requestOptions.timeoutMs ?? 5000);
+  const deadline = Date.now() + timeoutMs;
+
+  while (current.status === "running") {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `联网研究停止请求仍在处理中（${current.stage}）；刷新后可继续查看或重试。`,
+      );
+    }
+    await wait(pollIntervalMs, requestOptions.signal);
+    current = await loadResearchRun(runId, { signal: requestOptions.signal });
+  }
+  return current;
 }
