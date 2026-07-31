@@ -49,6 +49,7 @@ test("research stop survives refresh and retries the same run", async ({ page })
   });
   expect(cancelled.cancel_requested_at).toBeTruthy();
   expect(cancelled.completed_at).toBeTruthy();
+  expect(cancelled.query_attempts.length).toBeGreaterThanOrEqual(1);
 
   await page.reload();
   const group = await open(page, "群聊讨论", "群聊");
@@ -61,7 +62,7 @@ test("research stop survives refresh and retries the same run", async ({ page })
   await expect.poll(async () => (await run(page, id)).status).toBe("completed");
   const completed = await run(page, id);
   expect(completed.id).toBe(id);
-  expect(completed.query_attempts.length).toBeGreaterThanOrEqual(2);
+  expect(completed.query_attempts).toEqual(cancelled.query_attempts);
   expect(completed.source_block).not.toBe("");
   await expect(group.getByText("研究完成", { exact: true })).toBeVisible();
   await expect(group.getByLabel("仅用于下一轮单人聊天")).toBeChecked();
