@@ -1,365 +1,159 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-07-29  
+> 更新：2026-07-31  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P0-E1、P0-E2 与 P0-E3 前两切片已进入 `main`；方舟 replay-only 适配及 smoke/full 合同已完成，当前等待配置 credential 与精确 Model/Endpoint ID 后手动执行真实 smoke。**  
-> 冻结边界：**生产 claim producer / claim UI、生产 ChatTurn 接入、方舟生产聊天 Provider 与可执行 agent 扩张继续冻结，必须由真实 replay 结果决定后续顺序。**
+> 当前主线：**仅检查和改进 Study Agent 本体的代码功能、核心学习流程与桌面/移动端体验。**  
+> 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**
 
-本文件只维护当前事实、指标、缺口、顺序和门禁。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
+本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
 ## 1. 产品边界
 
 ```text
-当前目标 -> 教学/练习 -> 资料与证据 -> 理解验证
--> 已确认/未解决 -> 下一步 -> 整理与恢复
+当前目标
+-> 教学 / 练习
+-> 资料与证据
+-> 理解验证
+-> 已确认 / 未解决
+-> 下一步
+-> 整理、恢复与继续学习
 ```
 
-- RAG 服务于围绕自己的资料学习；Web Research 服务于需要外部事实的任务。
-- GitHub 是源码学习证据来源，不是第二个执行产品或顶级工作台。
-- Memory 是连续性基础设施；Workflow 只属于高级诊断。
-- React 是交互和可重建缓存；SQLite durable entities 是运行真值。
-- planned / attempted / partial / failed 不得覆盖 committed truth。
-- 当前仍冻结横向产品扩张，以真实 replay、质量门禁和核心学习闭环为判断标准。
+- React 是当前产品交互面；FastAPI 提供生产路由与应用服务；SQLite durable entities 是运行真值。
+- RAG 服务于围绕用户自己的资料学习；Web Research 服务于需要外部事实的学习任务。
+- GitHub 是源码学习证据来源，不是第二个顶级工作台。
+- Memory 是学习连续性基础设施；Workflow 只属于高级诊断。
+- planned / attempted / partial / failed 不得覆盖 committed learning truth。
+- 当前冻结横向功能扩张，以主学习闭环是否清晰、可恢复、可验证、可在窄屏操作为判断标准。
 
-## 2. 已完成主链
+## 2. 当前 `main`
 
-- TaskContract、LearningClosureRun、ThreadSummaryState、结构化恢复卡；
-- RAG K1a-K1e、EvidenceSnapshot、ResearchRun source truth；
-- AnswerClaimSnapshot v1、deterministic evaluator self-test 与 record-only real-provider replay adapter；
-- 真实 Provider 回答报告 -> 离线 AnswerClaim 严格校验 -> 双 artifact 的手动 workflow 合同；
-- 方舟标准 OpenAI-compatible replay-only adapter、固定单 case smoke 与完整 10-case full 合同；
-- 生产路径学习验证 E2E；
-- desktop / 390px / 定向 360×520 Golden Journeys；
-- 核心首屏按需加载与隐藏功能错误隔离；
-- 资料与来源三层收口；
-- 学习结束 review-first；
-- desktop / mobile SessionNavigator 单一交互 owner；
-- 新手入口与设置渐进披露；
-- SlideOver 键盘焦点闭环、复制反馈、上传前置合同和窄屏/软键盘体验门禁；
-- React -> FastAPI -> SQLite 的确定性真实全栈浏览器运行时；
-- 首次学习、理解验证、真实上传/索引/证据、learning closure、中断续写和失败重试的真实组合门禁；
-- 命名成功截图、manifest、浏览器真实动作 recorder、对话滚动几何与证据完整性 teardown；
-- 长中文、长 URL、宽代码、IME composition、真实 wheel 滚动、回到最新与刷新恢复的 360×520 门禁。
+- 当前 merge SHA：`b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
+- PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
+- PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
+- 两批均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
 
-近期已进入 `main`：
-
-- PR #72 `3796bfe3bbc7c83feac9eeb9f195803a5ed57228`，最终 CI #1496；
-- PR #73 `676fe23a0f26d500712b71c6e175d99d953f1e80`，最终 CI #1520；
-- PR #74 `911e83769c1b53849fe21772099bec0323357180`，最终 head CI #1546；
-- PR #76 `267969d92f0eaed4d6b2dc6b631a5380dd86f591`，最终 CI #1554；
-- PR #77 `836a50c306b1af17f1c01e07dc96291cb5da9b30`，最终 head CI #1579；
-- PR #78 `b5bf2239cc93f1d30e3914010ee88d548ab2b8ca`，第一切片状态同步；
-- PR #79 `6934b77e88e49244614af4e74eae980911229c80`，最终 head CI #1595；
-- PR #80 `56b584c1a9ab28eeb997e5636015270be501d32a`，第二切片状态同步，CI #1599；
-- PR #81 `2ed83b57d49b8057a128b9e3df62da62a7be133e`，最终 head CI #1609；
-- PR #82 `b2d178777e43a2c165e9b4229b0531db855bfe8e`，P0-E1 完成状态同步，CI #1613；
-- PR #83 `c90bc39ad3bbe9137e035d0892122b3b86755749`，最终 head CI #1626；
-- PR #84 `28176449373d9819a40ad35768741095d3b888c5`，P0-E2 第一切片状态同步，CI #1630；
-- PR #85 `fab62bc526acef7c7f6fd0ebcdcef8661c01ad49`，最终 head CI #1659；
-- PR #86 `a974efdf712df4a4dd6b0ef5690327c558c932a4`，P0-E2 完成状态同步；
-- PR #87 `97bd0a02b6738d7d34aac112ccbc756a851bd14c`，P0-E3 replay 运行合同，最终 head CI #1680；
-- PR #88 `42e036a189f28c7561731c5fdc0da04c861407bf`，P0-E3 第一切片状态同步；
-- PR #89 `b1fac061f390cf224fe9288e7786474c3d1d1f6e`，方舟 smoke/full replay 合同，最终 head CI #1696。
-
-## 3. 当前真实指标
-
-### RAG K1
-
-- 12 documents；30 retrieval cases / 26 answerable；10 answer-quality gold；
-- source recall@K 0.923077；nDCG 0.903600；adaptive recall@K 0.942308；
-- multi-source recall@K 0.9；stale / forbidden leakage 0；
-- deterministic answerable 26/26；unanswerable block 4/4。
-
-这些是固定 corpus 回归合同，不代表真实模型最终质量。
-
-### AnswerClaim real-provider replay
-
-- 固定输入：完整 10 条 K1 answer-quality gold；
-- record-only AnswerClaim 运行合同：已进入 `main`；
-- 方舟 replay-only adapter：已进入 `main`；
-- smoke：固定 `clean_requests_session` 单 case，只验证 credential、endpoint、精确模型、JSON、usage 与 artifact；
-- full：固定完整 10-case，并执行离线 AnswerClaim 严格评测；
-- 实际 real-provider smoke / full artifact：**均尚未执行**；
-- claim coverage、unsupported-claim rate、link alignment、refusal leakage、稳定性、latency、usage 与成本：**暂无真实数字**；
-- deterministic / synthetic 测试只证明合同可执行，不得冒充真实模型质量。
-
-### GitHub replay
-
-- 15 repos；17 cases；15 Provider replay；partial rate 0.7647；
-- symbol mapping P/R/F1 0.625 / 0.4545 / 0.5263；
-- CI association P/R/F1 0.3529 / 1.0 / 0.5217。
-
-G10-D 可执行代理继续冻结。
-
-### P0-E2 observed journey metrics
-
-以下数字来自浏览器事件 recorder，而不是用例手写常量；前三条 desktop 与 390px 结果一致：
-
-| 旅程 | 点击 | 配置/推进决策 | 恢复动作 | 发送 | 用户滚动 | 表面并集 |
-|---|---:|---:|---:|---:|---:|---|
-| 首次回答 | 0 | 0 | 0 | 1 | 0 | main、returning restore |
-| 返回学习 | 1 | 1 | 1 | 1 | 0 | main、returning restore |
-| 失败重试 | 1 | 0 | 1 | 1 | 0 | main、interrupted recovery、returning restore |
-| 360×520 复杂内容 | 1 | 0 | 0 | 1 | 1 | main、returning restore |
-
-- 四条旅程均无页面级横向溢出；首次回答为 keyboard-only 路径。
-- 复杂内容旅程中的一次点击为“回到最新”；真实 wheel 记录为 `wheel:-700`。
-- IME 组合期间的 Enter 不提交；composition end 后 Enter 只提交一次。
-
-### P0-E2 成功证据包
-
-- 23 张真实 viewport PNG：desktop 1440×900 共 9 张、mobile 390×844 共 9 张、narrow 360×520 共 5 张；
-- 360×520 对话可视高度 251px；
-- 用户滚动后距底部 700px；点击“回到最新”后距底部 0；刷新后仍为 0；
-- 宽代码只在代码块内部横向滚动；长 URL 在消息边界内换行；
-- global teardown 强制校验截图数量、尺寸、manifest、observed metrics、文件非空和交叉引用。
-
-## 4. 已验证的产品闭环
+## 3. 已验证的产品闭环
 
 | 闭环 | 当前结论 | 真实证据边界 |
 |---|---|---|
-| 首次开始 | 真实全栈通过、成功证据可审查 | React/FastAPI/SQLite 与 desktop/390px 成功步骤截图；0 点击、0 配置决策 |
-| 返回学习 | 可用、成功证据可审查 | 恢复上下文、一次明确选择、继续后刷新；1 点击、1 决策、1 恢复动作 |
-| 上传资料学习 | 真实全栈通过 | Markdown 校验、解析、document/revision identity、staging/activation、检索、selected evidence 与刷新恢复 |
-| 联网研究 | 基础恢复可用 | multi-step research 与完整 cancel propagation 仍是 P1 生命周期补强项 |
-| 源码学习 | 展示与恢复可用 | symbol mapping 与 CI association 精度仍不足以证明稳定理解源码关系 |
-| 理解验证 | 真实全栈通过 | 空泛“懂了” reject；正确推理进入 committed truth 和 transfer，并刷新恢复 |
-| 学习结束 | 真实全栈通过 | closure preview、冻结候选、MemoryRun hash、确认写入、summary、刷新、归档并新建 |
-| 中断恢复 | 真实全栈通过 | Stop 后 partial 保存为 interrupted；刷新恢复；同 turn id 续写；前缀不重复；只提交一次 |
-| 失败重试 | 真实全栈通过、成功证据可审查 | 零-token failed / fixture failure 均有明确 retry；一次恢复点击；刷新恢复最终结果 |
-| 窄屏复杂内容 | 通过、成功证据可审查 | 360×520 长文/URL/代码、IME、真实滚动、回到最新、主动发送定位与刷新恢复 |
+| 首次开始 | 真实全栈通过 | React -> FastAPI -> SQLite；无需先做配置决策 |
+| 返回学习 | 可恢复并继续 | 恢复目标、上下文和下一步，继续后刷新仍一致 |
+| 上传资料学习 | 真实全栈通过 | 文件合同、解析、document/revision、索引、EvidenceSnapshot、刷新恢复 |
+| 联网研究 | 取消与恢复闭环通过 | 慢研究 -> 请求取消 -> durable `cancelled` -> 刷新 -> 同 run 从 checkpoint 重试完成 |
+| 源码学习 | 展示与恢复可用 | symbol mapping 与 CI association 精度仍不足以证明稳定源码关系理解 |
+| 理解验证 | 真实全栈通过 | 空泛“懂了”不提交；正确推理才进入 committed truth 和 transfer |
+| 学习结束 | 真实全栈通过 | closure preview、确认写入、summary、刷新、归档并新建 |
+| 中断续写 | 真实全栈通过 | partial 保存为 `interrupted`；刷新后同 turn 续写；前缀不重复；只提交一次 |
+| 零 token 失败 | 真实全栈通过 | `failed` 刷新后仍可重新生成；retry child 完成后 parent `superseded` |
+| 长会话恢复 | desktop / 390×844 / 360×520 通过 | 恢复卡位于当前 conversation viewport，不再落在历史顶部 |
+| 窄屏复杂内容 | 360×520 通过 | 长中文、长 URL、宽代码、IME、真实滚动、回到最新与刷新恢复 |
 
-## 5. P0-E1 第一切片：首次学习与理解验证
+## 4. 最近两批核心修复
 
-PR #77 建立首个真实组合门禁：
+### 4.1 失败刷新恢复与长会话入口
 
-```text
-Playwright browser
--> Vite proxy
--> production FastAPI routes
--> ExternalDataPolicyChatService / TaskContract / pedagogy
--> production SQLite repositories
--> session reload and UI restoration
-```
+PR #92 修复两个 P0 恢复缺口：
 
-- 测试入口只替换外部模型与网络 gateway；生产 route、application service、transaction 和 repository 继续执行；
-- 每个用例清空临时数据库、WAL/SHM 和导出目录，desktop / mobile 不共享状态；
-- desktop / 390px 覆盖首次系统学习、SQLite durable truth、刷新恢复、空泛理解 reject、正确推理 commit；
-- CI #1579 全量门禁通过。
+- 最新 turn 为 `failed` 时，刷新后恢复为 retry-only 状态；
+- 零 token 失败不显示“从断点继续”，不伪造部分回答；
+- `interrupted` 仍保留同 turn 断点续写；
+- 恢复卡移动到最新对话上下文附近并在 viewport 内保持可见；
+- failed-before-reply 不显示“部分回答已保留/复制”；
+- 360×520 首轮门禁发现恢复卡顶部越界约 21px，最终通过短屏紧凑布局修复，而不是放宽断言；
+- 后端 `failed` / `interrupted` durable status 和 committed learning truth 均未改变。
 
-真实门禁暴露并修复默认路由缺口：`TaskContract` 已识别 `learn`，但自动学习方式仍可能进入普通 direct answer。当前“带我系统学习……”自动进入苏格拉底协议；用户显式选择直接讲解时仍保留手动控制。
+### 4.2 联网研究取消状态收口
 
-## 6. P0-E1 第二切片：上传、证据与 learning closure
+PR #93 修复 ResearchRun 两阶段取消在前端没有收口的问题：
 
-### 6.1 真实上传与资料学习
+- 服务端首次取消响应仍为 `running` 时，前端持续读取同一 durable run；
+- 只有 run 离开 `running` 后才解除忙碌状态；
+- 先发服务端取消请求，再中止浏览器中的旧执行请求；
+- 取消期间 `useInChat=false`，已有来源不会自动进入下一轮聊天；
+- 等待预算耗尽时保留 run ID，并提示刷新后继续查看或重试；
+- 刷新可恢复 `cancelled`、查询尝试和已有 checkpoint；
+- 同一查询从已取消 run 的 checkpoint 重试，不创建重复 ResearchRun；
+- 新增 desktop 与 390×844 真实全栈旅程，不通过 `page.route` 伪造核心 ResearchRun API。
 
-```text
-File chooser
--> multipart upload
--> 服务端文件合同
--> Markdown parser
--> document / revision identity
--> staging index
--> active index
--> local retrieval
--> EvidenceSnapshot
--> selected evidence
--> refresh restoration
-```
+本批门禁连续发现并修复两个测试基础设施问题：
 
-- RAG 上传目录、索引文件和 SQLite 均隔离在临时运行时；
-- 浏览器不通过 `page.route` 伪造上传、检索或聊天 API；
-- 用户明确要求完整讲解时，生产披露策略将真实检索到的本地文档标记为 selected；普通苏格拉底推导阶段仍允许 withholding；
-- UI、API、RAG index、SQLite turn snapshot 和刷新结果一致。
+1. 静态 owner 测试只读取旧控制器入口，迁移为稳定 re-export 后需要同时审查入口与实现文件；
+2. 新增 real-stack 文件最初被普通 fixture Playwright 项目误收录，最终加入统一 `REAL_STACK_TESTS` 排除清单，由专用真实全栈配置运行。
 
-### 6.2 learning closure
+## 5. 当前质量门禁
 
-```text
-committed learning state
--> LearningClosureRun
--> deterministic external generator
--> frozen candidates
--> MemoryRun preview
--> updates hash
--> user confirmation
--> safe writer
--> ThreadSummaryState
--> refresh
--> archive and new session
-```
+CI #1731 完整通过：
 
-- 保留生产 LearningClosureService、MemoryRun、hash 校验、safe writer、summary metadata 与归档流程；
-- 只替换外部 closure candidate generator；
-- 修复 Vite 缺少 `/learning-closure-runs` 代理的问题；
-- desktop / 390px 均完成 preview、确认写入、长期记忆读取、刷新恢复、归档并新建；
-- CI #1595 通过全部基础门禁、34/34 fixture Golden Journeys 与 8/8 real-stack cases。
+- 全量 pytest；
+- RAG K1 固定 corpus 基线；
+- Ruff、项目打包检查、detect-secrets；
+- expanded mypy baseline；
+- 前端单元测试、TypeScript 与 Vite production build；
+- 38 条 Chromium fixture / narrow Golden Journeys；
+- desktop 与 390×844 专用真实全栈浏览器门禁，包含新增 ResearchRun 取消旅程。
 
-## 7. P0-E1 第三切片：中断续写与失败重试
+测试边界：
 
-### 7.1 stream interruption -> continuation
+- 浏览器门禁替换外部模型、搜索或文件来源时，仍保留生产 route、application service、transaction 和 repository；
+- real-stack 核心 API 不使用 `page.route` 伪造；
+- 每个真实旅程使用隔离的临时 SQLite、RAG、memory 和输出目录；
+- 失败必须暴露真实产品或测试建模问题，不通过降低断言强行变绿。
 
-- 浏览器真实点击 Stop，Abort 传到 FastAPI；
-- partial reply 保存为 `interrupted`，thread committed truth 不变；
-- attempted snapshot 保留，但不存在 `committed_learning_state`；
-- 刷新后恢复卡显示 partial 和“从断点继续”；
-- continuation 复用原 turn id，只生成剩余后缀，不重复已有前缀；
-- 成功后同一 turn 变为 completed，只提交一次 learning state。
+## 6. 当前真实指标
 
-### 7.2 zero-token failure -> retry
+### RAG K1 固定回归
 
-- Provider 在首 token 前异常时保存为 `failed`，不再错误标记为 `interrupted`；
-- UI 只提供“重新生成”，不提供无意义的断点继续；
-- failed parent 保留 attempted truth，不推进 thread committed state；
-- retry 创建一个 child turn，成功后 parent 变为 superseded；
-- 只有成功 child 提交 learning state，刷新后只恢复最终结果。
+- 12 documents；30 retrieval cases / 26 answerable；10 answer-quality gold；
+- source recall@K `0.923077`；nDCG `0.903600`；adaptive recall@K `0.942308`；
+- multi-source recall@K `0.9`；stale / forbidden leakage `0`；
+- deterministic answerable `26/26`；unanswerable block `4/4`。
 
-CI #1609 通过全部基础门禁、34/34 fixture Golden Journeys 与 12/12 real-stack cases。
+这些数字只代表固定 corpus 回归合同，不代表真实模型最终回答质量。
 
-## 8. P0-E2：可审查成功体验证据——已完成
+### 成功体验证据
 
-### 8.1 第一切片：成功产物与真实动作指标
+- 23 张已保留的真实 viewport PNG：desktop 1440×900 共 9 张、mobile 390×844 共 9 张、narrow 360×520 共 5 张；
+- 360×520 对话可视高度 251px；
+- 真实 wheel 滚动后距底部 700px；“回到最新”和刷新后均恢复到 0；
+- 宽代码只在代码块内部横向滚动；长 URL 在消息边界内换行；
+- 浏览器 composition 事件验证：组合期间 Enter 不提交，composition end 后只提交一次。
 
-PR #83 建立稳定证据合同：
+### 仍属冻结的评测能力
 
-- browser recorder 自动采集 click、Tab/Enter/Escape、composer submit、wheel/touch/滚动键、明确决策、恢复动作和 surface switch；
-- recorder 使用 session storage 跨刷新保留完整旅程，而不依赖用例手写计数；
-- 首次回答、返回学习、失败重试各保留 3 个命名步骤，覆盖 desktop 与 390px，共 18 张 PNG；
-- 截图使用真实 viewport，不使用 full-page，避免固定 composer 覆盖页面中段和截图过程污染滚动指标；
-- manifest 记录 journey、project、step、viewport、scroll position、document height 和可见 product surfaces；
-- `product_surfaces` 按所有成功步骤取并集，不再只统计结束页面；
-- CI #1626 通过全部门禁。
+仓库中仍保留 record-only AnswerClaim real-provider replay 与方舟 smoke/full 运行合同，但：
 
-### 8.2 第二切片：360×520、复杂内容、IME 与真实滚动
+- 实际 real-provider smoke / full artifact 均尚未执行；
+- 不存在可报告的真实 claim coverage、unsupported-claim rate、citation alignment、latency、usage 或成本数字；
+- 这些合同不是当前开发主线，不得推动生产 Provider、claim UI 或 ChatTurn 写入扩张。
 
-PR #85 增加一个定向 `narrow-chromium` 项目，而不是把全部旅程扩成三倍：
+## 7. 当前缺口
 
-- 覆盖长中文连续文本、长 URL、宽代码和多段列表；
-- 验证长 URL 不撑破消息，宽代码由代码块内部滚动承接；
-- compositionstart / compositionupdate / compositionend 期间 Enter 不误发送；
-- 使用真实 wheel 产生滚动，验证“回到最新”和刷新恢复；
-- manifest 增加 conversation scrollTop / scrollHeight / clientHeight / distance-from-bottom；
-- evidence completeness 从 18 张扩展到 23 张；
-- Playwright 明确分离 34 条 fixture、1 条 narrow 和 12 条 real-stack。
+**P1：核心功能与体验**
 
-真实门禁连续暴露并修复：
+1. 继续逐批检查首次学习、返回学习、上传资料、理解验证和学习结束的真实交互细节，优先修阻断和高频困惑；
+2. 扩展联网研究在多查询、读取失败、部分结果和重试过程中的阶段解释，避免只显示工程状态；
+3. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样；
+4. 加强源码学习的 symbol mapping、CI association precision 与 partial-result 用户解释。
 
-1. 移动端 chat 可能按内容高度扩张，conversation 不是真正 scroll owner；
-2. 长 Markdown 刷新恢复可能停在中段；
-3. 用户在旧内容位置主动发送后，新问题和回答不可见；
-4. “回到最新”可能被 composer 覆盖或被 sticky header 拦截；
-5. 在 360×520 下，学习状态、topbar 与单列 composer 一度只给对话留下约 10px。
+**P2：兼容性与维护**
 
-最终结构：conversation 拥有独立 viewport shell；短手机窗口只保留目标与验证状态，topbar 操作保持单行，composer 使用紧凑横向发送。390×844 正常移动布局不受短高度规则影响。CI #1659 通过全部门禁、35/35 fixture+narrow 与 12/12 real-stack。
+1. 增加 Firefox / WebKit 兼容抽样；
+2. 清理 README 中旧首页、Streamlit、群聊、新闻和当前 React 工作台之间的表述差异；
+3. 继续统一 Golden Journey 的点击、决策、surface、恢复和耗时指标。
 
-### 8.3 基于成功证据的人工复核记录
+## 8. 执行规则
 
-本次人工复核基于 23 张成功截图、manifest 与 observed metrics；不是实体手机和真实操作系统输入法的实机测试。
+- 只从 Study Agent 核心学习流程出发选择下一批，不因为仓库已有实验合同就继续扩张；
+- 优先级：阻断 -> 高频体验问题 -> 状态真值错误 -> 可维护性 -> 低频兼容性；
+- 每批使用独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并；
+- 新功能或修复必须同时给出单元、真实全栈或人工验收边界；
+- 不报告未实际运行的 Provider 指标，不把 deterministic / synthetic 结果冒充真实模型质量。
 
-**已消除的阻断：**
+## 9. 文档规则
 
-- 360×520 对话区不再坍缩，稳定保留 251px 阅读高度；
-- composer、顶部操作和“回到最新”互不遮挡；
-- 主动发送后回到最新，后台新增内容仍尊重用户旧阅读位置；
-- 刷新后恢复到最终回答；
-- 长 URL、代码块和列表未造成页面横向溢出。
-
-**可接受项：**
-
-- 短高度下隐藏阶段与下一步等次要状态，只保留目标和验证状态，符合渐进披露原则；
-- “回到最新”浮在对话右下角，会覆盖小块正文，但只在离开底部时出现，且可立即恢复；
-- 宽代码依赖代码块内横向滑动，没有额外提示，当前不构成阻断。
-
-**仍需后续处理：**
-
-- fixture 503 恢复卡的泛化标题仍可能让 failed 与 interrupted 语义不够清楚，列入 P1 文案校准；
-- 浏览器 composition 事件已覆盖，但实体安卓/iOS 输入法、软键盘安全区和真实触摸惯性仍需实机抽样；
-- Firefox/WebKit 未进入当前门禁。
-
-**P0-E2 结论：通过。** 当前 Chromium desktop、390×844 与定向 360×520 范围内，成功过程已经可查看、可度量、可人工复核。允许解冻真实 Provider AnswerClaim replay，但只能 record-only，不得直接接入生产 ChatTurn。
-
-## 9. P0-E3：真实 Provider AnswerClaim replay（record-only）
-
-### 9.1 第一切片：运行合同——已完成
-
-PR #87 已建立以下合同：
-
-```text
-fixed 10-case K1 gold
--> production K1e real-provider answer replay
--> Provider-authored answer / assertions / cited_sources
--> immutable raw report
--> offline AnswerClaim adapter
--> AnswerClaimSnapshotV1 strict validation
--> record-only quality report
-```
-
-- 第二阶段不再次调用 Provider；
-- 不从自然语言回答重新抽取或补写 claim；
-- Provider assertion 映射为 `factual / asserted / provider_structured`；
-- citation 映射为 strict known-evidence `direct_support` link；
-- 保留最终回答换行用于稳定 `answer_hash`；
-- 要求完整 10-case scope、零 failed case、Provider/model/endpoint fingerprints；
-- 记录 source report fingerprint、latency、usage 与可选操作者核实的人民币成本；
-- 未知 evidence、重复 claim、空最终回答等错误只暴露失败，不伪造补分；
-- 手动 workflow 上传 K1e 与 AnswerClaim 两个 JSON artifact；
-- CI #1680 通过 897 pytest、全部静态/前端/浏览器与 12/12 real-stack 门禁。
-
-### 9.2 第二切片：方舟 replay-only 与 smoke/full——已完成
-
-PR #89 建立以下边界：
-
-- `VolcengineArkReplayProvider` 继承 provenance-approved real-provider replay adapter；
-- 仅使用标准方舟 OpenAI-compatible `/api/v3`；
-- credential 优先读取 `VOLCENGINE_API_KEY`，兼容 `ARK_API_KEY`；
-- `model_name` 必须是精确 Model ID 或 Endpoint ID；
-- `/api/plan/v3` 与 `/api/coding/v3` 在代码、测试和文档中明确拒绝；
-- `smoke` 默认只运行 `clean_requests_session`，验证 credential、endpoint、JSON object、usage 和 artifact；
-- `full` 才运行完整 10-case，并执行离线 AnswerClaim 评测；
-- smoke 不能生成完整模型质量结论；
-- 方舟没有注册到生产聊天 Provider owner；
-- CI #1696 通过全部后端、RAG、静态、安全、mypy、前端、35/35 fixture+narrow 与 12/12 real-stack 门禁。
-
-### 9.3 当前下一步：执行真实方舟 smoke
-
-1. 在仓库 Secret 中配置 `VOLCENGINE_API_KEY` 或 `ARK_API_KEY`；
-2. 获取并填写精确 Model ID 或 Endpoint ID；
-3. 手动执行 `.github/workflows/rag-provider-replay.yml`：`replay_scope=smoke`、`provider_profile=volcengine`；
-4. smoke 的 base URL 留空，使用标准方舟 `/api/v3`；成本留空；
-5. 审查单 case artifact 的 provider identity、JSON parse、latency 与 usage；
-6. 只有绿色 smoke 才允许连续执行两次完整 10-case full；
-7. 比较 claim coverage、unsupported claim、citation alignment、refusal leakage、latency、usage、核实成本与输出稳定性；
-8. 根据失败分布决定先做 claim producer 改进，还是 RAG-K1f / K2。
-
-在真实 artifact 产生前，不存在可报告的真实 AnswerClaim 模型指标。
-
-## 10. P1 / P2 缺口
-
-**P1：**
-
-1. failed / interrupted 恢复卡文案语义校准；
-2. 加强 GitHub replay 的 symbol mapping、CI association precision 和 partial-result 解释；
-3. 补 multi-step research / cancel 的完整生命周期门禁；
-4. 实体手机输入法、软键盘安全区与触摸滚动抽样。
-
-**P2：**
-
-1. 增加 Firefox/WebKit 兼容抽样；
-2. 清理 README 中 Streamlit“已移除”与“兼容入口仍存在”的表述差异；
-3. 继续校准 Golden Journey 指标，使点击、决策、surface、恢复能够跨用例比较。
-
-## 11. 当前冻结与执行状态
-
-- `main` 当前 P0-E3 方舟 replay 合同 merge SHA：`b1fac061f390cf224fe9288e7786474c3d1d1f6e`；
-- PR #89 已 closed / merged，最终 feature head `898cb0599e941830dd16e48185584719acceb7da`，CI #1696 完整全绿；
-- 当前状态分支：`docs/p0-e3-volcengine-status`；
-- 下一执行顺序：真实方舟 smoke -> 两次完整 full -> 结果分析 -> 决定 claim producer 或 RAG-K1f/K2；
-- 真实 Provider replay workflow 需要 workflow_dispatch；当前连接器未暴露该写操作；
-- 生产方舟聊天 Provider、claim producer、claim UI、生产 ChatTurn 接入、自适应 LearningPlan、G10-D 可执行代理继续冻结；
-- 合并策略：独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并。
-
-## 12. 文档规则
-
-- 当前状态只更新本文件；status-only 更新留在 active branch；
-- `ARCHITECTURE_STATUS.md` 只维护稳定 owner/边界；`STATE_MODEL.md` 只维护稳定数据模型；
+- 当前状态只更新本文件；
+- `ARCHITECTURE_STATUS.md` 只维护稳定 owner / 边界；
+- `STATE_MODEL.md` 只维护稳定数据模型；
 - 不新增并列长期状态文档；代码、CI、分支和 PR 变化必须同步本文件。
