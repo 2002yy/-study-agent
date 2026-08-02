@@ -19,7 +19,7 @@ type WebLookupControllerOptions = {
 };
 
 function isUsable(response: ResearchLookupResponse): boolean {
-  return ["completed", "partial"].includes(response.status) && response.news_items.length > 0;
+  return response.status === "completed" && response.news_items.length > 0;
 }
 
 function isRetryable(response: ResearchLookupResponse | null): boolean {

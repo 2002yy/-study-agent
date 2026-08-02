@@ -1,10 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-07-31  
+> 更新：2026-08-03
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**仅检查和改进 Study Agent 本体的代码功能、核心学习流程与桌面/移动端体验。**  
 > 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**
+> 当前切片：**P1-R1 联网研究阶段解释已实现，PR #96 的远程完整 CI 已通过；PR 仍为 Draft，等待用户决定是否合并。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -82,6 +83,16 @@ PR #93 修复 ResearchRun 两阶段取消在前端没有收口的问题：
 1. 静态 owner 测试只读取旧控制器入口，迁移为稳定 re-export 后需要同时审查入口与实现文件；
 2. 新增 real-stack 文件最初被普通 fixture Playwright 项目误收录，最终加入统一 `REAL_STACK_TESTS` 排除清单，由专用真实全栈配置运行。
 
+### 4.3 P1-R1 联网研究阶段解释（远程 CI 已通过）
+
+当前活动分支 `codex/p1-r1-research-stage-explanations` 收口“工程状态不可理解”的一处核心语义：
+
+- `partial` ResearchRun 保留查询、来源与 checkpoint，但不再自动作为下一轮聊天资料；学习者可显式选用，或重试补全；
+- 聊天恢复卡与群聊研究面板明确说明部分结果、已保留的查询/来源和重试语义；
+- Windows 真实全栈重置在释放缓存连接后再删除 SQLite 文件，desktop 与 390×844 可连续执行；
+- 已通过前端 222 项单元测试、TypeScript/Vite production build，以及 ResearchRun 取消—刷新—同 run 重试的 desktop 与 390×844 真实全栈旅程；
+- PR #96 的两项 GitHub Actions CI 已通过，覆盖全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁；该 PR 仍为 Draft，未经用户确认不得合并。
+
 ## 5. 当前质量门禁
 
 CI #1731 完整通过：
@@ -133,7 +144,7 @@ CI #1731 完整通过：
 **P1：核心功能与体验**
 
 1. 继续逐批检查首次学习、返回学习、上传资料、理解验证和学习结束的真实交互细节，优先修阻断和高频困惑；
-2. 扩展联网研究在多查询、读取失败、部分结果和重试过程中的阶段解释，避免只显示工程状态；
+2. 根据用户决定将 PR #96 继续保持 Draft、转 Ready 或合并；合并前不得扩大 P1-R1 范围；
 3. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样；
 4. 加强源码学习的 symbol mapping、CI association precision 与 partial-result 用户解释。
 

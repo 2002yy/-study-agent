@@ -8,6 +8,7 @@ It must never be used as the normal application entrypoint.
 from __future__ import annotations
 
 import asyncio
+import gc
 import os
 import shutil
 from dataclasses import asdict
@@ -329,6 +330,9 @@ app.dependency_overrides[get_learning_closure_service] = _real_stack_closure_ser
 
 
 def _remove_runtime_database() -> None:
+    # Cached repositories hold SQLite connections.  Releasing them before
+    # unlinking is required on Windows, where an open connection locks the file.
+    gc.collect()
     database_path = runtime_database_path()
     for suffix in ("", "-wal", "-shm"):
         Path(f"{database_path}{suffix}").unlink(missing_ok=True)

@@ -107,6 +107,9 @@ function researchStateText(value: ResearchLookupResponse): string {
   if (value.status === "failed") {
     return value.error || "研究服务暂时不可用，可重试。";
   }
+  if (value.status === "partial") {
+    return `已保留 ${selected} 个来源和 ${attempts} 次查询。部分结果不会自动用于下一轮聊天；可手动确认或重试补全。`;
+  }
   if (value.provider_status === "empty") {
     return `当前来源未返回结果；这不代表目标不存在。已记录 ${attempts} 次查询。`;
   }
@@ -328,7 +331,7 @@ export function WechatPanel({
       {webLookup ? (
         <div className="news-result lookup-result">
           <div className="memory-preview-meta">
-            <strong>{stageLabels[webLookup.stage] ?? webLookup.stage}</strong>
+            <strong>{webLookup.status === "partial" ? "研究得到部分可用结果" : stageLabels[webLookup.stage] ?? webLookup.stage}</strong>
             <span>{researchStateText(webLookup)}</span>
           </div>
           <label className="toggle-row">

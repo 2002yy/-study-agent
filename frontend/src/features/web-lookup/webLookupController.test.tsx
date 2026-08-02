@@ -150,6 +150,31 @@ describe("useWebLookupController", () => {
     expect(apiMocks.createResearchRun).not.toHaveBeenCalled();
   });
 
+  it("does not automatically use partial research in chat", async () => {
+    apiMocks.createResearchRun.mockResolvedValue(
+      runPayload({ status: "pending", stage: "planned", news_items: [], source_block: "" }),
+    );
+    apiMocks.executeResearchRun.mockResolvedValue(
+      runPayload({ status: "partial", stage: "completed", provider_status: "partial" }),
+    );
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "Python docs",
+        setOperationError: vi.fn(),
+        setActiveRunId: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.lookup();
+    });
+
+    expect(result.current.result?.status).toBe("partial");
+    expect(result.current.useInChat).toBe(false);
+    expect(result.current.canRetry).toBe(true);
+  });
+
   it("sends server cancellation before invalidating the browser request", async () => {
     apiMocks.loadResearchRun.mockResolvedValue(
       runPayload({ status: "running", stage: "reading", active_operation_id: "op_1" }),
