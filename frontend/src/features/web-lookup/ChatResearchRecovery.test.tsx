@@ -79,6 +79,30 @@ describe("ChatResearchRecovery", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("keeps partial findings out of chat until the learner explicitly uses them", () => {
+    const { container } = render(
+      <ChatResearchRecovery
+        run={{
+          ...run("failed"),
+          status: "partial",
+          stage: "completed",
+          selected_sources: [{ item: { title: "official docs" } }],
+          error: "",
+        }}
+        isBusy={false}
+        canRetry
+        canResume={false}
+        useInChat={false}
+        onRetry={vi.fn()}
+        onResume={vi.fn()}
+      />,
+    );
+
+    expect(container).toHaveTextContent("不会自动用于下一轮聊天");
+    expect(container).toHaveTextContent("1 个来源");
+    expect(container).toHaveTextContent("研究得到部分可用结果");
+  });
+
   it("does not expose standalone research as chat recovery", () => {
     const { container } = render(
       <ChatResearchRecovery

@@ -13,6 +13,19 @@ const stageLabels: Record<string, string> = {
   cancelled: "研究已停止",
 };
 
+function runDetail(run: ResearchLookupResponse): string {
+  if (run.status === "partial") {
+    return "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
+  }
+  if (run.status === "failed") {
+    return `${run.error || "本次研究未完成"}；重试会从已保存的进度继续`;
+  }
+  if (run.status === "cancelled") {
+    return "已停止本次研究；需要时可从已保存的进度重试";
+  }
+  return run.stop_reason || stageLabels[run.stage] || run.stage;
+}
+
 export function ChatResearchRecovery({
   run,
   progress = null,
@@ -48,12 +61,13 @@ export function ChatResearchRecovery({
   if (run?.research_context.run_kind !== "chat_tool_loop") return null;
   const recovered = run.status === "completed" && run.provider_status === "found";
   if (!canRetry && !canResume && !isBusy && !(recovered && useInChat)) return null;
-  const detail = run.error || run.stop_reason || stageLabels[run.stage] || run.stage;
+  const detail = runDetail(run);
+  const heading = run.status === "partial" ? "研究得到部分可用结果" : stageLabels[run.stage] ?? "联网研究可恢复";
 
   return (
     <div className={`memory-note ${recovered ? "" : "warn"}`} role="status">
       <div>
-        <strong>{recovered ? "联网研究已恢复" : stageLabels[run.stage] ?? "联网研究可恢复"}</strong>
+        <strong>{recovered ? "联网研究已恢复" : heading}</strong>
         <span>
           {recovered && useInChat
             ? "恢复结果已设为下一轮聊天资料。"
