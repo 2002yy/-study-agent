@@ -5,7 +5,7 @@
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**仅检查和改进 Study Agent 本体的代码功能、核心学习流程与桌面/移动端体验。**  
 > 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**
-> 当前切片：**PR #96 已合并；核心架构精简已在本地完成并通过门禁，待提交评审。**
+> 当前切片：**核心架构精简与真实全栈 CI 修复已提交 `main`，最终 SHA `9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`，GitHub Actions run `30826682687` 全绿。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -30,11 +30,12 @@
 
 ## 2. 当前核心功能基线
 
-- 当前核心功能基线 merge SHA：`a2eed731037f7dfa6970a26cf9f65a53fb919206`；
+- 当前核心功能基线 SHA：`9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
 - PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
 - PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
 - PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`，合并前完整 CI 通过；
-- 三批均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
+- 核心架构精简与 CI 修复：删除旧 Streamlit 入口、收紧依赖与打包边界，并修复真实全栈 RAG 路径、查询规划和测试状态隔离，SHA `9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
+- 以上批次均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
 
 ## 3. 已验证的产品闭环
 
@@ -103,12 +104,15 @@ PR #96 收口“工程状态不可理解”的一处核心语义：
 - 从主依赖与锁文件移除 Streamlit 及其专属传递依赖；
 - 将 FastAPI 文件上传所需的 `python-multipart` 提升为显式主依赖，避免依赖旧 UI 的偶然传递安装；
 - README、用户指南和稳定架构文档统一为单一 React 前端事实。
+- RAG 默认索引路径改为请求时解析，避免真实全栈隔离路径在模块导入阶段被冻结；
+- 具体学习问题的检索查询不再混入教学指令，证据充分性只评估真实问题与学习目标；
+- 真实全栈 reset 先排空在途请求，再重建 SQLite schema，并隔离本机 frontend settings，消除跨旅程污染。
 
-本地门禁：136 个 pytest 文件分批执行，共 888 项通过；前端 224 项、production build 和 desktop Chromium 18 条旅程通过；Ruff、打包门禁、变更文件 detect-secrets 和 mypy baseline gate 通过。Luna 审查发现的新群聊草稿残留已修复，并补充 React controller 覆盖。
+门禁证据：首批本地 136 个 pytest 文件共 888 项通过，修复批次相关后端测试 57 项通过；前端 224 项、production build 与既有 Chromium 旅程通过；desktop / 390×844 真实全栈共 14 项通过。GitHub Actions run `30826682687` 再次通过全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁。
 
 ## 5. 当前质量门禁
 
-PR #96 合并前远程完整 CI 通过；当前架构精简批次已完成本地门禁，推送后仍以新的 GitHub Actions 结果为准：
+当前核心基线 `9e0adb8` 的 GitHub Actions run `30826682687` 已完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus 基线；
