@@ -38,9 +38,14 @@ def build_retrieval_query_plan(
     objective = plan.target_understanding or state.objective
     gap = plan.unresolved_gap or state.unresolved_gap
     weak = raw.replace("。", "").replace("！", "") in WEAK_INPUTS
-    parts = [objective, gap]
+    # A concrete user question is the evidence claim to evaluate. Pedagogical
+    # gap text can contain coaching instructions rather than corpus concepts,
+    # so use it only when the learner supplied no useful query of their own.
+    parts = [objective]
     if raw and not weak:
         parts.append(raw)
+    else:
+        parts.append(gap)
     private_query = " ".join(
         dict.fromkeys(part.strip() for part in parts if part and part.strip())
     )

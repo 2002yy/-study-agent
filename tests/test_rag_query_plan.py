@@ -43,3 +43,26 @@ def test_specific_user_input_is_kept_with_pedagogy_context():
 
     assert "left <= right" in plan.private_query
     assert "二分查找边界" in plan.private_query
+
+
+def test_specific_user_input_excludes_pedagogical_gap_instruction():
+    plan = build_retrieval_query_plan(
+        "目标值大于中点值时左边界如何更新？",
+        state=LearningState(protocol="feynman"),
+        plan=PedagogyTurnPlan(
+            mode="feynman",
+            phase="diagnose",
+            knowledge_kind="derivable",
+            move="probe_gap",
+            disclosure_level=1,
+            target_understanding="二分查找边界",
+            unresolved_gap=(
+                "Identify the single most important unexplained term, "
+                "causal break, or missing boundary."
+            ),
+        ),
+    )
+
+    assert "目标值大于中点值" in plan.private_query
+    assert "二分查找边界" in plan.private_query
+    assert "Identify the single" not in plan.private_query

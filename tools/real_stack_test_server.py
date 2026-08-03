@@ -26,6 +26,7 @@ E2E_ROOT = Path(
 RAG_INDEX_PATH = E2E_ROOT / "rag_index.json"
 RAG_UPLOAD_DIR = E2E_ROOT / "rag_uploads"
 MEMORY_DIR = E2E_ROOT / "memory"
+FRONTEND_SETTINGS_PATH = E2E_ROOT / "frontend_settings.yaml"
 
 if os.getenv("STUDY_AGENT_E2E_RESET", "").strip() == "1":
     shutil.rmtree(E2E_ROOT, ignore_errors=True)
@@ -45,6 +46,7 @@ os.environ.setdefault("RAG_EMBEDDING_PROFILE", "local_hash")
 os.environ.setdefault("RAG_EMBEDDING_PROVIDER", "local_hash")
 
 from fastapi import HTTPException  # noqa: E402
+from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
 
 from src import api as api_package  # noqa: E402
 from src import memory as memory_module  # noqa: E402
@@ -70,6 +72,7 @@ from src.application.runtime_repository import (  # noqa: E402
     runtime_database_path,
 )
 from src.context_builder import build_messages  # noqa: E402
+from src.infrastructure.sqlite.database import RuntimeDatabase  # noqa: E402
 from src.mode_manager import RuntimeModes  # noqa: E402
 from src.pedagogy.evaluation import SemanticEvaluation  # noqa: E402
 from src.rag import index as rag_index_module  # noqa: E402
@@ -80,6 +83,72 @@ from src.task_contract import (  # noqa: E402
 )
 from src.tools.local_knowledge import retrieve_local_knowledge  # noqa: E402
 from src.tools.web_agent import WebToolTrace  # noqa: E402
+
+
+class _ExclusiveE2EResetMiddleware:
+    """Drain active HTTP requests before deleting shared real-stack state."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+        self._condition = asyncio.Condition()
+        self._active_requests = 0
+        self._resetting = False
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        is_reset = scope.get("path") == "/__e2e__/reset"
+        reset_timed_out = False
+        async with self._condition:
+            if is_reset:
+                await self._condition.wait_for(lambda: not self._resetting)
+                self._resetting = True
+                try:
+                    await asyncio.wait_for(
+                        self._condition.wait_for(
+                            lambda: self._active_requests == 0
+                        ),
+                        timeout=15.0,
+                    )
+                except TimeoutError:
+                    self._resetting = False
+                    self._condition.notify_all()
+                    reset_timed_out = True
+            else:
+                await self._condition.wait_for(lambda: not self._resetting)
+                self._active_requests += 1
+
+        if reset_timed_out:
+            body = b'{"detail":"Timed out draining active E2E requests"}'
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            async with self._condition:
+                if is_reset:
+                    self._resetting = False
+                else:
+                    self._active_requests -= 1
+                self._condition.notify_all()
+
+
+app.add_middleware(_ExclusiveE2EResetMiddleware)
 
 FIRST_REPLY = (
     "我们先建立目标：理解为什么二分查找是 O(log n)。"
@@ -115,6 +184,7 @@ def _test_runtime_modes() -> RuntimeModes:
 # Isolate every filesystem owner used by the real upload and memory workflows.
 api_package.RAG_UPLOAD_DIR = RAG_UPLOAD_DIR
 api_package.MEMORY_DIR = MEMORY_DIR
+api_package.FRONTEND_SETTINGS_PATH = FRONTEND_SETTINGS_PATH
 api_package.load_runtime_modes = _test_runtime_modes
 api_package.is_memory_write_allowed = lambda _modes: True
 memory_module.MEMORY_DIR = MEMORY_DIR
@@ -330,8 +400,8 @@ app.dependency_overrides[get_learning_closure_service] = _real_stack_closure_ser
 
 
 def _remove_runtime_database() -> None:
-    # Cached repositories hold SQLite connections.  Releasing them before
-    # unlinking is required on Windows, where an open connection locks the file.
+    # Request draining closes repository connection contexts before Windows
+    # file deletion; collect any delayed finalizers as an additional safeguard.
     gc.collect()
     database_path = runtime_database_path()
     for suffix in ("", "-wal", "-shm"):
@@ -340,6 +410,7 @@ def _remove_runtime_database() -> None:
 
 def _reset_filesystem_state() -> None:
     RAG_INDEX_PATH.unlink(missing_ok=True)
+    FRONTEND_SETTINGS_PATH.unlink(missing_ok=True)
     for directory in (
         E2E_ROOT / "current",
         E2E_ROOT / "archive",
@@ -359,6 +430,7 @@ def reset_real_stack_state() -> dict[str, Any]:
     _real_stack_closure_service.cache_clear()
     reset_runtime_repository_cache()
     _remove_runtime_database()
+    RuntimeDatabase(runtime_database_path()).initialize()
     _reset_filesystem_state()
     return {
         "reset": True,

@@ -641,6 +641,16 @@ def test_rag_status_and_upload_endpoints(tmp_path):
     assert data["vector_backend"]["name"] == "local"
 
 
+def test_rag_default_index_path_is_resolved_at_request_time(monkeypatch, tmp_path):
+    from src.api.routes import rag_routes
+    from src.rag import index as rag_index
+
+    isolated_index = tmp_path / "isolated-rag-index.json"
+    monkeypatch.setattr(rag_index, "DEFAULT_RAG_INDEX_PATH", isolated_index)
+
+    assert rag_routes._index_path(None) == isolated_index
+
+
 def test_rag_upload_appends_by_default_and_can_rebuild(tmp_path):
     client = TestClient(app)
     index_path = tmp_path / "append_index.json"

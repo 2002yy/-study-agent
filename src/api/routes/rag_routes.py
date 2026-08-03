@@ -25,8 +25,8 @@ from src.api.models.rag import (
 )
 from src.application.rag_run_service import RagRunService
 from src.application.runtime_repository import get_rag_run_service
+from src.rag import index as rag_index
 from src.rag.backends import get_vector_backend_from_env
-from src.rag.index import DEFAULT_RAG_INDEX_PATH, load_rag_index
 from src.rag.upload_validation import (
     UploadCandidate,
     validate_upload_batch,
@@ -42,7 +42,7 @@ def _run_response(run) -> RagRunResponse:
 
 
 def _index_path(value: str | None) -> Path:
-    return Path(value) if value else DEFAULT_RAG_INDEX_PATH
+    return Path(value) if value else rag_index.DEFAULT_RAG_INDEX_PATH
 
 
 @router.get("/rag/status", response_model=RagStatusResponse)
@@ -52,7 +52,7 @@ def rag_status(index_path: str | None = None) -> RagStatusResponse:
     chunks = 0
     index_version = 0
     if target.exists():
-        index = load_rag_index(target)
+        index = rag_index.load_rag_index(target)
         documents = len(index.documents)
         chunks = len(index.chunks)
         index_version = index.version
