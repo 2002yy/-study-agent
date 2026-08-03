@@ -117,7 +117,7 @@ Study Agent 的定位很明确：**一个运行在你本地的、教学法驱动
 ## 架构
 
 当前主架构是 **React + FastAPI + application services + SQLite**。
-Streamlit 入口（`app.py`）已移除，`src/ui` 待清理；前端统一为 React。迁移状态的唯一事实源见
+旧 Streamlit 入口与 `src/ui` 已移除；前端统一为 React，后端不再依赖 Streamlit。迁移状态的唯一事实源见
 [Architecture Status](docs/ARCHITECTURE_STATUS.md)。
 
 ![architecture](assets/screenshots/arch.png)
@@ -152,11 +152,11 @@ pip install -r requirements-dev.txt
 tools\start-study-agent.bat
 ```
 
-浏览器打开 `http://127.0.0.1:5173`。旧 Streamlit 入口仅用于兼容验证。
+浏览器打开 `http://127.0.0.1:5173`。
 
 ### 依赖管理
 
-本项目使用 [pip-tools](https://github.com/jazzband/pip-tools) 管理依赖：
+本项目使用 `.in` 源文件和自动生成的 lock 文件管理依赖：
 
 - [`requirements.in`](requirements.in) / [`requirements-dev.in`](requirements-dev.in) — **人类维护**，写范围版本
 - [`requirements.txt`](requirements.txt) / [`requirements-dev.txt`](requirements-dev.txt) — **自动生成**，写精确版本（lock 文件）
@@ -164,9 +164,8 @@ tools\start-study-agent.bat
 修改依赖后重新生成 lock 文件：
 
 ```bash
-pip install pip-tools
-pip-compile requirements.in        # 重新锁定主依赖
-pip-compile requirements-dev.in    # 重新锁定开发依赖
+uv pip compile requirements.in -o requirements.txt --python-version 3.12
+uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.12
 ```
 
 ---
@@ -220,7 +219,8 @@ RAG_RERANKER=disabled
 │   ├── llm_router.py       # 模型路由分发
 │   ├── context_builder.py  # 上下文构建
 │   ├── mode_manager.py     # 模式管理（版本/性能/氛围）
-│   ├── api.py              # FastAPI health / chat / memory / sessions / RAG / tools / workflows endpoints
+│   ├── api/                # FastAPI routes、request/response models 与兼容导出
+│   ├── application/        # 核心用例编排与服务
 │   ├── role_manager.py     # 角色加载与管理
 │   ├── performance_budget.py # 性能预算（max_tokens 分级）
 │   ├── memory.py           # 记忆系统
@@ -238,7 +238,6 @@ RAG_RERANKER=disabled
 │   ├── news/               # 新闻聚合链路
 │   ├── rag/                # 本地 RAG MVP：加载、分块、索引、关键词/向量原型/embedding/可选后端检索
 │   ├── tools/              # 受控工具边界：本地知识检索等
-│   └── ui/                 # Streamlit UI 组件
 ├── tests/                  # pytest 测试套件
 ├── frontend/               # React + Vite + TypeScript console
 ├── docs/                   # 设计文档与工程说明
@@ -302,7 +301,7 @@ CI 通过 GitHub Actions 在 push / pull request 上运行，集成 `pytest`、`
 求职导向的技术演进路线：
 
 - [x] FastAPI service layer foundation: `/health`, `/chat`, `/memory/preview`, `/memory/commit`, `/sessions`, `/rag`, `/rag/index`, `/rag/query`, `/rag/status`, `/rag/upload`, `/rag/local-knowledge`, `/tools` and `/workflows/runs` implemented; optional local API token, CORS allowlist and SSE chat streaming implemented; broader deployment hardening remains planned
-- [x] RAG MVP: Markdown / TXT / DOCX / PDF loading, chunking, local keyword retrieval, local vector prototype, hybrid retrieval, backend-vector retrieval, configurable embedding provider, optional Chroma adapter, controlled local-knowledge retrieval, citation context, source blocks, Streamlit retrieval panel, optional single-chat and WeChat interactive injection
+- [x] RAG MVP: Markdown / TXT / DOCX / PDF loading, chunking, local keyword retrieval, local vector prototype, hybrid retrieval, backend-vector retrieval, configurable embedding provider, optional Chroma adapter, controlled local-knowledge retrieval, citation context, source blocks, and React knowledge-base workflows
 - [ ] RAG document QA (partial): PDF parsing has file-size, page-count, extracted-text and encrypted-file guards; production embedding requires explicit API/env configuration and Chroma remains optional
 - [ ] Vector store: Chroma optional adapter implemented; FAISS local prototype and pgvector engineering version remain planned
 - [x] P8.4 evaluation sets foundation: retrieval, answer grounding, tool routing, workflow events and safety regression cases before expanding agentic behavior

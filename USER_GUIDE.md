@@ -22,7 +22,7 @@ Study Agent 是一个**本地优先、教学法驱动的 AI 学习工作台**。
 6. **长期记忆**：safe writer 预览确认写入
 7. 角色群聊、新闻研究为延伸学习空间（位于顶部抽屉）
 
-> 当前主架构是 React + FastAPI。Streamlit 入口（`app.py`）已移除，前端统一为 React。
+> 当前主架构是 React + FastAPI。旧 Streamlit 入口和依赖均已移除，前端统一为 React。
 
 ## 2. 启动
 

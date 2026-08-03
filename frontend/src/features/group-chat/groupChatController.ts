@@ -66,6 +66,7 @@ export function useGroupChatController(options: GroupControllerOptions) {
     try {
       const wechat = await resetWechat(threadId);
       dispatch({ type: "RESET_GROUP_THREAD", threadId: wechat.group_thread_id });
+      setInput("");
       options.clearAssociatedNews();
       options.setWechat(wechat);
     } catch (caught) {

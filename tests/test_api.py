@@ -698,6 +698,24 @@ def test_rag_upload_keeps_duplicate_basenames_unique(monkeypatch, tmp_path):
     assert (upload_dir / "same-2.md").read_text(encoding="utf-8") == "Second uploaded duplicate basename."
 
 
+def test_rag_upload_cannot_escape_upload_directory(monkeypatch, tmp_path):
+    from src import api
+
+    upload_dir = tmp_path / "uploads"
+    index_path = tmp_path / "safe_index.json"
+    monkeypatch.setattr(api, "RAG_UPLOAD_DIR", upload_dir)
+
+    response = TestClient(app).post(
+        "/rag/upload",
+        params={"index_path": str(index_path), "max_chars": 200, "overlap_chars": 0},
+        files={"files": ("../unsafe.md", b"Safe upload content.", "text/markdown")},
+    )
+
+    assert response.status_code == 200
+    assert (upload_dir / "unsafe.md").is_file()
+    assert not (tmp_path / "unsafe.md").exists()
+
+
 def test_rag_upload_reports_vector_stage_failure(monkeypatch, tmp_path):
     from src.rag import service as rag_service
 
@@ -897,16 +915,16 @@ def test_chat_stream_endpoint_emits_sse_and_logs(runtime_test_context):
 
 
 def test_memory_preview_and_commit_endpoints(monkeypatch, tmp_path):
-    from src import api, memory_writer
+    from src import memory_writer
+    from src.api.routes import memory_routes
 
     target = tmp_path / "progress.md"
     monkeypatch.setitem(memory_writer.MEMORY_TARGETS, "progress", target)
-    monkeypatch.setattr(
-        api,
-        "load_runtime_modes",
-        lambda: RuntimeModes(memory_mode="confirm_write", safe_mode=False),
-    )
-    monkeypatch.setattr(memory_writer, "load_runtime_modes", api.load_runtime_modes)
+    def load_modes():
+        return RuntimeModes(memory_mode="confirm_write", safe_mode=False)
+
+    monkeypatch.setattr(memory_routes, "load_runtime_modes", load_modes)
+    monkeypatch.setattr(memory_writer, "load_runtime_modes", load_modes)
     client = TestClient(app)
     payload = {"updates": [{"target": "progress", "content": "API memory update"}]}
 
@@ -923,14 +941,15 @@ def test_memory_preview_and_commit_endpoints(monkeypatch, tmp_path):
 
 
 def test_memory_preview_matches_pending_and_replace_format(monkeypatch, tmp_path):
-    from src import api, memory_writer
+    from src import memory_writer
+    from src.api.routes import memory_routes
 
     focus = tmp_path / "current_focus.md"
     summary = tmp_path / "summary.md"
     monkeypatch.setitem(memory_writer.MEMORY_TARGETS, "current_focus", focus)
     monkeypatch.setitem(memory_writer.MEMORY_TARGETS, "summary", summary)
     monkeypatch.setattr(
-        api,
+        memory_routes,
         "load_runtime_modes",
         lambda: RuntimeModes(memory_mode="confirm_write", safe_mode=False),
     )
@@ -955,12 +974,13 @@ def test_memory_preview_matches_pending_and_replace_format(monkeypatch, tmp_path
 
 
 def test_memory_append_false_rejected_for_non_replaceable_target(monkeypatch, tmp_path):
-    from src import api, memory_writer
+    from src import memory_writer
+    from src.api.routes import memory_routes
 
     target = tmp_path / "progress.md"
     monkeypatch.setitem(memory_writer.MEMORY_TARGETS, "progress", target)
     monkeypatch.setattr(
-        api,
+        memory_routes,
         "load_runtime_modes",
         lambda: RuntimeModes(memory_mode="confirm_write", safe_mode=False),
     )
@@ -978,12 +998,13 @@ def test_memory_append_false_rejected_for_non_replaceable_target(monkeypatch, tm
 
 
 def test_memory_commit_rejects_when_runtime_is_not_writable(monkeypatch, tmp_path):
-    from src import api, memory_writer
+    from src import memory_writer
+    from src.api.routes import memory_routes
 
     target = tmp_path / "progress.md"
     monkeypatch.setitem(memory_writer.MEMORY_TARGETS, "progress", target)
     monkeypatch.setattr(
-        api,
+        memory_routes,
         "load_runtime_modes",
         lambda: RuntimeModes(memory_mode="preview", safe_mode=False),
     )

@@ -21,14 +21,6 @@ from src.rag.schema import RagChunk, RagDocument, RagIndex, RagSearchResult
 from src.rag.service import search_documents, search_documents_with_debug
 from src.rag.rerank import RerankerConfig, apply_reranker, get_reranker
 from src.rag.vector import cosine_similarity, embed_text, search_rag_index_hybrid, search_rag_index_vector
-from src.ui.rag_panel import (
-    chunk_preview_rows,
-    format_rag_debug_summary,
-    format_score_breakdown,
-    parse_path_lines,
-    sanitize_upload_name,
-    summarize_rag_index,
-)
 
 
 def _install_fake_pypdf(
@@ -473,54 +465,6 @@ def test_build_rag_debug_explains_hybrid_scores(tmp_path):
     assert breakdown["vector_score"] > 0
 
 
-def test_rag_panel_index_summary_and_chunk_preview(tmp_path):
-    path = tmp_path / "notes.md"
-    path.write_text("First retrieval paragraph.\n\nSecond retrieval paragraph.", encoding="utf-8")
-    index = build_rag_index([path], max_chars=200, overlap_chars=0)
-
-    summary = summarize_rag_index(index)
-    preview_rows = chunk_preview_rows(index)
-
-    assert summary["documents"] == 1
-    assert summary["chunks"] == 1
-    assert summary["document_rows"][0]["title"] == "notes"
-    assert summary["document_rows"][0]["chunk_count"] == 1
-    assert len(summary["document_rows"][0]["content_hash"]) == 8
-    assert preview_rows[0]["lines"] == "L1-L3"
-    assert "retrieval paragraph" in preview_rows[0]["preview"]
-
-
-def test_rag_panel_formats_debug_summary_and_breakdown():
-    debug = {
-        "retrieval_mode": "hybrid",
-        "top_k": 3,
-        "min_score": 0.01,
-        "candidate_count": 8,
-        "returned_count": 2,
-        "query_terms": ["rag", "debug"],
-    }
-    result_debug = {
-        "score_breakdown": {
-            "fusion": "rrf",
-            "rrf_k": 60,
-            "lexical_rank": 1,
-            "lexical_rrf": 0.016393,
-            "lexical_score": 3.5,
-            "lexical_normalized": 1.0,
-            "vector_rank": 2,
-            "vector_rrf": 0.016129,
-            "vector_score": 0.25,
-            "combined_score": 0.032522,
-        }
-    }
-
-    assert format_rag_debug_summary(debug) == (
-        "mode=hybrid; top_k=3; min_score=0.01; candidates=8; returned=2; terms=debug, rag"
-    )
-    assert "fusion=rrf" in format_score_breakdown(result_debug)
-    assert "combined_score=0.033" in format_score_breakdown(result_debug)
-
-
 def test_build_rag_debug_marks_empty_queries(tmp_path):
     path = tmp_path / "notes.md"
     path.write_text("Local retrieval.", encoding="utf-8")
@@ -582,16 +526,3 @@ def test_empty_rag_context_is_explicit():
 
 def test_empty_rag_sources_are_blank():
     assert format_rag_sources([]) == ""
-
-
-def test_rag_upload_name_is_sanitized():
-    assert sanitize_upload_name("../unsafe lesson.md") == "unsafe_lesson.md"
-    assert sanitize_upload_name("资料 01.docx") == "01.docx"
-    assert sanitize_upload_name("...") == "document"
-
-
-def test_parse_path_lines_ignores_blank_lines():
-    paths = parse_path_lines(' "notes.md" \n\n C:/tmp/lesson.txt ')
-
-    normalized = [str(path).replace("\\", "/") for path in paths]
-    assert normalized == ["notes.md", "C:/tmp/lesson.txt"]

@@ -5,7 +5,7 @@
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**仅检查和改进 Study Agent 本体的代码功能、核心学习流程与桌面/移动端体验。**  
 > 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**
-> 当前切片：**P1-R1 联网研究阶段解释已实现，PR #96 的远程完整 CI 已通过；PR 仍为 Draft，等待用户决定是否合并。**
+> 当前切片：**PR #96 已合并；核心架构精简已在本地完成并通过门禁，待提交评审。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -30,10 +30,11 @@
 
 ## 2. 当前核心功能基线
 
-- 当前核心功能基线 merge SHA：`b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
+- 当前核心功能基线 merge SHA：`a2eed731037f7dfa6970a26cf9f65a53fb919206`；
 - PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
 - PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
-- 两批均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
+- PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`，合并前完整 CI 通过；
+- 三批均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
 
 ## 3. 已验证的产品闭环
 
@@ -51,7 +52,7 @@
 | 长会话恢复 | desktop / 390×844 / 360×520 通过 | 恢复卡位于当前 conversation viewport，不再落在历史顶部 |
 | 窄屏复杂内容 | 360×520 通过 | 长中文、长 URL、宽代码、IME、真实滚动、回到最新与刷新恢复 |
 
-## 4. 最近两批核心修复
+## 4. 最近核心修复
 
 ### 4.1 失败刷新恢复与长会话入口
 
@@ -83,19 +84,31 @@ PR #93 修复 ResearchRun 两阶段取消在前端没有收口的问题：
 1. 静态 owner 测试只读取旧控制器入口，迁移为稳定 re-export 后需要同时审查入口与实现文件；
 2. 新增 real-stack 文件最初被普通 fixture Playwright 项目误收录，最终加入统一 `REAL_STACK_TESTS` 排除清单，由专用真实全栈配置运行。
 
-### 4.3 P1-R1 联网研究阶段解释（远程 CI 已通过）
+### 4.3 P1-R1 联网研究阶段解释（已合并）
 
-当前活动分支 `codex/p1-r1-research-stage-explanations` 收口“工程状态不可理解”的一处核心语义：
+PR #96 收口“工程状态不可理解”的一处核心语义：
 
 - `partial` ResearchRun 保留查询、来源与 checkpoint，但不再自动作为下一轮聊天资料；学习者可显式选用，或重试补全；
 - 聊天恢复卡与群聊研究面板明确说明部分结果、已保留的查询/来源和重试语义；
 - Windows 真实全栈重置在释放缓存连接后再删除 SQLite 文件，desktop 与 390×844 可连续执行；
 - 已通过前端 222 项单元测试、TypeScript/Vite production build，以及 ResearchRun 取消—刷新—同 run 重试的 desktop 与 390×844 真实全栈旅程；
-- PR #96 的两项 GitHub Actions CI 已通过，覆盖全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁；该 PR 仍为 Draft，未经用户确认不得合并。
+- PR #96 的两项 GitHub Actions CI 已通过，覆盖全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁；随后已按用户确认合并到 `main`。
+
+### 4.4 核心架构精简（当前批次）
+
+- 删除已无生产调用者的 `src/ui/*` Streamlit 展示层和仅服务该入口的健康检查；
+- 删除绑定旧 session state / 展示 helper 的死测试，保留 application service、API、repository 与 React 控制器覆盖；
+- `mode_manager` 不再依赖前端框架，配置读取继续以 YAML、校验和 mtime 同步为边界；
+- 打包门禁改为只要求 React + FastAPI 生产入口；
+- 从主依赖与锁文件移除 Streamlit 及其专属传递依赖；
+- 将 FastAPI 文件上传所需的 `python-multipart` 提升为显式主依赖，避免依赖旧 UI 的偶然传递安装；
+- README、用户指南和稳定架构文档统一为单一 React 前端事实。
+
+本地门禁：136 个 pytest 文件分批执行，共 888 项通过；前端 224 项、production build 和 desktop Chromium 18 条旅程通过；Ruff、打包门禁、变更文件 detect-secrets 和 mypy baseline gate 通过。Luna 审查发现的新群聊草稿残留已修复，并补充 React controller 覆盖。
 
 ## 5. 当前质量门禁
 
-CI #1731 完整通过：
+PR #96 合并前远程完整 CI 通过；当前架构精简批次已完成本地门禁，推送后仍以新的 GitHub Actions 结果为准：
 
 - 全量 pytest；
 - RAG K1 固定 corpus 基线；
@@ -144,15 +157,14 @@ CI #1731 完整通过：
 **P1：核心功能与体验**
 
 1. 继续逐批检查首次学习、返回学习、上传资料、理解验证和学习结束的真实交互细节，优先修阻断和高频困惑；
-2. 根据用户决定将 PR #96 继续保持 Draft、转 Ready 或合并；合并前不得扩大 P1-R1 范围；
-3. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样；
-4. 加强源码学习的 symbol mapping、CI association precision 与 partial-result 用户解释。
+2. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样；
+3. 加强源码学习的 symbol mapping、CI association precision 与 partial-result 用户解释。
 
 **P2：兼容性与维护**
 
 1. 增加 Firefox / WebKit 兼容抽样；
-2. 清理 README 中旧首页、Streamlit、群聊、新闻和当前 React 工作台之间的表述差异；
-3. 继续统一 Golden Journey 的点击、决策、surface、恢复和耗时指标。
+2. 继续统一 Golden Journey 的点击、决策、surface、恢复和耗时指标；
+3. 在替代覆盖稳定后逐批缩小 `src.api` compatibility exports 与旧 Markdown/YAML 状态视图。
 
 ## 8. 执行规则
 

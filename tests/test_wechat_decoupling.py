@@ -17,11 +17,6 @@ def test_wechat_facade_should_document_compatibility_only():
     assert "Compatibility facade for legacy imports" in text
 
 
-def test_wechat_panel_should_not_import_wechat_facade():
-    text = Path("src/ui/wechat_panel.py").read_text(encoding="utf-8")
-    assert "from src.wechat import" not in text
-
-
 def test_wechat_facade_has_no_runtime_logic():
     text = Path("src/wechat.py").read_text(encoding="utf-8")
     forbidden = [

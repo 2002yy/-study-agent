@@ -73,7 +73,9 @@ def _corpus_fingerprint(paths: list[Path], fixture_dir: Path) -> str:
         relative = path.relative_to(fixture_dir).as_posix().encode("utf-8")
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
-        content = path.read_bytes()
+        # Git may check text fixtures out as CRLF on Windows. The corpus
+        # fingerprint describes logical fixture content, not checkout policy.
+        content = path.read_bytes().replace(b"\r\n", b"\n")
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
     return digest.hexdigest()

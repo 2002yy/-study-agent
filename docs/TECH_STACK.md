@@ -4,7 +4,7 @@
 > 当前状态、缺口和下一步统一查看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。  
 > 架构 owner 与兼容边界查看 [`ARCHITECTURE_STATUS.md`](ARCHITECTURE_STATUS.md)。
 
-本文用于说明当前主架构、核心工程能力和对外项目表达。Streamlit 只作为 legacy compatibility 入口，不代表当前产品架构。
+本文用于说明当前主架构、核心工程能力和对外项目表达。产品运行时为 React + FastAPI；旧 Streamlit UI 与运行依赖已移除。
 
 ## 1. 项目定位
 
@@ -243,7 +243,6 @@ CI 运行：
 
 以下内容只作兼容，不再承接新功能：
 
-- `app.py` 和 `src/ui/*` Streamlit 入口；
 - `src.api` compatibility exports；
 - 旧 Markdown/YAML 状态视图；
 - 已废弃的 `/news/lookup` 等 adapter。

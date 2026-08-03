@@ -3,14 +3,6 @@ import yaml
 from src import mode_manager
 
 
-def _clear_mode_cache():
-    try:
-        mode_manager.load_runtime_config.clear()
-        mode_manager.load_runtime_modes.clear()
-    except Exception:
-        pass
-
-
 def test_load_runtime_modes_reads_yaml_state(monkeypatch, tmp_path):
     runtime_state = tmp_path / "config" / "runtime_state.yaml"
     internal_state = tmp_path / "memory" / "internal_state.md"
@@ -55,8 +47,6 @@ def test_load_runtime_modes_reads_yaml_state(monkeypatch, tmp_path):
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
-
     modes = mode_manager.load_runtime_modes()
 
     assert modes.current_version == "v9.0.0"
@@ -116,7 +106,6 @@ def test_missing_yaml_migrates_from_markdown(monkeypatch, tmp_path):
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
 
     modes = mode_manager.load_runtime_modes()
 
@@ -152,7 +141,6 @@ def test_updates_write_yaml_and_sync_markdown(monkeypatch, tmp_path):
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
 
     mode_manager.update_entry_mode("single")
     mode_manager.update_interaction_mode("warm")
@@ -227,7 +215,6 @@ def test_yaml_remains_source_of_truth_when_markdown_drifts(monkeypatch, tmp_path
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
 
     modes = mode_manager.load_runtime_modes()
 
@@ -262,7 +249,6 @@ def test_runtime_config_schema_warns_and_uses_safe_defaults(monkeypatch, tmp_pat
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
 
     result = mode_manager.load_runtime_config()
     modes = mode_manager.load_runtime_modes()
@@ -288,7 +274,6 @@ def test_runtime_config_invalid_yaml_returns_defaults_with_warning(monkeypatch, 
     monkeypatch.setattr(mode_manager, "INTERNAL_STATE", internal_state)
     monkeypatch.setattr(mode_manager, "INTERACTION_SETTINGS", interaction_settings)
     monkeypatch.setattr(mode_manager, "WECHAT_STATE", wechat_state)
-    _clear_mode_cache()
 
     result = mode_manager.load_runtime_config()
 

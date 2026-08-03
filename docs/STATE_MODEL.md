@@ -204,9 +204,8 @@ RAG 数据分为：
 
 ## 10. Legacy compatibility
 
-以下状态模型只用于旧入口兼容：
+以下状态模型只用于旧数据兼容：
 
-- Streamlit `st.session_state`；
 - `config/runtime_state.yaml`；
 - `memory/internal_state.md`；
 - `memory/interaction_settings.md`；

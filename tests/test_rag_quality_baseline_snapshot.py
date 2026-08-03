@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tools.run_rag_quality_baseline import run_baseline
+from tools.run_rag_quality_baseline import _corpus_fingerprint, run_baseline
 
 
 FIXTURE_DIR = Path("tests/fixtures/rag_eval")
@@ -40,6 +40,18 @@ ANSWER_METRICS = (
     "mean_source_diversity",
     "stale_revision_leakage_rate",
 )
+
+
+def test_corpus_fingerprint_is_independent_of_checkout_line_endings(tmp_path):
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "sample.md"
+    fixture.write_bytes(b"first\nsecond\n")
+    lf_fingerprint = _corpus_fingerprint([fixture], fixture_dir)
+
+    fixture.write_bytes(b"first\r\nsecond\r\n")
+
+    assert _corpus_fingerprint([fixture], fixture_dir) == lf_fingerprint
 
 
 def test_rag_k1_baseline_changes_require_an_explicit_snapshot_update():

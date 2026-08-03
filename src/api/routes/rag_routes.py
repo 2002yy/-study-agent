@@ -25,10 +25,13 @@ from src.api.models.rag import (
 )
 from src.application.rag_run_service import RagRunService
 from src.application.runtime_repository import get_rag_run_service
+from src.rag.backends import get_vector_backend_from_env
+from src.rag.index import DEFAULT_RAG_INDEX_PATH, load_rag_index
 from src.rag.upload_validation import (
     UploadCandidate,
     validate_upload_batch,
 )
+from src.tools.local_knowledge import retrieve_local_knowledge
 
 router = APIRouter(tags=["rag"])
 RagRunServiceDependency = Annotated[RagRunService, Depends(get_rag_run_service)]
@@ -38,17 +41,12 @@ def _run_response(run) -> RagRunResponse:
     return RagRunResponse(**asdict(run))
 
 
-def _index_path(value: str | None) -> __import__("pathlib").Path:
-    from pathlib import Path
-    from src.rag.index import DEFAULT_RAG_INDEX_PATH
-
+def _index_path(value: str | None) -> Path:
     return Path(value) if value else DEFAULT_RAG_INDEX_PATH
 
 
 @router.get("/rag/status", response_model=RagStatusResponse)
 def rag_status(index_path: str | None = None) -> RagStatusResponse:
-    from src.api import get_vector_backend_from_env, load_rag_index
-
     target = _index_path(index_path)
     documents = 0
     chunks = 0
@@ -342,8 +340,6 @@ def delete_knowledge_base_document(
 
 @router.post("/rag/local-knowledge", response_model=LocalKnowledgeResponse)
 def local_knowledge_endpoint(request: LocalKnowledgeRequest) -> LocalKnowledgeResponse:
-    from src.api import retrieve_local_knowledge
-
     result = retrieve_local_knowledge(
         request.query,
         enabled=request.enabled,

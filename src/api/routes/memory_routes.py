@@ -17,6 +17,7 @@ from src.api.models.memory import (
 )
 from src.application.memory_service import MemoryService
 from src.application.runtime_repository import get_memory_service
+from src.mode_manager import load_runtime_modes
 from src.application.helpers import (
     extract_latest_section,
     memory_file_row,
@@ -106,8 +107,6 @@ def preview_memory_updates(
     request: MemoryPreviewRequest,
     service: MemoryServiceDependency,
 ) -> MemoryPreviewResponse:
-    from src.api import load_runtime_modes
-
     try:
         run = service.create(
             [update.model_dump() for update in request.updates],
@@ -123,8 +122,6 @@ def commit_memory_updates(
     request: MemoryPreviewRequest,
     service: MemoryServiceDependency,
 ) -> MemoryCommitResponse:
-    from src.api import load_runtime_modes
-
     modes = load_runtime_modes()
     try:
         created = service.create(

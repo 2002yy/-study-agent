@@ -16,9 +16,11 @@ from src.constants import (
     ROLE_OPTIONS,
 )
 from src.application.helpers import (
+    load_frontend_settings,
     role_payload,
     runtime_settings_payload,
     validate_choice,
+    write_frontend_settings,
 )
 from src.external_data_policy import (
     CLOUD_CONTEXT_POLICIES,
@@ -26,13 +28,20 @@ from src.external_data_policy import (
     normalize_cloud_context_policy,
     normalize_web_policy,
 )
+from src.mode_manager import (
+    set_memory_mode,
+    update_debug_mode,
+    update_entry_mode,
+    update_interaction_mode,
+    update_memory_capture,
+    update_performance_mode,
+    update_safe_mode,
+)
 
 router = APIRouter(tags=["settings"])
 
 
 def _runtime_settings_with_external_policy() -> RuntimeSettingsResponse:
-    from src.api import load_frontend_settings
-
     response = runtime_settings_payload()
     stored = load_frontend_settings()
     settings = dict(response.settings)
@@ -60,18 +69,6 @@ def get_runtime_settings() -> RuntimeSettingsResponse:
 
 @router.patch("/runtime/settings", response_model=RuntimeSettingsResponse)
 def patch_runtime_settings(request: RuntimeSettingsPatch) -> RuntimeSettingsResponse:
-    from src.api import (
-        load_frontend_settings,
-        set_memory_mode,
-        update_debug_mode,
-        update_entry_mode,
-        update_interaction_mode,
-        update_memory_capture,
-        update_performance_mode,
-        update_safe_mode,
-        write_frontend_settings,
-    )
-
     frontend_settings = load_frontend_settings()
     if request.selected_role is not None:
         frontend_settings["selected_role"] = validate_choice(

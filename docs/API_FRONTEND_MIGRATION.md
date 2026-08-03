@@ -4,8 +4,9 @@
 > [ARCHITECTURE_STATUS.md](ARCHITECTURE_STATUS.md). This document describes API
 > contracts and historical migration details.
 
-This document is the contract map for migrating the Streamlit business baseline
-to the React frontend. React should prefer these APIs over local fake state.
+This document records the completed migration from the former Streamlit
+baseline to the React frontend. The old `src/ui` layer has been removed; React
+uses these APIs instead of local fake state.
 
 ## Principles
 
@@ -84,9 +85,9 @@ to the React frontend. React should prefer these APIs over local fake state.
 Session detail/archive and KnowledgeBase document lifecycle are implemented;
 their stale entries were removed from this gap table.
 
-## Streamlit Entrypoints To Migrate
+## Retired Streamlit Entrypoints
 
-| Streamlit file/function | Target API |
+| Removed file/function | Replacement |
 | --- | --- |
 | `src/ui/sidebar.py` runtime controls | `/runtime/settings`, `/roles`, `/memory` |
 | `src/ui/chat_panel.py` single chat | `/chat/stream` |

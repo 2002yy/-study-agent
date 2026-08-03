@@ -10,6 +10,18 @@ def test_fastapi_api_is_modular_package():
     assert not Path("src/api.py").exists()
 
 
+def test_legacy_streamlit_runtime_is_removed():
+    assert not list(Path("src/ui").glob("*.py"))
+    assert not Path("src/health_check.py").exists()
+    assert "streamlit" not in Path("requirements.in").read_text(encoding="utf-8").lower()
+    assert "import streamlit" not in Path("src/mode_manager.py").read_text(encoding="utf-8")
+
+
+def test_fastapi_upload_dependency_is_explicit():
+    requirements = Path("requirements.in").read_text(encoding="utf-8").lower()
+    assert "python-multipart" in requirements
+
+
 def test_application_helpers_paths_stay_at_project_root():
     from src.application import helpers
 
@@ -17,18 +29,6 @@ def test_application_helpers_paths_stay_at_project_root():
     assert helpers.ROOT.resolve() == root
     assert helpers.FRONTEND_SETTINGS_PATH_DEFAULT.resolve() == root / "config" / "frontend_settings.yaml"
     assert helpers.SESSION_DIR_DEFAULT.resolve() == root / "logs" / "sessions"
-
-
-def test_sidebar_save_uses_session_id():
-    text = Path("src/ui/sidebar.py").read_text(encoding="utf-8")
-    assert "save(st.session_state.session_id)" in text
-    assert "path = save()" not in text
-
-
-def test_wechat_panel_no_duplicate_render_call():
-    text = Path("src/ui/wechat_panel.py").read_text(encoding="utf-8")
-    needle = "_render_wechat_stream(content_placeholder, content)\n    _render_wechat_stream(content_placeholder, content)"
-    assert needle not in text
 
 
 def test_env_variants_are_excluded():
@@ -69,7 +69,7 @@ def test_package_script_has_python_fallback_candidates():
 
 def test_package_helper_required_files_are_locked():
     text = Path("tools/package_project_helper.py").read_text(encoding="utf-8")
-    assert '"src/ui/wechat_panel.py"' in text
+    assert '"src/api/app.py"' in text
     assert '"src/safe_writer.py"' in text
     assert '"src/mode_manager.py"' in text
     assert '"src/llm_client.py"' in text
@@ -83,32 +83,9 @@ def test_package_helper_module_guards_main():
     assert 'if __name__ == "__main__":' in text
 
 
-def test_health_check_does_not_create_runtime_dirs():
-    text = Path("src/health_check.py").read_text(encoding="utf-8")
-    assert "path.mkdir(parents=True, exist_ok=True)" not in text
-    assert "os.access(probe, os.W_OK)" in text
-
-
-def test_opening_radio_does_not_immediately_write_interaction_mode():
-    text = Path("src/ui/wechat_panel.py").read_text(encoding="utf-8")
-    assert "def _commit_interaction_mode(choice: str):" in text
-    # The interaction_mode write must only live inside _commit_interaction_mode,
-    # not directly in _render_opening_setup
-    count = text.count("if choice != st.session_state.interaction_mode:")
-    assert count == 1, f"Expected 1 occurrence, found {count}"
-
-
 def test_tmp_files_are_excluded():
     assert should_exclude(Path("chat/wechat_state.md.20260508_150258_825985.tmp"))
     assert should_exclude(Path("memory/internal_state.md.tmp"))
-
-
-def test_global_state_buttons_use_app_rerun():
-    text = Path("src/ui/wechat_panel.py").read_text(encoding="utf-8")
-    assert 'key="mark_wechat_read"' in text
-    assert 'key="new_wechat_group"' in text
-    assert 'key="news_round_button"' in text
-    assert "_rerun_app()" in text
 
 
 def test_wechat_join_state_uses_single_batch_write():
@@ -135,6 +112,12 @@ def test_exports_are_excluded():
 def test_replacement_artifact_dirs_are_excluded():
     assert should_exclude(Path("article_text_replacement_files_v069/src/wechat.py"))
     assert should_exclude(Path("article_text_replacement_files_v070/src/ui/wechat_panel.py"))
+
+
+def test_browser_test_artifacts_are_excluded():
+    assert should_exclude(Path("frontend/test-results/artifacts/trace.zip"))
+    assert should_exclude(Path("frontend/playwright-report/index.html"))
+    assert should_exclude(Path("frontend/playwright-real-stack-report/index.html"))
 
 
 def test_session_logger_init_does_not_create_dirs():
@@ -180,6 +163,13 @@ def test_chat_service_does_not_depend_on_api_package():
     assert "import src.api" not in text
 
 
+def test_production_routes_do_not_depend_on_api_compatibility_facade():
+    for route in Path("src/api/routes").glob("*.py"):
+        text = route.read_text(encoding="utf-8")
+        assert "from src.api import" not in text, route
+        assert "import src.api" not in text, route
+
+
 def test_frontend_chat_state_is_owned_by_workspace_provider():
     app_text = Path("frontend/src/App.tsx").read_text(encoding="utf-8")
     runtime_text = Path("frontend/src/app/WorkspaceRuntime.tsx").read_text(
@@ -204,12 +194,6 @@ def test_frontend_chat_state_is_owned_by_workspace_provider():
     assert "commitTurn(" not in app_text
     assert "sendChatStream(" in controller_text
     assert "commitTurn(" in controller_text
-
-
-def test_sidebar_force_refresh_clears_memory_cache():
-    text = Path("src/ui/sidebar.py").read_text(encoding="utf-8")
-    assert 'st.session_state.memory_bundle = {}' in text
-    assert 'st.session_state.memory_context_mode = ""' in text
 
 
 def test_runtime_version_is_synced():

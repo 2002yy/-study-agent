@@ -35,6 +35,93 @@ describe("useGroupChatController", () => {
     vi.clearAllMocks();
   });
 
+  it("clears the draft and associated news after resetting the group", async () => {
+    const nextWechat = { ...initialWechat, group_thread_id: "group-next" };
+    apiMocks.resetWechat.mockResolvedValue(nextWechat);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const setWechat = vi.fn();
+    const clearAssociatedNews = vi.fn();
+
+    const { result } = renderHook(
+      () =>
+        useGroupChatController({
+          wechat: initialWechat,
+          setWechat,
+          chatSettings: {
+            selectedRole: "auto",
+            selectedMode: "auto",
+            selectedModel: "flash",
+            relationshipMode: "standard",
+            contextMode: "fast",
+          },
+          ragSettings: {
+            retrievalMode: "hybrid",
+            topK: 5,
+            chatTopK: 3,
+            minScore: 0,
+          },
+          ragEnabled: false,
+          clearAssociatedNews,
+        }),
+      {
+        wrapper: ({ children }) => (
+          <WorkspaceProvider initialState={{ activeGroupThreadId: "group-test" }}>
+            {children}
+          </WorkspaceProvider>
+        ),
+      },
+    );
+
+    act(() => result.current.setInput("old draft"));
+    await act(async () => result.current.reset());
+
+    expect(apiMocks.resetWechat).toHaveBeenCalledWith("group-test");
+    expect(result.current.threadId).toBe("group-next");
+    expect(result.current.input).toBe("");
+    expect(clearAssociatedNews).toHaveBeenCalledOnce();
+    expect(setWechat).toHaveBeenCalledWith(nextWechat);
+  });
+
+  it("keeps the returned group visible after marking it read", async () => {
+    const readWechat = {
+      ...initialWechat,
+      group_thread_id: "group-read",
+      content: "group history",
+    };
+    apiMocks.markWechatRead.mockResolvedValue(readWechat);
+    const setWechat = vi.fn();
+
+    const { result } = renderHook(
+      () =>
+        useGroupChatController({
+          wechat: initialWechat,
+          setWechat,
+          chatSettings: {
+            selectedRole: "auto",
+            selectedMode: "auto",
+            selectedModel: "flash",
+            relationshipMode: "standard",
+            contextMode: "fast",
+          },
+          ragSettings: {
+            retrievalMode: "hybrid",
+            topK: 5,
+            chatTopK: 3,
+            minScore: 0,
+          },
+          ragEnabled: false,
+          clearAssociatedNews: vi.fn(),
+        }),
+      { wrapper: WorkspaceProvider },
+    );
+
+    await act(async () => result.current.markRead());
+
+    expect(result.current.threadId).toBe("group-read");
+    expect(setWechat).toHaveBeenCalledWith(readWechat);
+    expect(result.current.error).toBe("");
+  });
+
   it("owns streaming send and settles a user stop without stale busy", async () => {
     apiMocks.sendWechatMessageStream.mockImplementation(
       async (_message, _options, handlers, requestOptions) =>

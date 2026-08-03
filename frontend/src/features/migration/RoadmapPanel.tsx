@@ -1,9 +1,9 @@
 import { ShieldCheck } from "lucide-react";
 
 const roadmapItems = [
-  "微信群和新闻已接入基础兼容流程。",
-  "下一步补齐流式群聊、分阶段新闻、群聊搜索和记忆闭环。",
-  "Streamlit 暂时保留为旧版业务闭环回归参考。"
+  "群聊、新闻、RAG 与学习记忆已接入可恢复的服务端流程。",
+  "当前优先收口核心学习闭环、恢复语义与窄屏体验。",
+  "产品前端统一为 React，旧 Streamlit 运行层已移除。"
 ];
 
 export function RoadmapPanel() {
@@ -11,8 +11,8 @@ export function RoadmapPanel() {
     <section className="panel compact" id="prd-roadmap">
       <div className="panel-header">
         <div>
-          <h2>双版本对齐</h2>
-          <span>按 PRD 保留能力边界</span>
+          <h2>核心能力边界</h2>
+          <span>围绕主学习闭环持续收口</span>
         </div>
         <ShieldCheck size={18} />
       </div>

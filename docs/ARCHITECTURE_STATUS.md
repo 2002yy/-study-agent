@@ -10,7 +10,7 @@
 - **sealed**：在指定架构范围内已有唯一 owner、持久化、恢复和回归边界。
 - **partial**：生产路径已存在，但完整生命周期或产品合同仍未封板。
 - **transitional**：当前可用，但不是最终 owner/state machine。
-- **legacy**：只为旧客户端或旧入口保留。
+- **legacy**：只为旧客户端或旧接口保留。
 
 架构 sealed 不代表整个用户流程完成。例如 Chat/Session core 已 sealed，但会话标题、summary status 和恢复卡属于产品层后续工作。
 
@@ -37,7 +37,7 @@
 | AppShell | sealed | layout-only `AppShell` |
 | Workspace Runtime | sealed | controller construction、recovery、persistence、view binding |
 | Compatibility API | legacy | frozen `src/api/__init__.py` exports |
-| Streamlit | legacy | `app.py`、`src/ui/*`，只接受兼容修复 |
+| Web UI | sealed | React feature controllers + Workspace Runtime；旧 Streamlit UI 已移除 |
 
 ## 3. 稳定架构原则
 
@@ -48,7 +48,7 @@
 5. RAG 索引使用 active/staging version 和失败不激活原则。
 6. 研究能力扩展现有 WebLookup owner，避免 WebLookupRun/ResearchRun 双轨。
 7. 新生产代码不得依赖 `src.api` compatibility facade。
-8. Streamlit 不再承接新功能。
+8. 产品 UI 只在 React 工作台演进，后端核心模块不得依赖前端框架。
 9. planned/attempted 状态不能覆盖 committed truth。
 10. 普通会话切换不能全局取消无关 operation scope。
 

@@ -1,11 +1,11 @@
 # Study Agent 项目全貌
 
-> 面向新协作者和无上下文接手者的当前阶段总览。  
-> 当前开发阶段：`v0.9.0-dev`（架构 v2 第 1 批 — 停止状态膨胀）
+> 面向新协作者和无上下文接手者的当前架构总览。
+> 实时进度、版本和下一步以 `docs/PROJECT_STATUS.md` 为唯一事实源。
 
 ## 1. 项目定义
 
-这是一个基于 `Python + Streamlit` 的学习管理 Agent，当前核心体验包括：
+这是一个基于 `React + FastAPI + SQLite` 的个人学习 Agent，当前核心体验包括：
 
 1. 学习对话与角色化教学
 2. 课后更新预览与确认写入
@@ -42,11 +42,13 @@
 9. `src/llm_client.py`: LLM 调用与 client 重置
 10. `src/performance_budget.py`: 性能预算（max_tokens 分级）
 
-### UI
+### UI 与 API
 
-1. `src/ui/wechat_panel.py`: 微信群主面板
-2. `src/ui/sidebar.py`: 设置、模式、记忆、导出
-3. `src/ui/status_bar.py`: 状态与版本展示
+1. `frontend/src/app/`: 工作台运行时、恢复和控制器装配
+2. `frontend/src/features/`: 学习对话、资料、研究、群聊和新闻界面
+3. `src/api/routes/`: FastAPI adapter
+4. `src/application/`: 核心用例编排与 durable run 服务
+5. `src/repositories/`: SQLite 持久化 owner
 
 ### 文档
 
@@ -81,10 +83,10 @@
 
 如果你要快速接手，推荐顺序：
 
-1. `CHANGELOG.md`
-2. `ARCHITECTURE_V2.md` (目标架构)
-3. `domain_models.md` (领域实体定义)
-4. `state_invariants.md` (系统不变量)
-5. `migration_plan.md` (分批迁移计划)
-6. `src/wechat_format.py`
-7. `src/ui/wechat_panel.py`
+1. `docs/PROJECT_STATUS.md`（当前事实与下一步）
+2. `docs/ARCHITECTURE_STATUS.md`（稳定 owner 与边界）
+3. `README.md`（产品与启动入口）
+4. `domain_models.md`（领域实体定义）
+5. `state_invariants.md`（系统不变量）
+6. `frontend/src/app/WorkspaceRuntime.tsx`
+7. `src/application/`

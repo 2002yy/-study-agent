@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import streamlit as st
 import yaml
 
 from src.safe_writer import safe_write_text
@@ -453,11 +452,6 @@ def _write_runtime_state(data: dict[str, Any]) -> None:
     )
     _yaml_mtime_cached = 0.0  # force re-sync on next read
     _sync_runtime_state_markdown_views(normalized)
-    try:
-        load_runtime_config.clear()
-        load_runtime_modes.clear()
-    except Exception:
-        logger.warning("Failed to clear runtime mode caches", exc_info=True)
 
 
 def _sync_runtime_state_markdown_views(data: dict[str, Any]) -> None:
@@ -553,12 +547,10 @@ def _apply_state_updates(path: Path, updates: dict[str, str]) -> None:
     _write_runtime_state(data)
 
 
-@st.cache_data(ttl=30)
 def load_runtime_config() -> RuntimeConfigLoadResult:
     return _runtime_config_from_yaml()
 
 
-@st.cache_data(ttl=30)
 def load_runtime_modes() -> RuntimeModes:
     return _modes_from_runtime_state(load_runtime_config().state)
 

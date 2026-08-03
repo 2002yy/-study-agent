@@ -1,8 +1,8 @@
 """长期记忆写入统一入口。
 
 写入层级：
-  app.py → memory_writer → safe_writer → 文件
-  app.py → mode_manager._write_keyvalue → 状态文件
+  application service → memory_writer → safe_writer → 文件
+  runtime settings API → mode_manager._write_keyvalue → 状态文件
 
 所有 memory/ 和 logs/ 下的正式写入都通过本模块，附带权限检查。
 """

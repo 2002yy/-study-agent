@@ -443,5 +443,5 @@ AppShell 不再包含任何业务 handler。
 - `GroupChatService.append_news_bundle()` writes source plus per-speaker discussion in one Group transaction and is idempotent by NewsRun ID; the completed NewsRun stores its GroupThread association.
 - `newsController` owns stage data, busy/error, restore, cancellation, and orchestration. `NewsWorkspace` is a rendering surface, and `activeNewsRunId` is always the server-issued ID.
 - NewsRun is sealed. Except for confirmed bugs, its repository, stage model, routes, and controller are frozen while ToolRun becomes the next vertical slice.
-- The legacy Streamlit WeChat UI remains on its compatibility file path and is not considered part of the sealed React/FastAPI runtime.
-- ToolRun, Memory, and their existing persistence flows remain frozen on the legacy path and are not claimed as migrated.
+- The legacy Streamlit UI has been removed; React + FastAPI is the only product runtime.
+- ToolRun and Memory use server-owned durable runs; compatibility exports remain isolated from new production code.
