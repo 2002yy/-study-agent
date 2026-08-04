@@ -4,7 +4,6 @@ import {
   BookOpen,
   CheckCircle2,
   Clipboard,
-  Database,
   Library,
   Loader2,
   LogOut,
@@ -353,10 +352,6 @@ export function ChatPanel(props: ChatPanelProps) {
               <button onClick={(event) => openFromMenu("group", event.currentTarget)} role="menuitem" type="button">
                 <MessageSquare size={16} />
                 <span><strong>群聊讨论</strong><small>让多位角色从不同角度讨论</small></span>
-              </button>
-              <button onClick={(event) => openFromMenu("news", event.currentTarget)} role="menuitem" type="button">
-                <Database size={16} />
-                <span><strong>新闻研究</strong><small>实验性的公开信息研究工作区</small></span>
               </button>
               <button onClick={(event) => openFromMenu("tools", event.currentTarget)} role="menuitem" type="button">
                 <Wrench size={16} />
