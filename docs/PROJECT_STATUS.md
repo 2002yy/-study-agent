@@ -4,7 +4,7 @@
 > 更新：2026-08-04  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**停止横向扩张，集中梳理核心学习功能、产品入口、运行状态与桌面/移动端体验。**  
-> 当前切片：**PR #99 已合并 `main`；Draft PR #100 已删除无生产调用者的 NewsWorkspace / NewsController 前端适配层，并明确后端 NewsRun 与 410 迁移墓碑边界。代码基线 CI run `30915516437` 全绿。**  
+> 当前切片：**PR #100 已合并 `main`；Draft PR #101 已完成 EvidenceRuntime 第一批 owner 抽离，代码基线 CI run `30917787585` 全绿。**  
 > 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -40,14 +40,15 @@
 - PR #96：联网研究阶段与 partial 结果使用边界；
 - PR #97：联网研究产品表面集中化，squash merge SHA `3b1b9ef92c0496a659e2be3bf6075d529eb01826`；
 - PR #98：主工作区遗留 NewsRun 状态与过时 action 清理，squash merge SHA `6b357bfe3b63d072f9374f19e149866171145b7a`；
-- PR #99：前端类型、布局兼容壳和无效设置合同清理，squash merge SHA `04770915e08528cb639edeba9839223072340f61`。
+- PR #99：前端类型、布局兼容壳和无效设置合同清理，squash merge SHA `04770915e08528cb639edeba9839223072340f61`；
+- PR #100：NewsWorkspace / NewsController 前端适配层删除与 NewsRun 兼容边界收口，squash merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`。
 
 ### 2.2 当前待合并切片
 
-- 分支：`agent/news-compatibility-boundary`；
-- Draft PR：`#100 收口新闻兼容适配层`；
-- 代码基线 commit：`fbd321cb4782aca42b554eb2010d9e2fd54b69ca`；
-- 完整 CI：run `30915516437`，结论 `success`。
+- 分支：`agent/evidence-runtime-extraction`；
+- Draft PR：`#101 抽离 EvidenceRuntime owner`；
+- 代码基线 commit：`b6bd09aa5a81d6f055176badb5316b8c32401da0`；
+- 完整 CI：run `30917787585`，结论 `success`。
 
 ## 3. 已验证的产品闭环
 
@@ -66,9 +67,7 @@
 | 长会话恢复 | desktop / mobile / 360×520 通过 | 恢复卡保持在当前 conversation viewport |
 | 窄屏复杂内容 | 360×520 通过 | 长中文、URL、宽代码、IME、滚动与刷新恢复 |
 
-## 4. 功能集中化已完成切片
-
-### 4.1 必须保护的稳定骨架
+## 4. 必须保护的稳定骨架
 
 - `RestoreCard`：新用户、返回学习、失败重试和中断续写；
 - `LearningStrip`：目标、阶段、缺口、下一步和验证状态；
@@ -77,84 +76,76 @@
 - 学习结束必须经过 preview、确认和 hash-locked MemoryRun；
 - durable run、刷新恢复、窄屏、IME 和复杂内容已有强回归门禁。
 
-这些能力不是当前清理对象。任何集中化修改不得改变其 committed truth、持久化和恢复合同。
+任何运行时拆分不得改变 committed truth、持久化格式、恢复语义或上述交互闭环。
 
-### 4.2 PR #97：新闻与联网研究产品表面合并
+## 5. 已完成的集中化切片
 
-1. 从普通菜单移除独立“新闻研究”；
-2. 删除主工作区新闻抽屉；
-3. 群聊不再嵌入完整 `NewsWorkspace`；
-4. 群聊只读展示已有 ResearchRun，不再创建第二套研究真值；
-5. 聊天入口继续创建带 `owner_turn_id` 的 durable ResearchRun；
-6. 保留取消、刷新恢复和同 run 重试；
-7. completed run 恢复后默认只展示，不自动选为下一轮聊天资料；
-8. 切换聊天线程时复位一次性 `useInChat=false`，但不删除 run 或回答证据。
+### 5.1 PR #97：新闻与联网研究产品表面合并
 
-### 4.3 PR #98：主工作区遗留 NewsRun 状态清理
+1. 删除普通菜单和群聊中的独立新闻工作区；
+2. 普通用户联网研究统一使用 durable ResearchRun；
+3. completed run 恢复后默认只展示，不自动继承为下一轮聊天资料；
+4. 切换聊天线程时复位一次性 `useInChat=false`，但不删除 run 或回答证据。
 
-1. 删除 `activeNewsRunId`、`SET_ACTIVE_NEWS_RUN`、旧新闻查询和 `readArticles` 状态；
-2. 主工作区不再构造或返回 `useNewsController`；
-3. 删除 NewsRun 取消端口和 run ID wiring；
-4. 群聊 reset 只影响群聊 scope；
-5. `WorkspacePersistence` schema 升至 v4，恢复旧 payload 时主动丢弃 `newsRunId`；
-6. reducer 删除 `selectedPanel`、`SELECT_PANEL` 和无生产调用者的 `START_NEW_CHAT_SESSION`；
-7. 聊天切换保留独立 Research / Tool / RAG run；
-8. 静态边界测试禁止退休字段和 NewsController 回到主工作区。
+### 5.2 PR #98：主工作区遗留 NewsRun 状态清理
 
-### 4.4 PR #99：前端类型与布局兼容合同收尾
+1. 删除 `activeNewsRunId`、旧新闻查询状态和 NewsController wiring；
+2. `WorkspacePersistence` schema 升至 v4，旧 `newsRunId` 显式丢弃；
+3. 删除过时 reducer action；
+4. 聊天切换保留独立 Research / Tool / RAG run。
 
-1. `DrawerId` 删除 `"news"`；
-2. 当前 `WorkspaceState` 删除 `newsRunId`；
-3. 旧 payload 可含 `newsRunId`，但恢复时显式丢弃，不再写回；
-4. 工作区直接依赖 `SettingsPanel`；
-5. 删除 `SettingsPanel` 五个未使用 props；
-6. 删除仅做重导出的 `layout/Sidebar.tsx`；
-7. 删除已被独立抽屉取代的 `layout/Inspector.tsx`；
-8. 扩展静态边界测试，禁止兼容壳和无效合同重新接回。
+### 5.3 PR #99：前端类型与布局兼容合同收尾
 
-### 4.5 PR #100：NewsWorkspace / NewsRun 最终边界
+1. 删除 `DrawerId.news` 和当前 `WorkspaceState.newsRunId`；
+2. 删除旧 Sidebar / Inspector 兼容壳；
+3. `SettingsPanel` props 只保留真实使用的输入；
+4. 静态边界禁止兼容壳与无效合同重新接回。
 
-#### 调用者审计
+### 5.4 PR #100：NewsWorkspace / NewsRun 最终边界
 
-临时 inventory CI run `30914499344` 对 `frontend/src`、`src` 和 `tests` 做全树扫描，结论：
+1. 全树审计确认 NewsWorkspace / NewsController 没有生产前端调用者；
+2. 删除 NewsWorkspace、NewsController 及专属测试；
+3. 普通用户新闻能力只能通过 ResearchRun / Web Research；
+4. 后端 NewsRun 暂留为 headless compatibility durable workflow；
+5. 六条旧新闻 URL 仅保留无业务副作用的 410 tombstone；
+6. tombstone 不得执行旧流程或写入群聊文件。
 
-- `NewsWorkspace` 与 `useNewsController` 没有生产前端调用者；
-- 它们只剩自身文件、专属单元测试与边界测试；
-- `/news/runs` 前端 API helper 只被退休 controller 使用；
-- 后端 `/news/runs` route、NewsService、SQLite durable entity 和跨层回归测试仍完整存在；
-- 六条旧新闻 URL 已由测试明确保护为 410 迁移墓碑，且不得执行旧流程。
+## 6. PR #101：EvidenceRuntime 第一批 owner 抽离
 
-#### 已完成
+### 6.1 已迁移 owner
 
-1. 删除 `features/news-workspace/NewsWorkspace.tsx`；
-2. 删除 `features/news-workspace/newsController.ts`；
-3. 删除 NewsController 专属单元测试与旧 controller boundary test；
-4. `WebLookupRunBoundary.test.ts` 改为永久断言旧 UI/controller 不得恢复；
-5. 新增仓库级兼容边界：NewsRun 客户端命令只能留在 `frontend/src/api.ts`，其他生产前端不得成为 owner；
-6. 保留 `NewsRunResponse` 与 `/news/runs` 客户端 helper，作为无 UI 的 headless compatibility adapter；
-7. 保留后端 NewsRun durable entity、完整 server-owned `/news/runs` 工作流和跨层测试；
-8. 保留 `/news/round`、`/wechat/news-round`、`/news/search`、`/news/enrich`、`/news/digest`、`/news/discuss` 六条 410 迁移墓碑；
-9. 410 墓碑只拒绝请求并指向 `/news/runs`，不得执行 `src.api.run_news_round` 或写入群聊文件。
+新增 `frontend/src/app/useEvidenceRuntime.ts`，集中拥有：
 
-#### 最终结论
+- `ragEnabled` 与 `ragSettings`；
+- `activeRagQueryRunId`、`activeRagWriteRunId`、`activeWebLookupRunId` 的读取和 dispatch；
+- `useRagController`；
+- `useUploadController`；
+- `useWebLookupController`；
+- 聊天线程变化时的一次性研究选择复位；
+- Sources 抽屉打开时的 RAG 状态与知识文档加载。
 
-```text
-普通用户新闻能力
--> 只能通过 durable ResearchRun / Web Research
+### 6.2 顶层运行时变化
 
-退休前端 NewsWorkspace / NewsController
--> 删除，不再保留实验 UI
+- `WorkspaceRuntime` 不再直接保存 RAG 设置或三个 evidence run ID；
+- `WorkspaceRuntime` 只实例化 `useEvidenceRuntime`，再将其公开合同交给恢复、视图与跨域组合；
+- `useWorkspaceControllers` 不再构造 WebLookup / RAG / Upload controller；
+- `useWorkspaceControllers` 仍负责聊天、群聊、工具、记忆和 evidence 之间的跨域编排；
+- `WorkspaceView` 的用户可见 props 和交互行为未变化；
+- `useWorkspaceRecovery` 的 localStorage schema 与恢复字段未变化。
 
-后端 NewsRun
--> 暂时保留为 headless compatibility durable workflow
+### 6.3 永久边界
 
-旧新闻 URL
--> 保留 410 tombstone，不再拥有业务实现
-```
+静态测试锁定：
 
-## 5. PR #100 验证证据
+- WebLookup、RAG、Upload controller 只能由 EvidenceRuntime 构造；
+- WorkspaceRuntime 不得重新持有 evidence run ID 或 `RagSettings` state；
+- Sources 抽屉的 RAG 与文档加载只能由 EvidenceRuntime 执行；
+- 跨域组合层可以明确跳过 `sources`，但不得调用 RAG 加载或 `refreshDocuments()`；
+- WorkspaceCoordinator 仍属于跨域组合层，不下沉到 EvidenceRuntime。
 
-代码基线 commit `fbd321cb4782aca42b554eb2010d9e2fd54b69ca` 的 CI run `30915516437` 已完整通过：
+## 7. PR #101 验证证据
+
+代码基线 commit `b6bd09aa5a81d6f055176badb5316b8c32401da0` 的 CI run `30917787585` 已完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -162,72 +153,69 @@
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 完整前端测试；
+- 64 个前端测试文件、231 项测试；
 - TypeScript / Vite production build；
 - 38 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
-审计与 CI 实际发现：六条 410 路由不是可直接删除的无主代码，而是仓库明确测试的兼容墓碑。第一次尝试改为 404 后，`test_legacy_news_round_routes_are_gone_without_running_legacy_flow` 精确失败；最终恢复 410 拒绝合同，没有恢复任何旧业务流。
+CI 首轮发现一条新静态测试把“跨域层明确跳过 sources”误判成 owner。修正后的合同允许声明委托，但禁止跨域层实际加载 RAG 或知识文档。没有为通过测试恢复旧 owner，也没有改变产品行为。
 
 说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
 
-## 6. 当前明确保留
+## 8. 当前明确保留
 
 - ResearchRun SQLite schema、checkpoint、cancel、resume、retry；
-- 后端 NewsRun durable entity 与 `/news/runs`；
-- 六条无业务副作用的新闻 410 迁移墓碑；
-- RestoreCard、LearningStrip、SourcesPanel、RAG、MemoryRun；
+- RAG query/write durable run 与恢复字段；
+- 后端 NewsRun durable entity、`/news/runs` 与六条 410 tombstone；
+- RestoreCard、LearningStrip、SourcesPanel、MemoryRun；
 - 学习结束 committed truth；
-- Workspace runtime 的 durable owner；
-- 普通模式与实验室入口的后续设计空间。
+- `useWorkspaceRecovery` 的跨域持久化协调；
+- WorkspaceCoordinator 的跨域取消与清理职责。
 
-当前已不存在：普通用户新闻顶级入口、新闻抽屉、NewsWorkspace、NewsController、NewsRun 工作区状态、NewsRun 持久化 owner。
+本批没有创建第二套 evidence 状态，也没有迁移数据库或 API。
 
-## 7. 下一执行顺序
+## 9. 下一执行顺序
 
-### P1-R1：运行时按领域拆分
+### P1-R2：继续收窄 EvidenceRuntime 合同
+
+1. 将 evidence 恢复字段组合封装为明确的 `ids / setIds / settings` 合同，减少 WorkspaceRuntime 展开字段；
+2. 审计 GitHub evidence 的生产 owner，将其归入 EvidenceRuntime，而不是新增顶级工作区；
+3. 评估 `activeQuery` 是否应拆成跨域 selector，避免工具与 Sources 各自推导；
+4. 保持 WorkspacePersistence schema 不变。
+
+### P1-R3：抽离 LearningSessionRuntime
 
 ```text
 LearningSessionRuntime
-  -> chat / sessions / pedagogy / recovery / closure
-
-EvidenceRuntime
-  -> upload / RAG / research / GitHub evidence / sources
-
-ExtensionRuntime
-  -> group chat / controlled tools / workflows / compatibility adapters
+-> chat / sessions / pedagogy / recovery / closure
 ```
 
-拆分原则：
+先移动 owner，不改变 session、turn、closure 或 committed truth。
 
-- 先移动 owner，不改变 durable entity；
-- 每个切片只迁移一个领域；
-- 继续跑完整前端、窄屏和真实全栈门禁；
-- 不允许重新制造第二套会话或研究真值。
+### P1-R4：抽离 ExtensionRuntime
 
-第一刀优先抽离 `EvidenceRuntime`，因为上传、RAG、ResearchRun、GitHub evidence 和 Sources 已有较清晰的共同边界。
+```text
+ExtensionRuntime
+-> group chat / controlled tools / workflows / compatibility adapters
+```
 
-### P1-R2：普通模式与单一实验室入口
+### P1-R5：普通模式与单一实验室入口
 
 普通模式只保留：会话历史、资料与来源、学习成果、设置。群聊、工具和开发者诊断进入单一实验室，默认不加载。
 
-### P1-R3：学习成果与长期记忆分层
+### P1/P2：剩余债务
 
-默认学习结束只展示本次成果、未解决项、下一步和将写入内容；长期记忆目标、手动候选编辑和置信度明细降到高级管理。
-
-### P1/P2：样式与后端兼容债务
-
-- 删除 NewsWorkspace 后遗留的无 owner CSS selector，在 CSS owner 批次统一处理；
+- 删除 NewsWorkspace 遗留的无 owner CSS selector；
 - CORS 统一为单一 owner；
-- 410 墓碑只在明确迁移窗口结束后单独删除；
-- 补 Firefox、WebKit 和实体手机抽样。
+- 410 tombstone 只在明确迁移窗口结束后单独删除；
+- 补 Firefox、WebKit 和实体手机抽样；
+- GitHub symbol mapping 与 CI association 继续增强。
 
-## 8. PR #100 合并条件
+## 10. PR #101 合并条件
 
-- 最新 head 的完整 CI 全绿；
+- 最新 head 完整 CI 全绿；
 - 状态文档与代码事实一致；
-- 不恢复新闻顶级入口、NewsWorkspace 或 NewsController；
-- 不删除后端 durable NewsRun；
-- 410 路由只做无副作用 tombstone；
+- 不改变 WorkspacePersistence schema；
 - 不改变 ResearchRun、RAG、MemoryRun 或 committed learning truth；
-- PR 保持可回滚，范围只包含新闻兼容边界收口。
+- 不恢复 NewsWorkspace、NewsController 或新闻顶级入口；
+- PR 保持可回滚，范围只包含 EvidenceRuntime 第一批 owner 抽离。

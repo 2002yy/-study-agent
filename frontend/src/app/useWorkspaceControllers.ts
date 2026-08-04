@@ -5,8 +5,6 @@ import type { LocalKnowledgeInvocation } from "../api";
 import { createEmptyRag, useChatController } from "../features/chat/chatController";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useMemoryController } from "../features/learning-memory/memoryController";
-import { useRagController } from "../features/rag/ragController";
-import { useUploadController } from "../features/rag/uploadController";
 import { useRoleController } from "../features/roles/roleController";
 import {
   CHAT_SETTINGS_DEFAULTS,
@@ -14,9 +12,9 @@ import {
 } from "../features/settings/SettingsPanel";
 import { useSettingsController } from "../features/settings/settingsController";
 import { useToolController } from "../features/tools/toolController";
-import { useWebLookupController } from "../features/web-lookup/webLookupController";
 import { useWorkflowController } from "../features/workflows/workflowController";
-import type { ApiSnapshot, ChatSettings, RagSettings } from "../types";
+import type { ApiSnapshot, ChatSettings } from "../types";
+import type { EvidenceRuntime } from "./useEvidenceRuntime";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
 import { useWorkspace } from "./WorkspaceProvider";
@@ -39,41 +37,41 @@ export function useWorkspaceControllers(options: {
   setInput: ValueSetter<string>;
   chatSettings: ChatSettings;
   setChatSettings: ValueSetter<ChatSettings>;
-  ragSettings: RagSettings;
-  setRagSettings: ValueSetter<RagSettings>;
-  ragEnabled: boolean;
-  setRagEnabled: ValueSetter<boolean>;
   keepCurrentRole: boolean;
   setKeepCurrentRole: ValueSetter<boolean>;
   conversationInstruction: string;
   setConversationInstruction: ValueSetter<string>;
   operationError: ValueSetter<string>;
   activeGroupThreadId?: string;
+  evidence: EvidenceRuntime;
   runIds: {
     tool?: string;
     memory?: string;
     learningClosure?: string;
-    ragQuery?: string;
-    ragWrite?: string;
-    webLookup?: string;
   };
   setGroupThreadId: DirectSetter<string | undefined>;
   setRunId: {
     tool: DirectSetter<string | undefined>;
     memory: DirectSetter<string | undefined>;
     learningClosure: DirectSetter<string | undefined>;
-    ragQuery: DirectSetter<string | undefined>;
-    ragWrite: DirectSetter<string | undefined>;
-    webLookup: DirectSetter<string | undefined>;
   };
 }) {
   const { state, dispatch } = useWorkspace();
+  const {
+    ragEnabled,
+    setRagEnabled,
+    ragSettings,
+    setRagSettings,
+    webLookupController,
+    ragController,
+    uploadController,
+  } = options.evidence;
   const roleController = useRoleController(options.chatSettings.selectedRole);
   const workflowController = useWorkflowController();
   const settingsController = useSettingsController({
     chatSettings: options.chatSettings,
-    ragSettings: options.ragSettings,
-    ragEnabled: options.ragEnabled,
+    ragSettings,
+    ragEnabled,
     setRuntimeSettings: (runtimeSettings) =>
       options.setSnapshot((current) => ({ ...current, runtimeSettings })),
     setOperationError: options.operationError,
@@ -86,14 +84,8 @@ export function useWorkspaceControllers(options: {
     setWechat: (wechat) =>
       options.setSnapshot((current) => ({ ...current, wechat })),
     chatSettings: options.chatSettings,
-    ragSettings: options.ragSettings,
-    ragEnabled: options.ragEnabled,
-  });
-  const webLookupController = useWebLookupController({
-    query: options.input,
-    setOperationError: options.operationError,
-    activeRunId: options.runIds.webLookup,
-    setActiveRunId: options.setRunId.webLookup,
+    ragSettings,
+    ragEnabled,
   });
   const memoryController = useMemoryController({
     activeRunId: options.runIds.memory,
@@ -103,18 +95,6 @@ export function useWorkspaceControllers(options: {
     onMemoryChanged: options.refresh,
     onSummaryChanged: (summary) =>
       dispatch({ type: "SET_SESSION_SUMMARY", summary }),
-  });
-  const ragController = useRagController({
-    settings: options.ragSettings,
-    activeRunId: options.runIds.ragQuery,
-    setActiveRunId: options.setRunId.ragQuery,
-    setOperationError: options.operationError,
-  });
-  const uploadController = useUploadController({
-    activeRunId: options.runIds.ragWrite,
-    setActiveRunId: options.setRunId.ragWrite,
-    setOperationError: options.operationError,
-    onChanged: options.refresh,
   });
   const workspaceCoordinator = useMemo(
     () =>
@@ -145,11 +125,11 @@ export function useWorkspaceControllers(options: {
     chatSettings: options.chatSettings,
     chatSettingsDefaults: CHAT_SETTINGS_DEFAULTS,
     setChatSettings: options.setChatSettings,
-    ragSettings: options.ragSettings,
+    ragSettings,
     ragSettingsDefaults: RAG_SETTINGS_DEFAULTS,
-    setRagSettings: options.setRagSettings,
-    ragEnabled: options.ragEnabled,
-    setRagEnabled: options.setRagEnabled,
+    setRagSettings,
+    ragEnabled,
+    setRagEnabled,
     keepCurrentRole: options.keepCurrentRole,
     setKeepCurrentRole: options.setKeepCurrentRole,
     conversationInstruction: options.conversationInstruction,
@@ -165,7 +145,7 @@ export function useWorkspaceControllers(options: {
       workspaceCoordinator.clearChatArtifacts.bind(workspaceCoordinator),
     refresh: options.refresh,
     onResearchRunDiscovered: (runId, forceRefresh = false) => {
-      options.setRunId.webLookup(runId);
+      options.evidence.setWebLookupRunId(runId);
       if (forceRefresh) void webLookupController.refreshRun(runId);
     },
   });
@@ -173,9 +153,9 @@ export function useWorkspaceControllers(options: {
     options.input.trim() || chatController.lastChat?.rag?.query || "";
   const currentToolInvocation: LocalKnowledgeInvocation = {
     query: activeQuery,
-    retrievalMode: options.ragSettings.retrievalMode,
-    topK: options.ragSettings.chatTopK,
-    minScore: options.ragSettings.minScore,
+    retrievalMode: ragSettings.retrievalMode,
+    topK: ragSettings.chatTopK,
+    minScore: ragSettings.minScore,
   };
   const toolController = useToolController({
     invocation: currentToolInvocation,
@@ -197,16 +177,11 @@ export function useWorkspaceControllers(options: {
 
   useEffect(() => {
     const drawer = state.activeDrawer;
-    if (!drawer) return;
+    if (!drawer || drawer === "sources") return;
     let active = true;
     const load = async () => {
       try {
-        if (drawer === "sources") {
-          await Promise.all([
-            options.loadFeature("rag"),
-            uploadController.refreshDocuments(),
-          ]);
-        } else if (drawer === "group") {
+        if (drawer === "group") {
           await options.loadFeature("wechat", { groupThreadId });
         } else if (drawer === "tools") {
           await options.loadFeature("tools");
@@ -218,7 +193,6 @@ export function useWorkspaceControllers(options: {
       } catch (error) {
         if (!active) return;
         const labels: Partial<Record<typeof drawer, string>> = {
-          sources: "资料与来源",
           group: "群聊",
           tools: "工具",
           timeline: "开发者诊断",
