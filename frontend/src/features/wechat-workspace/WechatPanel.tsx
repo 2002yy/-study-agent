@@ -5,7 +5,6 @@ import { searchWechat } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import type { WechatSearchResponse, WechatStateResponse } from "../../types";
 import { displayValue } from "../../utils/format";
-import { NewsWorkspace } from "../news-workspace/NewsWorkspace";
 import type { NewsController } from "../news-workspace/newsController";
 import type { ResearchLookupResponse } from "../web-lookup/researchApi";
 import { speakerToRole } from "../roles/roleCatalog";
@@ -121,27 +120,19 @@ function researchStateText(value: ResearchLookupResponse): string {
 
 export function WechatPanel({
   wechat,
-  newsController,
   webLookup,
   useWebLookup,
   setUseWebLookup,
   wechatInput,
   setWechatInput,
-  newsQuery,
-  setNewsQuery,
-  readArticles,
-  setReadArticles,
   sessionId,
   onOpening,
   onReset,
   onMarkRead,
   onSendWechat,
   onStopWechat,
-  onLookupNews,
-  onStopLookup,
   isWechatBusy,
   error,
-  isNewsBusy
 }: {
   wechat: WechatStateResponse | null;
   newsController: NewsController;
@@ -317,17 +308,6 @@ export function WechatPanel({
         </div>
       </form>
 
-      <NewsWorkspace
-        query={newsQuery}
-        setQuery={setNewsQuery}
-        readArticles={readArticles}
-        setReadArticles={setReadArticles}
-        controller={newsController}
-        onLookupNews={onLookupNews}
-        onStopLookup={onStopLookup}
-        isLookupBusy={isNewsBusy}
-      />
-
       {webLookup ? (
         <div className="news-result lookup-result">
           <div className="memory-preview-meta">
@@ -337,7 +317,7 @@ export function WechatPanel({
           <label className="toggle-row">
             <input
               checked={useWebLookup}
-              disabled={!(["completed", "partial"].includes(webLookup.status) && webLookup.news_items.length > 0)}
+              disabled={!( ["completed", "partial"].includes(webLookup.status) && webLookup.news_items.length > 0)}
               onChange={(event) => setUseWebLookup(event.target.checked)}
               type="checkbox"
             />
