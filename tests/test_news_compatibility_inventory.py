@@ -2,35 +2,85 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
-SCAN_ROOTS = (ROOT / "frontend" / "src", ROOT / "src", ROOT / "tests")
-TOKENS = (
-    "NewsWorkspace",
-    "useNewsController",
-    "NewsController",
-    '"/news/runs',
-    "'/news/runs",
-    "/news/runs",
-    "status_code=410",
-    "HTTP_410_GONE",
+FRONTEND_ROOT = ROOT / "frontend" / "src"
+RETIRED_FRONTEND_FILES = (
+    FRONTEND_ROOT / "features" / "news-workspace" / "NewsWorkspace.tsx",
+    FRONTEND_ROOT / "features" / "news-workspace" / "newsController.ts",
 )
-SUFFIXES = {".py", ".ts", ".tsx"}
+NEWS_CLIENT_COMMANDS = (
+    "createNewsRun",
+    "searchNewsRun",
+    "getNewsRun",
+    "enrichNewsRun",
+    "digestNewsRun",
+    "discussNewsRun",
+)
 
 
-def test_inventory_news_compatibility_callers() -> None:
-    matches: list[str] = []
-    for scan_root in SCAN_ROOTS:
-        for path in sorted(scan_root.rglob("*")):
-            if not path.is_file() or path.suffix not in SUFFIXES:
-                continue
-            relative = path.relative_to(ROOT).as_posix()
-            if relative == "tests/test_news_compatibility_inventory.py":
-                continue
-            for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if any(token in line for token in TOKENS):
-                    matches.append(f"{relative}:{line_number}: {line.strip()}")
+def _production_frontend_sources() -> list[Path]:
+    return [
+        path
+        for path in FRONTEND_ROOT.rglob("*")
+        if path.is_file()
+        and path.suffix in {".ts", ".tsx"}
+        and ".test." not in path.name
+    ]
 
-    pytest.fail("NEWS_COMPATIBILITY_INVENTORY\n" + "\n".join(matches))
+
+def test_retired_news_workspace_and_controller_stay_deleted() -> None:
+    assert all(not path.exists() for path in RETIRED_FRONTEND_FILES)
+
+
+def test_news_run_client_has_no_product_frontend_owner() -> None:
+    api_path = FRONTEND_ROOT / "api.ts"
+    api_source = api_path.read_text(encoding="utf-8")
+    for command in NEWS_CLIENT_COMMANDS:
+        assert f"function {command}" in api_source
+    assert "/news/runs" in api_source
+
+    forbidden_tokens = (
+        "NewsWorkspace",
+        "useNewsController",
+        "NewsController",
+        *NEWS_CLIENT_COMMANDS,
+        "/news/runs",
+    )
+    offenders: list[str] = []
+    for path in _production_frontend_sources():
+        if path == api_path:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if any(token in source for token in forbidden_tokens):
+            offenders.append(path.relative_to(ROOT).as_posix())
+
+    assert offenders == []
+
+
+def test_news_routes_keep_only_server_owned_news_runs() -> None:
+    route_source = (ROOT / "src" / "api" / "routes" / "news_routes.py").read_text(
+        encoding="utf-8"
+    )
+    for route in (
+        '@router.post("/news/runs"',
+        '@router.post("/news/runs/{run_id}/search"',
+        '@router.get("/news/runs"',
+        '@router.get("/news/runs/{run_id}"',
+        '@router.post("/news/runs/{run_id}/enrich"',
+        '@router.post("/news/runs/{run_id}/digest"',
+        '@router.post("/news/runs/{run_id}/discuss"',
+    ):
+        assert route in route_source
+
+    for retired_route in (
+        '@router.post("/news/round"',
+        '@router.post("/wechat/news-round"',
+        '@router.post("/news/search"',
+        '@router.post("/news/enrich"',
+        '@router.post("/news/digest"',
+        '@router.post("/news/discuss"',
+    ):
+        assert retired_route not in route_source
+
+    assert "status_code=410" not in route_source
