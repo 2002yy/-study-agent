@@ -47,10 +47,6 @@ export function WorkspaceView({
     setKeepCurrentRole: Dispatch<SetStateAction<boolean>>;
     conversationInstruction: string;
     setConversationInstruction: Dispatch<SetStateAction<string>>;
-    newsQuery: string;
-    setNewsQuery: Dispatch<SetStateAction<string>>;
-    readArticles: boolean;
-    setReadArticles: Dispatch<SetStateAction<boolean>>;
     operationError: string;
     setOperationError: Dispatch<SetStateAction<string>>;
   };

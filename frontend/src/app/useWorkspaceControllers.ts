@@ -5,7 +5,6 @@ import type { LocalKnowledgeInvocation } from "../api";
 import { createEmptyRag, useChatController } from "../features/chat/chatController";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useMemoryController } from "../features/learning-memory/memoryController";
-import { useNewsController } from "../features/news-workspace/newsController";
 import { useRagController } from "../features/rag/ragController";
 import { useUploadController } from "../features/rag/uploadController";
 import { useRoleController } from "../features/roles/roleController";
@@ -48,12 +47,9 @@ export function useWorkspaceControllers(options: {
   setKeepCurrentRole: ValueSetter<boolean>;
   conversationInstruction: string;
   setConversationInstruction: ValueSetter<string>;
-  newsQuery: string;
-  readArticles: boolean;
   operationError: ValueSetter<string>;
   activeGroupThreadId?: string;
   runIds: {
-    news?: string;
     tool?: string;
     memory?: string;
     learningClosure?: string;
@@ -63,7 +59,6 @@ export function useWorkspaceControllers(options: {
   };
   setGroupThreadId: DirectSetter<string | undefined>;
   setRunId: {
-    news: DirectSetter<string | undefined>;
     tool: DirectSetter<string | undefined>;
     memory: DirectSetter<string | undefined>;
     learningClosure: DirectSetter<string | undefined>;
@@ -93,22 +88,9 @@ export function useWorkspaceControllers(options: {
     chatSettings: options.chatSettings,
     ragSettings: options.ragSettings,
     ragEnabled: options.ragEnabled,
-    clearAssociatedNews: () => options.setRunId.news(undefined),
-  });
-  const newsController = useNewsController({
-    query: options.newsQuery,
-    readArticles: options.readArticles,
-    chatSettings: options.chatSettings,
-    groupThreadId,
-    activeRunId: options.runIds.news,
-    setActiveRunId: options.setRunId.news,
-    onDiscussed: (threadId) => {
-      options.setGroupThreadId(threadId);
-      void options.refresh();
-    },
   });
   const webLookupController = useWebLookupController({
-    query: options.newsQuery,
+    query: options.input,
     setOperationError: options.operationError,
     activeRunId: options.runIds.webLookup,
     setActiveRunId: options.setRunId.webLookup,
@@ -140,7 +122,6 @@ export function useWorkspaceControllers(options: {
         {
           cancelChat: () => operationRegistry.invalidate("chat"),
           cancelGroup: groupController.cancelWorkspace,
-          cancelNews: newsController.cancelWorkspace,
           cancelWebLookup: webLookupController.cancel,
           invalidateTool: () => operationRegistry.invalidate("tool"),
         },
@@ -152,7 +133,6 @@ export function useWorkspaceControllers(options: {
       ),
     [
       groupController.cancelWorkspace,
-      newsController.cancelWorkspace,
       webLookupController.cancel,
       ragController.clear,
       workflowController.clear,
@@ -262,7 +242,6 @@ export function useWorkspaceControllers(options: {
     workflowController,
     settingsController,
     groupController,
-    newsController,
     webLookupController,
     memoryController,
     ragController,

@@ -2,8 +2,6 @@ import type { ChatMessage, ChatResponse, DrawerId } from "../types";
 import type { SessionSummary } from "../features/sessions/sessionSummary";
 import { emptySessionSummary } from "../features/sessions/sessionSummary";
 
-export type WorkspacePanel = "chat" | "sources" | "group" | "news" | "tools" | "memory";
-
 export type StreamRecoveryState = {
   question: string;
   reply: string;
@@ -15,7 +13,6 @@ export type StreamRecoveryState = {
 export type WorkspaceRuntimeState = {
   activeChatThreadId?: string;
   activeGroupThreadId?: string;
-  activeNewsRunId?: string;
   activeWebLookupRunId?: string;
   activeToolRunId?: string;
   activeMemoryRunId?: string;
@@ -26,7 +23,6 @@ export type WorkspaceRuntimeState = {
   chatMessages: ChatMessage[];
   lastChat: ChatResponse | null;
   streamRecovery: StreamRecoveryState | null;
-  selectedPanel: WorkspacePanel;
   activeDrawer: DrawerId | null;
   pedagogyPhases: string[];
   transitionVersion: number;
@@ -35,7 +31,6 @@ export type WorkspaceRuntimeState = {
 export type WorkspaceAction =
   | { type: "SET_ACTIVE_CHAT_THREAD"; threadId?: string }
   | { type: "SET_ACTIVE_GROUP_THREAD"; threadId?: string }
-  | { type: "SET_ACTIVE_NEWS_RUN"; runId?: string }
   | { type: "SET_ACTIVE_WEB_LOOKUP_RUN"; runId?: string }
   | { type: "SET_ACTIVE_TOOL_RUN"; runId?: string }
   | { type: "SET_ACTIVE_MEMORY_RUN"; runId?: string }
@@ -56,9 +51,7 @@ export type WorkspaceAction =
       streamRecovery?: StreamRecoveryState | null;
     }
   | { type: "RESTORE_CHAT_SESSION"; threadId: string }
-  | { type: "START_NEW_CHAT_SESSION"; threadId: string }
   | { type: "RESET_GROUP_THREAD"; threadId?: string }
-  | { type: "SELECT_PANEL"; panel: WorkspacePanel }
   | { type: "OPEN_DRAWER"; drawer: DrawerId }
   | { type: "CLOSE_DRAWER" }
   | { type: "SET_PEDAGOGY_PHASES"; value: string[] };
@@ -67,7 +60,6 @@ export function createWorkspaceRuntimeState(
   partial: Partial<WorkspaceRuntimeState> = {}
 ): WorkspaceRuntimeState {
   return {
-    selectedPanel: "chat",
     activeDrawer: null,
     pedagogyPhases: [],
     transitionVersion: 0,
@@ -88,8 +80,6 @@ export function workspaceReducer(
       return { ...state, activeChatThreadId: action.threadId };
     case "SET_ACTIVE_GROUP_THREAD":
       return { ...state, activeGroupThreadId: action.threadId };
-    case "SET_ACTIVE_NEWS_RUN":
-      return { ...state, activeNewsRunId: action.runId };
     case "SET_ACTIVE_WEB_LOOKUP_RUN":
       return { ...state, activeWebLookupRunId: action.runId };
     case "SET_ACTIVE_TOOL_RUN":
@@ -177,33 +167,12 @@ export function workspaceReducer(
         transitionVersion: state.transitionVersion + 1
       };
     }
-    case "START_NEW_CHAT_SESSION":
-      return {
-        ...state,
-        activeChatThreadId: action.threadId,
-        sessionSummary: emptySessionSummary(action.threadId),
-        chatMessages: [],
-        lastChat: null,
-        streamRecovery: null,
-        pedagogyPhases: [],
-        activeNewsRunId: undefined,
-        activeWebLookupRunId: undefined,
-        activeToolRunId: undefined,
-        activeMemoryRunId: undefined,
-        activeLearningClosureRunId: undefined,
-        activeRagQueryRunId: undefined,
-        activeRagWriteRunId: undefined,
-        transitionVersion: state.transitionVersion + 1
-      };
     case "RESET_GROUP_THREAD":
       return {
         ...state,
         activeGroupThreadId: action.threadId,
-        activeNewsRunId: undefined,
         transitionVersion: state.transitionVersion + 1
       };
-    case "SELECT_PANEL":
-      return { ...state, selectedPanel: action.panel };
     case "OPEN_DRAWER":
       return { ...state, activeDrawer: action.drawer };
     case "CLOSE_DRAWER":

@@ -20,7 +20,6 @@ type GroupControllerOptions = {
   chatSettings: ChatSettings;
   ragSettings: RagSettings;
   ragEnabled: boolean;
-  clearAssociatedNews: () => void;
 };
 
 export function useGroupChatController(options: GroupControllerOptions) {
@@ -67,7 +66,6 @@ export function useGroupChatController(options: GroupControllerOptions) {
       const wechat = await resetWechat(threadId);
       dispatch({ type: "RESET_GROUP_THREAD", threadId: wechat.group_thread_id });
       setInput("");
-      options.clearAssociatedNews();
       options.setWechat(wechat);
     } catch (caught) {
       setError(`新群聊创建失败：${messageOf(caught)}`);

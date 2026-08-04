@@ -3,11 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
 
 describe("WorkspaceCoordinator", () => {
-  it("cancels every active feature through one command", () => {
+  it("cancels every active product operation through one command", () => {
     const ports = {
       cancelChat: vi.fn(),
       cancelGroup: vi.fn(),
-      cancelNews: vi.fn(),
       cancelWebLookup: vi.fn(),
       invalidateTool: vi.fn(),
     };
@@ -30,7 +29,6 @@ describe("WorkspaceCoordinator", () => {
       {
         cancelChat: vi.fn(),
         cancelGroup: vi.fn(),
-        cancelNews: vi.fn(),
         cancelWebLookup: vi.fn(),
         invalidateTool: vi.fn(),
       },

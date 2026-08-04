@@ -13,11 +13,14 @@ const summarized = {
 };
 
 describe("workspaceReducer", () => {
-  it("restores another chat without clearing group/news but clears chat closure scope", () => {
+  it("restores another chat without clearing independent runs but clears chat closure scope", () => {
     const state = createWorkspaceRuntimeState({
       activeChatThreadId: "chat-old",
       activeGroupThreadId: "group-1",
-      activeNewsRunId: "news-1",
+      activeWebLookupRunId: "research-1",
+      activeToolRunId: "tool-1",
+      activeRagQueryRunId: "rag-query-1",
+      activeRagWriteRunId: "rag-write-1",
       activeMemoryRunId: "memory-old",
       activeLearningClosureRunId: "closure-old",
       sessionSummary: summarized,
@@ -27,7 +30,10 @@ describe("workspaceReducer", () => {
 
     expect(next.activeChatThreadId).toBe("chat-new");
     expect(next.activeGroupThreadId).toBe("group-1");
-    expect(next.activeNewsRunId).toBe("news-1");
+    expect(next.activeWebLookupRunId).toBe("research-1");
+    expect(next.activeToolRunId).toBe("tool-1");
+    expect(next.activeRagQueryRunId).toBe("rag-query-1");
+    expect(next.activeRagWriteRunId).toBe("rag-write-1");
     expect(next.activeMemoryRunId).toBeUndefined();
     expect(next.activeLearningClosureRunId).toBeUndefined();
     expect(next.sessionSummary?.thread_id).toBe("chat-new");
@@ -75,29 +81,6 @@ describe("workspaceReducer", () => {
     expect(next.sessionSummary?.can_summarize).toBe(false);
   });
 
-  it("starts a new chat session and clears chat-scoped run state", () => {
-    const state = createWorkspaceRuntimeState({
-      activeChatThreadId: "chat-old",
-      activeGroupThreadId: "group-1",
-      activeNewsRunId: "news-1",
-      activeToolRunId: "tool-1",
-      activeMemoryRunId: "memory-1",
-      activeLearningClosureRunId: "closure-1",
-      sessionSummary: summarized,
-    });
-
-    const next = workspaceReducer(state, { type: "START_NEW_CHAT_SESSION", threadId: "chat-new" });
-
-    expect(next.activeChatThreadId).toBe("chat-new");
-    expect(next.activeGroupThreadId).toBe("group-1");
-    expect(next.activeNewsRunId).toBeUndefined();
-    expect(next.activeToolRunId).toBeUndefined();
-    expect(next.activeMemoryRunId).toBeUndefined();
-    expect(next.activeLearningClosureRunId).toBeUndefined();
-    expect(next.sessionSummary?.thread_id).toBe("chat-new");
-    expect(next.sessionSummary?.status).toBe("not_summarized");
-  });
-
   it("tracks a learning closure run independently from its MemoryRun", () => {
     const closure = workspaceReducer(createWorkspaceRuntimeState(), {
       type: "SET_ACTIVE_LEARNING_CLOSURE_RUN",
@@ -112,18 +95,22 @@ describe("workspaceReducer", () => {
     expect(memory.activeMemoryRunId).toBe("memory-1");
   });
 
-  it("resets group thread and clears the associated news run", () => {
+  it("resets only the group thread scope", () => {
     const state = createWorkspaceRuntimeState({
       activeChatThreadId: "chat-1",
       activeGroupThreadId: "group-old",
-      activeNewsRunId: "news-1"
+      activeWebLookupRunId: "research-1",
     });
 
-    const next = workspaceReducer(state, { type: "RESET_GROUP_THREAD", threadId: undefined });
+    const next = workspaceReducer(state, {
+      type: "RESET_GROUP_THREAD",
+      threadId: "group-new",
+    });
 
     expect(next.activeChatThreadId).toBe("chat-1");
-    expect(next.activeGroupThreadId).toBeUndefined();
-    expect(next.activeNewsRunId).toBeUndefined();
+    expect(next.activeGroupThreadId).toBe("group-new");
+    expect(next.activeWebLookupRunId).toBe("research-1");
+    expect(next.transitionVersion).toBe(state.transitionVersion + 1);
   });
 
   it("transitions the complete chat workspace atomically", () => {
@@ -190,13 +177,19 @@ describe("workspaceReducer", () => {
   });
 
   it("opens and closes a slide-over drawer", () => {
-    const opened = workspaceReducer(createWorkspaceRuntimeState(), { type: "OPEN_DRAWER", drawer: "settings" });
+    const opened = workspaceReducer(createWorkspaceRuntimeState(), {
+      type: "OPEN_DRAWER",
+      drawer: "settings",
+    });
     expect(opened.activeDrawer).toBe("settings");
     expect(workspaceReducer(opened, { type: "CLOSE_DRAWER" }).activeDrawer).toBeNull();
   });
 
   it("opening a drawer replaces the previous one", () => {
-    const next = workspaceReducer(createWorkspaceRuntimeState({ activeDrawer: "group" }), { type: "OPEN_DRAWER", drawer: "memory" });
+    const next = workspaceReducer(
+      createWorkspaceRuntimeState({ activeDrawer: "group" }),
+      { type: "OPEN_DRAWER", drawer: "memory" },
+    );
     expect(next.activeDrawer).toBe("memory");
   });
 });

@@ -29,40 +29,39 @@ const initialWechat: WechatStateResponse = {
   summary: "",
 };
 
+const controllerOptions = (setWechat: (wechat: WechatStateResponse) => void) => ({
+  wechat: initialWechat,
+  setWechat,
+  chatSettings: {
+    selectedRole: "auto",
+    selectedMode: "auto",
+    selectedModel: "flash",
+    relationshipMode: "standard",
+    contextMode: "fast",
+  },
+  ragSettings: {
+    retrievalMode: "hybrid" as const,
+    topK: 5,
+    chatTopK: 3,
+    minScore: 0,
+  },
+  ragEnabled: false,
+});
+
 describe("useGroupChatController", () => {
   beforeEach(() => {
     operationRegistry.cancelAll();
     vi.clearAllMocks();
   });
 
-  it("clears the draft and associated news after resetting the group", async () => {
+  it("clears the draft after resetting the group", async () => {
     const nextWechat = { ...initialWechat, group_thread_id: "group-next" };
     apiMocks.resetWechat.mockResolvedValue(nextWechat);
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const setWechat = vi.fn();
-    const clearAssociatedNews = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
-      () =>
-        useGroupChatController({
-          wechat: initialWechat,
-          setWechat,
-          chatSettings: {
-            selectedRole: "auto",
-            selectedMode: "auto",
-            selectedModel: "flash",
-            relationshipMode: "standard",
-            contextMode: "fast",
-          },
-          ragSettings: {
-            retrievalMode: "hybrid",
-            topK: 5,
-            chatTopK: 3,
-            minScore: 0,
-          },
-          ragEnabled: false,
-          clearAssociatedNews,
-        }),
+      () => useGroupChatController(controllerOptions(setWechat)),
       {
         wrapper: ({ children }) => (
           <WorkspaceProvider initialState={{ activeGroupThreadId: "group-test" }}>
@@ -78,7 +77,6 @@ describe("useGroupChatController", () => {
     expect(apiMocks.resetWechat).toHaveBeenCalledWith("group-test");
     expect(result.current.threadId).toBe("group-next");
     expect(result.current.input).toBe("");
-    expect(clearAssociatedNews).toHaveBeenCalledOnce();
     expect(setWechat).toHaveBeenCalledWith(nextWechat);
   });
 
@@ -89,29 +87,10 @@ describe("useGroupChatController", () => {
       content: "group history",
     };
     apiMocks.markWechatRead.mockResolvedValue(readWechat);
-    const setWechat = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
-      () =>
-        useGroupChatController({
-          wechat: initialWechat,
-          setWechat,
-          chatSettings: {
-            selectedRole: "auto",
-            selectedMode: "auto",
-            selectedModel: "flash",
-            relationshipMode: "standard",
-            contextMode: "fast",
-          },
-          ragSettings: {
-            retrievalMode: "hybrid",
-            topK: 5,
-            chatTopK: 3,
-            minScore: 0,
-          },
-          ragEnabled: false,
-          clearAssociatedNews: vi.fn(),
-        }),
+      () => useGroupChatController(controllerOptions(setWechat)),
       { wrapper: WorkspaceProvider },
     );
 
@@ -137,29 +116,10 @@ describe("useGroupChatController", () => {
           });
         }),
     );
-    const setWechat = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
-      () =>
-        useGroupChatController({
-          wechat: initialWechat,
-          setWechat,
-          chatSettings: {
-            selectedRole: "auto",
-            selectedMode: "auto",
-            selectedModel: "flash",
-            relationshipMode: "standard",
-            contextMode: "fast",
-          },
-          ragSettings: {
-            retrievalMode: "hybrid",
-            topK: 5,
-            chatTopK: 3,
-            minScore: 0,
-          },
-          ragEnabled: false,
-          clearAssociatedNews: vi.fn(),
-        }),
+      () => useGroupChatController(controllerOptions(setWechat)),
       {
         wrapper: ({ children }) => (
           <WorkspaceProvider initialState={{ activeGroupThreadId: "group-test" }}>
