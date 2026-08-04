@@ -5,7 +5,6 @@ import { SlideOver } from "../components/SlideOver";
 import { abandonInterruptedTurn } from "../features/chat/recoveryApi";
 import { LearningStrip } from "../features/learning/LearningStrip";
 import { MemoryPanel } from "../features/learning-memory/MemoryPanel";
-import { NewsWorkspace } from "../features/news-workspace/NewsWorkspace";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
 import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadContract";
@@ -64,7 +63,6 @@ export function WorkspaceView({
     workflowController,
     settingsController,
     groupController,
-    newsController,
     webLookupController,
     memoryController,
     ragController,
@@ -290,40 +288,19 @@ export function WorkspaceView({
       <SlideOver open={state.activeDrawer === "group"} title="群聊" onClose={closeDrawer}>
         <WechatPanel
           wechat={snapshot.wechat}
-          newsController={newsController}
           webLookup={webLookupController.result}
           useWebLookup={webLookupController.useInChat}
           setUseWebLookup={webLookupController.setUseInChat}
           wechatInput={groupController.input}
           setWechatInput={groupController.setInput}
-          newsQuery={ui.newsQuery}
-          setNewsQuery={ui.setNewsQuery}
-          readArticles={ui.readArticles}
-          setReadArticles={ui.setReadArticles}
           sessionId={groupThreadId}
           onOpening={groupController.opening}
           onReset={groupController.reset}
           onMarkRead={groupController.markRead}
           onSendWechat={groupController.send}
           onStopWechat={groupController.stop}
-          onLookupNews={webLookupController.lookup}
-          onStopLookup={webLookupController.cancel}
           isWechatBusy={groupController.isBusy}
           error={groupController.error}
-          isNewsBusy={webLookupController.isBusy}
-        />
-      </SlideOver>
-
-      <SlideOver open={state.activeDrawer === "news"} title="新闻" onClose={closeDrawer}>
-        <NewsWorkspace
-          query={ui.newsQuery}
-          setQuery={ui.setNewsQuery}
-          readArticles={ui.readArticles}
-          setReadArticles={ui.setReadArticles}
-          controller={newsController}
-          onLookupNews={webLookupController.lookup}
-          onStopLookup={webLookupController.cancel}
-          isLookupBusy={webLookupController.isBusy}
         />
       </SlideOver>
 
