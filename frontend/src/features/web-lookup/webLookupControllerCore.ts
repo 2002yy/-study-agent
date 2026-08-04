@@ -122,7 +122,9 @@ export function useWebLookupController(options: WebLookupControllerOptions) {
       .then((response) => {
         if (active) {
           setResult(response);
-          setUseInChat(isUsable(response));
+          // A restored durable run remains visible, but using it in chat is a
+          // one-shot user choice and must not be inherited across reloads or sessions.
+          setUseInChat(false);
         }
       })
       .catch((error) => {
