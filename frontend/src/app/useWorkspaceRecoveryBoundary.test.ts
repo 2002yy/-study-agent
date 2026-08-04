@@ -31,12 +31,16 @@ describe("workspace recovery and view boundaries", () => {
   it("owns persistence orchestration outside Runtime while Learning owns chat hydration", () => {
     for (const token of [
       "useWorkspacePersistence({",
-      "runtimeSettings?.settings",
       "sessionSettingsRestoredRef",
     ]) {
       expect(recoverySource).toContain(token);
       expect(runtimeSource).not.toContain(token);
     }
+    expect(recoverySource).toContain("runtimeSettings?.settings");
+    expect(runtimeSource).toContain(
+      "snapshot.runtimeSettings?.settings?.web_policy",
+    );
+    expect(runtimeSource).not.toContain("hydrateRuntimeSettings(");
     expect(learningSource).toContain("chatController.hydrateSession(");
     expect(recoverySource).not.toContain("hydrateSession(");
     expect(runtimeSource).not.toContain("hydrateSession(");
