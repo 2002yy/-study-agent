@@ -42,7 +42,6 @@ export type LearningRecoveryInput = Pick<
   | "lastRag"
   | "lastSessionId"
   | "cachedMessages"
-  | "isSending"
 >;
 
 export type LearningRecoveryState = Pick<
@@ -54,11 +53,11 @@ export type LearningRecoveryState = Pick<
   | "lastRag"
   | "lastSessionId"
   | "cachedMessages"
-  | "isSending"
 > & {
   chatSettings: ChatSettings;
   keepCurrentRole: boolean;
   conversationInstruction: string;
+  isSending: boolean;
 };
 
 export type LearningRecoveryPort = {
