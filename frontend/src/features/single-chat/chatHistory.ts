@@ -70,10 +70,11 @@ const WORKSPACE_STATE_DEFAULTS: WorkspaceState = {
 
 type LegacyWorkspaceState = Partial<WorkspaceState> & {
   sessionId?: string;
+  newsRunId?: string;
 };
 
 export function buildWorkspaceState(partial: LegacyWorkspaceState): WorkspaceState {
-  const { sessionId, ...rest } = partial;
+  const { sessionId, newsRunId: _retiredNewsRunId, ...rest } = partial;
   return {
     ...WORKSPACE_STATE_DEFAULTS,
     ...rest,
