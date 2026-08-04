@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**PR #103 已合并 `main`；Draft PR #104 已完成 LearningSessionRuntime 第一批 owner 抽离，代码基线 CI run `30930508714` 全绿。**  
+> 当前切片：**PR #104 已合并 `main`，LearningSessionRuntime 已接管学习设置、MemoryRun/ClosureRun、MemoryController 与恢复端口；下一批迁移 chat/session owner。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -35,15 +35,17 @@
 - PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`；
 - PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`；
 - PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
-- PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`。
+- PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
+- PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/learning-session-runtime-foundation`；
-- Draft PR：`#104 抽离 LearningSessionRuntime 第一批 owner`；
-- base：`main` at `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
-- 代码基线 head：`33b19c41bc9ca102417b9de01416142fb45eda17`；
-- 完整 CI：run `30930508714`，结论 `success`。
+- 当前 `main` 功能基线：PR #104 merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
+- PR #104 代码基线：`33b19c41bc9ca102417b9de01416142fb45eda17`；
+- 代码基线 CI：run `30930508714`，结论 `success`；
+- 最终 PR head：`7df757d404bca8133b28b76a7222787ec1f60116`；
+- 最终 head CI：run `30930983820`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -87,9 +89,9 @@ WorkspaceRuntime 和恢复层不得重新直接持有 evidence setter。
 
 Sources 搜索和受控 Tool invocation 共用同一结果；聊天发送和群聊发送的 `input.trim()` 仍属于各自提交校验。
 
-## 6. PR #104：LearningSessionRuntime 第一批
+## 6. LearningSessionRuntime 第一批
 
-新增 `frontend/src/app/useLearningSessionRuntime.ts`，集中拥有：
+`frontend/src/app/useLearningSessionRuntime.ts` 已集中拥有：
 
 - `chatSettings`；
 - `keepCurrentRole`；
@@ -124,26 +126,20 @@ const learning = useLearningSessionRuntime({ refresh })
 
 - 不再 import 或构造 `useMemoryController`；
 - 从 `options.learning` 读取学习设置和 `memoryController`；
-- 本批仍构造 `useChatController`，避免同时迁移 chat/session 与 closure owner；
+- 当前仍构造唯一的 `useChatController`；
 - WorkspaceCoordinator 继续属于跨域组合层。
 
 ### 6.3 Learning recovery port
 
-新增：
-
-- `LearningRecoveryInput`；
-- `LearningRecoveryState`；
-- `LearningRecoveryPort`；
-- `restore()`；
-- `hydrateRuntimeSettings()`。
-
-`useWorkspaceRecovery` 只接收：
+`LearningRecoveryPort` 统一暴露：
 
 ```text
-learning: learning.recovery
+state
+restore()
+hydrateRuntimeSettings()
 ```
 
-恢复层只能调用 `learning.restore()`、`learning.hydrateRuntimeSettings()` 并展开只读 `learning.state`，不得直接调用学习 setter。
+`useWorkspaceRecovery` 只接收 `learning: learning.recovery`，不得直接调用学习 setter。
 
 ### 6.4 兼容边界
 
@@ -152,12 +148,11 @@ learning: learning.recovery
 - session/turn/recovery API 不变；
 - SQLite schema 与 durable entity 不变；
 - MemoryRun 与 closure 确认语义不变；
-- committed learning truth 不变；
-- 本批没有迁移 `useChatController`。
+- committed learning truth 不变。
 
 ## 7. PR #104 验证证据
 
-代码基线 commit `33b19c41bc9ca102417b9de01416142fb45eda17` 的 CI run `30930508714` 已完整通过：
+代码基线 commit `33b19c41bc9ca102417b9de01416142fb45eda17` 的 CI run `30930508714` 与最终 head commit `7df757d404bca8133b28b76a7222787ec1f60116` 的 CI run `30930983820` 均完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -204,11 +199,3 @@ ExtensionRuntime
 - CORS 统一为单一 owner；
 - 410 tombstone 只在迁移窗口结束后单独删除；
 - 补 Firefox、WebKit 和实体手机抽样。
-
-## 9. PR #104 合并条件
-
-- 最新 head 完整 CI 全绿；
-- 状态文档与代码事实一致；
-- 不改变 WorkspacePersistence、API、SQLite schema、MemoryRun、closure 或 committed learning truth；
-- `useChatController` 仍只有一个生产 owner；
-- PR 范围保持为 LearningSessionRuntime 第一批 owner 与恢复边界。
