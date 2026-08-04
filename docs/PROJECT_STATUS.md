@@ -5,7 +5,7 @@
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**停止横向扩张，集中梳理核心学习功能、产品入口、运行状态与桌面/移动端体验。**  
 > 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**  
-> 当前切片：**在 `agent/research-experience-consolidation` 分支推进“研究能力入口收拢”；先消除新闻与联网研究的用户可见双轨，再处理运行时 owner 与 operation scope。**
+> 当前切片：**Draft PR #97 已完成研究产品表面和前端 wiring 的第一轮收拢；完整 CI 尚未确认，后端 NewsRun / ResearchRun owner 未改，下一步是 operation scope 合同。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -42,11 +42,11 @@
 ## 2. 当前核心功能基线
 
 - 当前核心功能基线 SHA：`9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
-- PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
-- PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
-- PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`，合并前完整 CI 通过；
+- PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`；
+- PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
+- PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`；
 - 核心架构精简与 CI 修复：删除旧 Streamlit 入口、收紧依赖与打包边界，并修复真实全栈 RAG 路径、查询规划和测试状态隔离，SHA `9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
-- 以上批次均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
+- 当前基线 GitHub Actions run `30826682687` 已全绿；本轮 PR #97 的门禁结果尚未写入事实基线。
 
 ## 3. 已验证的产品闭环
 
@@ -79,7 +79,7 @@
 
 ### 4.2 P0：新闻与联网研究形成用户可见双轨
 
-当前聊天已经拥有可恢复的 ResearchRun；但独立新闻工作区又提供搜索、读取正文、摘要、群聊和“用于下一轮聊天”，群聊内部还嵌入一份完整 NewsWorkspace。用户面对近似入口，内部则由 NewsRun 与 WebLookup/ResearchRun 两套 durable run 承担。
+原产品表面同时存在：聊天内可恢复 ResearchRun、独立 NewsWorkspace，以及群聊内嵌的第二份 NewsWorkspace。用户面对近似入口，内部则由 NewsRun 与 WebLookup/ResearchRun 两套 durable run 承担。
 
 目标用户模型统一为：
 
@@ -91,19 +91,13 @@
 -> 继续单人学习，或将已确认结果交给群聊讨论
 ```
 
-执行边界：
-
-- 第一阶段只收拢产品表面，不删除 NewsRun 后端兼容能力；
-- 独立“新闻研究”不再作为普通工作台顶级入口；
-- 群聊不再拥有第二套完整新闻搜索工作区；
-- partial 研究结果未经用户确认，不得自动进入下一轮聊天；
-- 后续新生产代码统一扩展现有 ResearchRun owner。
+本轮采用分层收拢：先删除重复产品入口和 wiring，不同时删除后端兼容能力或迁移 durable entity。
 
 ### 4.3 P0：Workspace 仍是总线式集中
 
 `App.tsx` 已是 composition-only，但 `WorkspaceRuntime`、`useWorkspaceControllers` 与 `WorkspaceView` 仍共同承载聊天、RAG、上传、研究、新闻、群聊、工具、记忆、诊断、多个本地设置和多类 run ID。
 
-目标拆分：
+目标边界：
 
 ```text
 LearningSessionRuntime
@@ -131,7 +125,7 @@ ExtensionRuntime
 
 ### 4.5 P1：普通用户可见系统能力过多
 
-当前更多菜单仍暴露群聊、新闻、工具和开发者诊断。目标是普通模式仅保留：会话历史、资料与来源、学习成果和设置；其余统一进入实验室，并默认不加载。
+目标是普通模式仅保留会话历史、资料与来源、学习成果和设置；群聊、手动工具和开发者诊断统一进入实验室，并默认不加载。
 
 ### 4.6 P1：学习成果与手动长期记忆管理混层
 
@@ -149,28 +143,40 @@ ExtensionRuntime
 - `selectedPanel` 等不再对应当前抽屉式 UI 的状态应删除；
 - Firefox、WebKit 和实体手机仍需要抽样。
 
-## 5. 当前执行切片
+## 5. 当前执行切片：P0-R2 研究产品表面收拢
 
-### P0-R2：研究产品表面收拢
+- 分支：`agent/research-experience-consolidation`
+- Draft PR：`#97 收拢联网研究与新闻入口`
+- 当前状态：代码已提交到分支；完整 CI 尚未确认，不能标记完成或合并。
 
-分支：`agent/research-experience-consolidation`
+### 5.1 已完成
 
-第一阶段：
+1. 从普通“更多”菜单移除独立“新闻研究”入口；
+2. 删除 `WorkspaceView` 中独立新闻抽屉；
+3. 群聊不再嵌入完整 `NewsWorkspace`；
+4. 从 `WorkspaceView -> WechatPanel` wiring 删除 NewsController、新闻查询、正文读取和搜索/停止回调；
+5. 从 `WechatPanel` 公共 props 删除上述遗留依赖；
+6. 保留群聊对已经存在的 ResearchRun 结果进行只读展示和显式使用选择；
+7. 更新 ChatPanel 产品边界测试，并新增 WechatPanel 产品边界测试。
 
-1. 从普通“更多”菜单移除独立新闻研究入口；
-2. 群聊不再显示嵌入式完整 NewsWorkspace；
-3. 保留 NewsRun、NewsWorkspace 和现有 API 作为兼容/实验能力，不改变数据库和后端 owner；
-4. 保留聊天内 ResearchRun 恢复、重试、partial 结果确认和证据展示；
-5. 增加产品表面回归，确保独立新闻入口不可见而联网研究仍可从聊天任务进入。
+### 5.2 明确保留、未改动
 
-第二阶段：
+- NewsRun、NewsWorkspace 和新闻 API 仍保留为兼容/实验能力；
+- ResearchRun 数据模型、数据库、checkpoint、取消、恢复和 retry 语义未改；
+- partial 研究结果仍不会自动进入下一轮聊天；
+- RestoreCard、LearningStrip、SourcesPanel、RAG、MemoryRun 和学习结束 committed truth 未改；
+- `WorkspaceRuntime` 中仍存在 NewsController、news query、readArticles 和 active NewsRun ID，等待确认无剩余产品调用者后再清理。
 
-1. 从 WechatPanel props 与 WorkspaceView wiring 中删除已失去用户入口的新闻控制依赖；
-2. 将群聊改为只消费用户已选择的研究结果；
-3. 复核新建会话时各 run 的 operation scope；
-4. 再决定 NewsRun 后端是保留为实验 adapter，还是迁移到 ResearchRun preset。
+### 5.3 待完成
 
-验收标准：
+1. 等待并检查 PR #97 的前端单元测试、TypeScript/Vite build、浏览器门禁和后端全量门禁；
+2. 若门禁发现旧旅程仍依赖新闻抽屉，修正测试建模而不是恢复重复产品入口；
+3. 增加 operation scope reducer 合同，明确新建会话应保留哪些独立 run；
+4. 依据合同修复 `START_NEW_CHAT_SESSION` 的误清理风险；
+5. 再清理 WorkspaceRuntime / useWorkspaceControllers 中无产品调用者的 NewsRun 状态和控制器；
+6. 最后决定 NewsRun 后端是保留为实验 adapter，还是迁移为 ResearchRun 的新闻预设。
+
+### 5.4 验收标准
 
 - 普通用户只理解一个“联网研究”概念；
 - 聊天研究仍可取消、刷新恢复、重试和显式用于下一轮聊天；
@@ -242,9 +248,10 @@ PR #93 让取消等待 durable 终态并支持刷新后同 run 重试；PR #96 �
 
 **P0：产品与状态真值**
 
-1. 完成 P0-R2 研究产品表面收拢；
+1. 完成 PR #97 门禁并收口研究产品表面；
 2. 补齐 operation scope 合同并修复会话切换误清理风险；
-3. 将 Workspace 总线拆成 Learning / Evidence / Extension 三个运行时边界。
+3. 清理剩余 NewsRun 前端运行状态；
+4. 将 Workspace 总线拆成 Learning / Evidence / Extension 三个运行时边界。
 
 **P1：核心体验**
 
