@@ -1,4 +1,11 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 import { useRagController } from "../features/rag/ragController";
 import { useUploadController } from "../features/rag/uploadController";
@@ -6,6 +13,7 @@ import { RAG_SETTINGS_DEFAULTS } from "../features/settings/SettingsPanel";
 import { useWebLookupController } from "../features/web-lookup/webLookupController";
 import type { ApiSnapshot, RagSettings } from "../types";
 import { useResetResearchSelectionOnSessionChange } from "./useResetResearchSelectionOnSessionChange";
+import type { WorkspaceRecovery } from "./WorkspacePersistence";
 import { useWorkspace } from "./WorkspaceProvider";
 import type { WorkspaceFeature } from "./workspaceDataLoader";
 
@@ -15,6 +23,30 @@ type FeatureLoader = (
 ) => Promise<Partial<ApiSnapshot>>;
 
 type OperationErrorSetter = Dispatch<SetStateAction<string>>;
+type RuntimeSettings = NonNullable<ApiSnapshot["runtimeSettings"]>["settings"];
+
+export type EvidenceRecoveryInput = Pick<
+  WorkspaceRecovery,
+  | "ragQueryRunId"
+  | "ragWriteRunId"
+  | "webLookupRunId"
+  | "ragSettings"
+  | "ragEnabled"
+>;
+
+export type EvidenceRecoveryState = {
+  ragQueryRunId?: string;
+  ragWriteRunId?: string;
+  webLookupRunId?: string;
+  ragSettings: RagSettings;
+  ragEnabled: boolean;
+};
+
+export type EvidenceRecoveryPort = {
+  state: EvidenceRecoveryState;
+  restore: (recovery: EvidenceRecoveryInput) => boolean;
+  hydrateRuntimeSettings: (settings: RuntimeSettings) => void;
+};
 
 export function useEvidenceRuntime(options: {
   refresh: () => Promise<void>;
@@ -30,12 +62,18 @@ export function useEvidenceRuntime(options: {
   const ragQueryRunId = state.activeRagQueryRunId;
   const ragWriteRunId = state.activeRagWriteRunId;
   const webLookupRunId = state.activeWebLookupRunId;
-  const setRagQueryRunId = (runId?: string) =>
-    dispatch({ type: "SET_ACTIVE_RAG_QUERY_RUN", runId });
-  const setRagWriteRunId = (runId?: string) =>
-    dispatch({ type: "SET_ACTIVE_RAG_WRITE_RUN", runId });
-  const setWebLookupRunId = (runId?: string) =>
-    dispatch({ type: "SET_ACTIVE_WEB_LOOKUP_RUN", runId });
+  const setRagQueryRunId = useCallback(
+    (runId?: string) => dispatch({ type: "SET_ACTIVE_RAG_QUERY_RUN", runId }),
+    [dispatch],
+  );
+  const setRagWriteRunId = useCallback(
+    (runId?: string) => dispatch({ type: "SET_ACTIVE_RAG_WRITE_RUN", runId }),
+    [dispatch],
+  );
+  const setWebLookupRunId = useCallback(
+    (runId?: string) => dispatch({ type: "SET_ACTIVE_WEB_LOOKUP_RUN", runId }),
+    [dispatch],
+  );
 
   const webLookupController = useWebLookupController({
     query: options.input,
@@ -55,6 +93,59 @@ export function useEvidenceRuntime(options: {
     setOperationError: options.setOperationError,
     onChanged: options.refresh,
   });
+
+  const restore = useCallback(
+    (recovery: EvidenceRecoveryInput) => {
+      if (recovery.ragQueryRunId) setRagQueryRunId(recovery.ragQueryRunId);
+      if (recovery.ragWriteRunId) setRagWriteRunId(recovery.ragWriteRunId);
+      if (recovery.webLookupRunId) setWebLookupRunId(recovery.webLookupRunId);
+
+      let restoredSessionSettings = false;
+      if (recovery.ragSettings) {
+        setRagSettings({ ...RAG_SETTINGS_DEFAULTS, ...recovery.ragSettings });
+        restoredSessionSettings = true;
+      }
+      if (typeof recovery.ragEnabled === "boolean") {
+        setRagEnabled(recovery.ragEnabled);
+        restoredSessionSettings = true;
+      }
+      return restoredSessionSettings;
+    },
+    [setRagQueryRunId, setRagWriteRunId, setWebLookupRunId],
+  );
+
+  const hydrateRuntimeSettings = useCallback((settings: RuntimeSettings) => {
+    setRagEnabled(settings.rag_enabled);
+    setRagSettings({
+      retrievalMode: settings.rag_retrieval_mode,
+      topK: settings.rag_search_top_k ?? settings.rag_top_k,
+      chatTopK: settings.rag_chat_top_k ?? settings.rag_top_k,
+      minScore: settings.rag_min_score,
+    });
+  }, []);
+
+  const recovery = useMemo<EvidenceRecoveryPort>(
+    () => ({
+      state: {
+        ragQueryRunId,
+        ragWriteRunId,
+        webLookupRunId,
+        ragSettings,
+        ragEnabled,
+      },
+      restore,
+      hydrateRuntimeSettings,
+    }),
+    [
+      ragQueryRunId,
+      ragWriteRunId,
+      webLookupRunId,
+      ragSettings,
+      ragEnabled,
+      restore,
+      hydrateRuntimeSettings,
+    ],
+  );
 
   useResetResearchSelectionOnSessionChange(
     options.activeChatThreadId,
@@ -97,6 +188,7 @@ export function useEvidenceRuntime(options: {
     webLookupController,
     ragController,
     uploadController,
+    recovery,
   };
 }
 

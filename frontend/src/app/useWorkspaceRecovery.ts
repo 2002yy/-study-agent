@@ -4,11 +4,11 @@ import type { Dispatch, SetStateAction } from "react";
 import { createEmptyRag, useChatController } from "../features/chat/chatController";
 import {
   CHAT_SETTINGS_DEFAULTS,
-  RAG_SETTINGS_DEFAULTS,
   modeOptions,
 } from "../features/settings/SettingsPanel";
 import { seedMessages } from "../features/single-chat/chatHistory";
-import type { ApiSnapshot, ChatSettings, RagSettings } from "../types";
+import type { ApiSnapshot, ChatSettings } from "../types";
+import type { EvidenceRecoveryPort } from "./useEvidenceRuntime";
 import {
   useWorkspacePersistence,
   type WorkspaceRecovery,
@@ -25,25 +25,16 @@ export function useWorkspaceRecovery(options: {
     tool?: string;
     memory?: string;
     learningClosure?: string;
-    ragQuery?: string;
-    ragWrite?: string;
-    webLookup?: string;
   };
   setIds: {
     group: DirectSetter;
     tool: DirectSetter;
     memory: DirectSetter;
     learningClosure: DirectSetter;
-    ragQuery: DirectSetter;
-    ragWrite: DirectSetter;
-    webLookup: DirectSetter;
   };
+  evidence: EvidenceRecoveryPort;
   chatSettings: ChatSettings;
   setChatSettings: Dispatch<SetStateAction<ChatSettings>>;
-  ragSettings: RagSettings;
-  setRagSettings: Dispatch<SetStateAction<RagSettings>>;
-  ragEnabled: boolean;
-  setRagEnabled: Dispatch<SetStateAction<boolean>>;
   keepCurrentRole: boolean;
   setKeepCurrentRole: Dispatch<SetStateAction<boolean>>;
   conversationInstruction: string;
@@ -54,10 +45,9 @@ export function useWorkspaceRecovery(options: {
   const {
     chatController,
     chatSettings,
-    ragSettings,
-    ragEnabled,
     keepCurrentRole,
     conversationInstruction,
+    evidence,
   } = options;
 
   const restoreWorkspace = useCallback((parsed: WorkspaceRecovery | null) => {
@@ -72,23 +62,23 @@ export function useWorkspaceRecovery(options: {
     if (parsed.learningClosureRunId) {
       options.setIds.learningClosure(parsed.learningClosureRunId);
     }
-    if (parsed.ragQueryRunId) options.setIds.ragQuery(parsed.ragQueryRunId);
-    if (parsed.ragWriteRunId) options.setIds.ragWrite(parsed.ragWriteRunId);
-    if (parsed.webLookupRunId) options.setIds.webLookup(parsed.webLookupRunId);
+    if (
+      evidence.restore({
+        ragQueryRunId: parsed.ragQueryRunId,
+        ragWriteRunId: parsed.ragWriteRunId,
+        webLookupRunId: parsed.webLookupRunId,
+        ragSettings: parsed.ragSettings,
+        ragEnabled: parsed.ragEnabled,
+      })
+    ) {
+      sessionSettingsRestoredRef.current = true;
+    }
     if (parsed.chatSettings) {
       sessionSettingsRestoredRef.current = true;
       options.setChatSettings({
         ...CHAT_SETTINGS_DEFAULTS,
         ...parsed.chatSettings,
       });
-    }
-    if (parsed.ragSettings) {
-      sessionSettingsRestoredRef.current = true;
-      options.setRagSettings({ ...RAG_SETTINGS_DEFAULTS, ...parsed.ragSettings });
-    }
-    if (typeof parsed.ragEnabled === "boolean") {
-      sessionSettingsRestoredRef.current = true;
-      options.setRagEnabled(parsed.ragEnabled);
     }
     if (typeof parsed.keepCurrentRole === "boolean") {
       options.setKeepCurrentRole(parsed.keepCurrentRole);
@@ -109,7 +99,7 @@ export function useWorkspaceRecovery(options: {
         rag: parsed.lastRag ?? createEmptyRag(),
       });
     }
-  }, [chatController, options.setIds]);
+  }, [chatController, options.setIds, evidence.restore]);
 
   useEffect(() => {
     const settings = options.snapshot.runtimeSettings?.settings;
@@ -131,14 +121,8 @@ export function useWorkspaceRecovery(options: {
           ? settings.context_mode
           : "",
     });
-    options.setRagEnabled(settings.rag_enabled);
-    options.setRagSettings({
-      retrievalMode: settings.rag_retrieval_mode,
-      topK: settings.rag_search_top_k ?? settings.rag_top_k,
-      chatTopK: settings.rag_chat_top_k ?? settings.rag_top_k,
-      minScore: settings.rag_min_score,
-    });
-  }, [options.snapshot.runtimeSettings]);
+    evidence.hydrateRuntimeSettings(settings);
+  }, [options.snapshot.runtimeSettings, evidence.hydrateRuntimeSettings]);
 
   const persistenceState = useMemo(
     () => ({
@@ -147,12 +131,8 @@ export function useWorkspaceRecovery(options: {
       toolRunId: options.ids.tool,
       memoryRunId: options.ids.memory,
       learningClosureRunId: options.ids.learningClosure,
-      ragQueryRunId: options.ids.ragQuery,
-      ragWriteRunId: options.ids.ragWrite,
-      webLookupRunId: options.ids.webLookup,
+      ...evidence.state,
       chatSettings,
-      ragSettings,
-      ragEnabled,
       keepCurrentRole,
       conversationInstruction,
       lastRoute: chatController.lastChat?.route,
@@ -163,9 +143,8 @@ export function useWorkspaceRecovery(options: {
     }),
     [
       options.ids,
+      evidence.state,
       chatSettings,
-      ragSettings,
-      ragEnabled,
       keepCurrentRole,
       conversationInstruction,
       chatController.lastChat,
