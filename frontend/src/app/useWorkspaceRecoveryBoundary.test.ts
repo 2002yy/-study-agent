@@ -30,7 +30,7 @@ describe("workspace recovery and view boundaries", () => {
 
   it("owns feature view binding outside Runtime", () => {
     for (const component of [
-      "<Sidebar",
+      "<SettingsPanel",
       "<ChatPanel",
       "<SessionNavigator",
       "<LearningStrip",
