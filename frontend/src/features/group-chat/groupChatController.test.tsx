@@ -29,7 +29,7 @@ const initialWechat: WechatStateResponse = {
   summary: "",
 };
 
-const controllerOptions = (setWechat: ReturnType<typeof vi.fn>) => ({
+const controllerOptions = (setWechat: (wechat: WechatStateResponse) => void) => ({
   wechat: initialWechat,
   setWechat,
   chatSettings: {
@@ -58,7 +58,7 @@ describe("useGroupChatController", () => {
     const nextWechat = { ...initialWechat, group_thread_id: "group-next" };
     apiMocks.resetWechat.mockResolvedValue(nextWechat);
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const setWechat = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
       () => useGroupChatController(controllerOptions(setWechat)),
@@ -87,7 +87,7 @@ describe("useGroupChatController", () => {
       content: "group history",
     };
     apiMocks.markWechatRead.mockResolvedValue(readWechat);
-    const setWechat = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
       () => useGroupChatController(controllerOptions(setWechat)),
@@ -116,7 +116,7 @@ describe("useGroupChatController", () => {
           });
         }),
     );
-    const setWechat = vi.fn();
+    const setWechat = vi.fn<(wechat: WechatStateResponse) => void>();
 
     const { result } = renderHook(
       () => useGroupChatController(controllerOptions(setWechat)),
