@@ -1,7 +1,6 @@
 export type WorkspaceCancellationPorts = {
   cancelChat: () => void;
   cancelGroup: () => void;
-  cancelNews: () => void;
   cancelWebLookup: () => void;
   invalidateTool: () => void;
 };
@@ -21,7 +20,6 @@ export class WorkspaceCoordinator {
   cancelAllActiveOperations() {
     this.cancellation.cancelChat();
     this.cancellation.cancelGroup();
-    this.cancellation.cancelNews();
     this.cancellation.cancelWebLookup();
     this.cancellation.invalidateTool();
   }
