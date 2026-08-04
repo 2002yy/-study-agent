@@ -1,34 +1,24 @@
 import { useRef, useState } from "react";
 import { useWorkspace } from "./WorkspaceProvider";
 import { useWorkspaceBootstrap } from "./WorkspaceBootstrap";
-import { CHAT_SETTINGS_DEFAULTS } from "../features/settings/SettingsPanel";
 import { useEvidenceRuntime } from "./useEvidenceRuntime";
+import { useLearningSessionRuntime } from "./useLearningSessionRuntime";
 import { useWorkspaceControllers } from "./useWorkspaceControllers";
 import { useWorkspaceRecovery } from "./useWorkspaceRecovery";
 import { WorkspaceView } from "./WorkspaceView";
-import type { ChatSettings } from "../types";
 
 export default function WorkspaceRuntime() {
   const { snapshot, setSnapshot, refresh, loadFeature } = useWorkspaceBootstrap();
   const { state: workspaceRuntime, dispatch: dispatchWorkspace } = useWorkspace();
   const [input, setInput] = useState("");
-  const [chatSettings, setChatSettings] = useState<ChatSettings>(CHAT_SETTINGS_DEFAULTS);
-  const [keepCurrentRole, setKeepCurrentRole] = useState(false);
-  const [conversationInstruction, setConversationInstruction] = useState("");
   const [operationError, setOperationError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toolRunId = workspaceRuntime.activeToolRunId;
-  const memoryRunId = workspaceRuntime.activeMemoryRunId;
-  const learningClosureRunId = workspaceRuntime.activeLearningClosureRunId;
   const setWechatThreadId = (threadId?: string) =>
     dispatchWorkspace({ type: "SET_ACTIVE_GROUP_THREAD", threadId });
   const setToolRunId = (runId?: string) =>
     dispatchWorkspace({ type: "SET_ACTIVE_TOOL_RUN", runId });
-  const setMemoryRunId = (runId?: string) =>
-    dispatchWorkspace({ type: "SET_ACTIVE_MEMORY_RUN", runId });
-  const setLearningClosureRunId = (runId?: string) =>
-    dispatchWorkspace({ type: "SET_ACTIVE_LEARNING_CLOSURE_RUN", runId });
 
   const evidence = useEvidenceRuntime({
     refresh,
@@ -37,6 +27,7 @@ export default function WorkspaceRuntime() {
     activeChatThreadId: workspaceRuntime.activeChatThreadId,
     setOperationError,
   });
+  const learning = useLearningSessionRuntime({ refresh });
   const controllers = useWorkspaceControllers({
     snapshot,
     setSnapshot,
@@ -44,25 +35,16 @@ export default function WorkspaceRuntime() {
     loadFeature,
     input,
     setInput,
-    chatSettings,
-    setChatSettings,
-    keepCurrentRole,
-    setKeepCurrentRole,
-    conversationInstruction,
-    setConversationInstruction,
     operationError: setOperationError,
     activeGroupThreadId: workspaceRuntime.activeGroupThreadId,
     evidence,
+    learning,
     runIds: {
       tool: toolRunId,
-      memory: memoryRunId,
-      learningClosure: learningClosureRunId,
     },
     setGroupThreadId: setWechatThreadId,
     setRunId: {
       tool: setToolRunId,
-      memory: setMemoryRunId,
-      learningClosure: setLearningClosureRunId,
     },
   });
   const { groupThreadId: wechatThreadId, chatController } = controllers;
@@ -74,22 +56,13 @@ export default function WorkspaceRuntime() {
       singleChat: chatController.threadId,
       group: wechatThreadId,
       tool: toolRunId,
-      memory: memoryRunId,
-      learningClosure: learningClosureRunId,
     },
     setIds: {
       group: setWechatThreadId,
       tool: setToolRunId,
-      memory: setMemoryRunId,
-      learningClosure: setLearningClosureRunId,
     },
     evidence: evidence.recovery,
-    chatSettings,
-    setChatSettings,
-    keepCurrentRole,
-    setKeepCurrentRole,
-    conversationInstruction,
-    setConversationInstruction,
+    learning: learning.recovery,
   });
 
   return (
@@ -103,14 +76,14 @@ export default function WorkspaceRuntime() {
         setInput,
         ragEnabled: evidence.ragEnabled,
         setRagEnabled: evidence.setRagEnabled,
-        chatSettings,
-        setChatSettings,
+        chatSettings: learning.chatSettings,
+        setChatSettings: learning.setChatSettings,
         ragSettings: evidence.ragSettings,
         setRagSettings: evidence.setRagSettings,
-        keepCurrentRole,
-        setKeepCurrentRole,
-        conversationInstruction,
-        setConversationInstruction,
+        keepCurrentRole: learning.keepCurrentRole,
+        setKeepCurrentRole: learning.setKeepCurrentRole,
+        conversationInstruction: learning.conversationInstruction,
+        setConversationInstruction: learning.setConversationInstruction,
         operationError,
         setOperationError,
       }}
