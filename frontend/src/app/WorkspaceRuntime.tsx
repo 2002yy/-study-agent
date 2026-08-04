@@ -22,7 +22,6 @@ export default function WorkspaceRuntime() {
   const [ragSettings, setRagSettings] = useState<RagSettings>(RAG_SETTINGS_DEFAULTS);
   const [keepCurrentRole, setKeepCurrentRole] = useState(false);
   const [conversationInstruction, setConversationInstruction] = useState("");
-  const newsRunId = workspaceRuntime.activeNewsRunId;
   const toolRunId = workspaceRuntime.activeToolRunId;
   const memoryRunId = workspaceRuntime.activeMemoryRunId;
   const learningClosureRunId = workspaceRuntime.activeLearningClosureRunId;
@@ -30,15 +29,12 @@ export default function WorkspaceRuntime() {
   const ragWriteRunId = workspaceRuntime.activeRagWriteRunId;
   const webLookupRunId = workspaceRuntime.activeWebLookupRunId;
   const setWechatThreadId = (threadId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_GROUP_THREAD", threadId });
-  const setNewsRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_NEWS_RUN", runId });
   const setToolRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_TOOL_RUN", runId });
   const setMemoryRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_MEMORY_RUN", runId });
   const setLearningClosureRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_LEARNING_CLOSURE_RUN", runId });
   const setRagQueryRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_RAG_QUERY_RUN", runId });
   const setRagWriteRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_RAG_WRITE_RUN", runId });
   const setWebLookupRunId = (runId?: string) => dispatchWorkspace({ type: "SET_ACTIVE_WEB_LOOKUP_RUN", runId });
-  const [newsQuery, setNewsQuery] = useState("最新新闻 when:1d");
-  const [readArticles, setReadArticles] = useState(true);
   const [operationError, setOperationError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const controllers = useWorkspaceControllers({
@@ -58,19 +54,17 @@ export default function WorkspaceRuntime() {
     setKeepCurrentRole,
     conversationInstruction,
     setConversationInstruction,
-    newsQuery,
-    readArticles,
     operationError: setOperationError,
     activeGroupThreadId: workspaceRuntime.activeGroupThreadId,
     runIds: {
-      news: newsRunId, tool: toolRunId, memory: memoryRunId,
+      tool: toolRunId, memory: memoryRunId,
       learningClosure: learningClosureRunId,
       ragQuery: ragQueryRunId, ragWrite: ragWriteRunId,
       webLookup: webLookupRunId,
     },
     setGroupThreadId: setWechatThreadId,
     setRunId: {
-      news: setNewsRunId, tool: setToolRunId, memory: setMemoryRunId,
+      tool: setToolRunId, memory: setMemoryRunId,
       learningClosure: setLearningClosureRunId,
       ragQuery: setRagQueryRunId, ragWrite: setRagWriteRunId,
       webLookup: setWebLookupRunId,
@@ -93,7 +87,6 @@ export default function WorkspaceRuntime() {
     ids: {
       singleChat: chatController.threadId,
       group: wechatThreadId,
-      news: newsRunId,
       tool: toolRunId,
       memory: memoryRunId,
       learningClosure: learningClosureRunId,
@@ -103,7 +96,6 @@ export default function WorkspaceRuntime() {
     },
     setIds: {
       group: setWechatThreadId,
-      news: setNewsRunId,
       tool: setToolRunId,
       memory: setMemoryRunId,
       learningClosure: setLearningClosureRunId,
@@ -142,10 +134,6 @@ export default function WorkspaceRuntime() {
         setKeepCurrentRole,
         conversationInstruction,
         setConversationInstruction,
-        newsQuery,
-        setNewsQuery,
-        readArticles,
-        setReadArticles,
         operationError,
         setOperationError,
       }}
