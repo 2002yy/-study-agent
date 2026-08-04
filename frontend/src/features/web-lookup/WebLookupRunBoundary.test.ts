@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -45,7 +45,6 @@ describe("recoverable web research composition", () => {
   it("keeps durable research status in group display while chat owns cancellation", () => {
     const panel = read("features/wechat-workspace/WechatPanel.tsx");
     const chatController = read("features/chat/chatController.ts");
-    const legacyWorkspace = read("features/news-workspace/NewsWorkspace.tsx");
 
     expect(panel).toContain('searching: "正在广域搜索"');
     expect(panel).toContain('reading: "正在读取网页或源码"');
@@ -53,6 +52,10 @@ describe("recoverable web research composition", () => {
     expect(panel).not.toContain("onStopLookup");
     expect(chatController).toContain("cancelChatResearchRuns");
     expect(chatController).toContain("cancelActiveResearch(activeTurnId)");
-    expect(legacyWorkspace).toContain("停止研究");
+  });
+
+  it("does not restore the retired NewsWorkspace or NewsController", () => {
+    expect(existsSync(resolve(root, "features/news-workspace/NewsWorkspace.tsx"))).toBe(false);
+    expect(existsSync(resolve(root, "features/news-workspace/newsController.ts"))).toBe(false);
   });
 });
