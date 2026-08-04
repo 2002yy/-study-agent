@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import time
 from typing import Any
 
-from tools.real_stack_test_server import app
+from tools.real_stack_test_server import app, _real_stack_chat_service
+from src.application.policy_chat_service import ExternalDataPolicyChatService
 from src.application.runtime_repository import (
+    get_chat_service,
     get_web_lookup_repository,
     get_web_lookup_service,
 )
 from src.application.web_lookup_service import WebLookupService
+from src.tools.web_agent import WebToolTrace
 
 
 class SlowDeterministicResearchGateway:
@@ -50,4 +54,53 @@ def _real_stack_web_lookup_service() -> WebLookupService:
     )
 
 
+def _resolve_deterministic_research(
+    user_input: str,
+    *,
+    owner_thread_id: str | None = None,
+    owner_turn_id: str | None = None,
+    **_kwargs: Any,
+) -> WebToolTrace:
+    """Replace only the external planner while preserving durable research owners."""
+
+    service = _real_stack_web_lookup_service()
+    run = service.create(
+        user_input,
+        owner_thread_id=owner_thread_id,
+        owner_turn_id=owner_turn_id,
+        run_kind="chat_tool_loop",
+    )
+    completed = service.execute(run.id, raise_on_error=False)
+    calls: tuple[dict[str, Any], ...] = ()
+    if completed.status == "completed" and completed.provider_status == "found":
+        calls = (
+            {
+                "name": "web_search",
+                "arguments": {"query": user_input},
+                "result": {
+                    "status": completed.status,
+                    "items": completed.items,
+                    "source_block": completed.source_block,
+                },
+            },
+        )
+    return WebToolTrace(
+        calls=calls,
+        error=completed.error,
+        run_id=run.id,
+    )
+
+
+def _real_stack_research_chat_service() -> ExternalDataPolicyChatService:
+    base = _real_stack_chat_service()
+    return ExternalDataPolicyChatService(
+        base.repository,
+        replace(
+            base.dependencies,
+            resolve_web_tools=_resolve_deterministic_research,
+        ),
+    )
+
+
 app.dependency_overrides[get_web_lookup_service] = _real_stack_web_lookup_service
+app.dependency_overrides[get_chat_service] = _real_stack_research_chat_service
