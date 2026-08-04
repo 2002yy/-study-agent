@@ -95,7 +95,6 @@ export type TurnEvidence = {
 
 export type DrawerId =
   | "group"
-  | "news"
   | "tools"
   | "sessions"
   | "memory"
@@ -567,7 +566,6 @@ export type ApiSnapshot = {
 export type WorkspaceState = {
   singleChatSessionId?: string;
   wechatThreadId?: string;
-  newsRunId?: string;
   webLookupRunId?: string;
   singleChatMessages: ChatMessage[];
   chatSettings: ChatSettings;

@@ -106,8 +106,6 @@ const retrievalDescriptions: Record<string, string> = {
 type SettingsPanelProps = {
   snapshot: ApiSnapshot;
   ragEnabled: boolean;
-  ragUploadMode: "upload" | "rebuild";
-  setRagUploadMode: (mode: "upload" | "rebuild") => void;
   setRagEnabled: (value: boolean) => void;
   chatSettings: ChatSettings;
   setChatSettings: (value: ChatSettings) => void;
@@ -121,11 +119,8 @@ type SettingsPanelProps = {
   setKeepCurrentRole: (value: boolean) => void;
   conversationInstruction: string;
   setConversationInstruction: (value: string) => void;
-  onNewSession: () => void;
   isSending: boolean;
   refresh: () => Promise<void>;
-  onUploadClick: () => void;
-  uploadState: string;
   lastChat: ChatResponse | null;
 };
 

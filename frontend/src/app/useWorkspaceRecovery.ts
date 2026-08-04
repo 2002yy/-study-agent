@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import { createEmptyRag, useChatController } from "../features/chat/chatController";
-import { seedMessages } from "../features/single-chat/chatHistory";
 import {
   CHAT_SETTINGS_DEFAULTS,
   RAG_SETTINGS_DEFAULTS,
   modeOptions,
-} from "../layout/Sidebar";
+} from "../features/settings/SettingsPanel";
+import { seedMessages } from "../features/single-chat/chatHistory";
 import type { ApiSnapshot, ChatSettings, RagSettings } from "../types";
 import {
   useWorkspacePersistence,

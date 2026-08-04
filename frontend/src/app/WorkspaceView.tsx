@@ -8,6 +8,7 @@ import { MemoryPanel } from "../features/learning-memory/MemoryPanel";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
 import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadContract";
+import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
 import type { SemanticSessionRow } from "../features/sessions/sessionNavigation";
@@ -16,7 +17,6 @@ import { ToolPanel } from "../features/tools/ToolPanel";
 import { WechatPanel } from "../features/wechat-workspace/WechatPanel";
 import { TimelinePanel } from "../features/workflows/TimelinePanel";
 import { GlobalNotices } from "../layout/GlobalNotices";
-import { Sidebar } from "../layout/Sidebar";
 import type { ApiSnapshot, ChatSettings, DrawerId, RagSettings, SessionRow } from "../types";
 import { useWorkspace } from "./WorkspaceProvider";
 import type { useWorkspaceControllers } from "./useWorkspaceControllers";
@@ -254,11 +254,9 @@ export function WorkspaceView({
       </SlideOver>
 
       <SlideOver open={state.activeDrawer === "settings"} title="设置" onClose={closeDrawer}>
-        <Sidebar
+        <SettingsPanel
           snapshot={snapshot}
           ragEnabled={ui.ragEnabled}
-          ragUploadMode={uploadController.mode}
-          setRagUploadMode={uploadController.setMode}
           setRagEnabled={ui.setRagEnabled}
           chatSettings={ui.chatSettings}
           setChatSettings={ui.setChatSettings}
@@ -272,11 +270,8 @@ export function WorkspaceView({
           setKeepCurrentRole={ui.setKeepCurrentRole}
           conversationInstruction={ui.conversationInstruction}
           setConversationInstruction={ui.setConversationInstruction}
-          onNewSession={requestNewSession}
           isSending={chatController.isSending}
           refresh={refresh}
-          onUploadClick={() => requestUpload("upload")}
-          uploadState={uploadController.status}
           lastChat={chatController.lastChat}
         />
       </SlideOver>

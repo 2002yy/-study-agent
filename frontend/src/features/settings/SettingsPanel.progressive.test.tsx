@@ -41,8 +41,6 @@ function renderPanel() {
     <SettingsPanel
       snapshot={snapshot}
       ragEnabled
-      ragUploadMode="upload"
-      setRagUploadMode={vi.fn()}
       setRagEnabled={vi.fn()}
       chatSettings={chatSettings}
       setChatSettings={vi.fn()}
@@ -56,11 +54,8 @@ function renderPanel() {
       setKeepCurrentRole={vi.fn()}
       conversationInstruction=""
       setConversationInstruction={vi.fn()}
-      onNewSession={vi.fn()}
       isSending={false}
       refresh={vi.fn()}
-      onUploadClick={vi.fn()}
-      uploadState="idle"
       lastChat={null}
     />,
   );

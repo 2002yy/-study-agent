@@ -3,12 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiSnapshot, ChatResponse } from "../types";
+import type { ApiSnapshot, ChatResponse } from "../../types";
 import {
   CHAT_SETTINGS_DEFAULTS,
   RAG_SETTINGS_DEFAULTS,
-  Sidebar,
-} from "./Sidebar";
+  SettingsPanel,
+} from "./SettingsPanel";
 
 describe("focused learning settings", () => {
   it("keeps the settings drawer limited to learning experience, materials, privacy and secondary advanced controls", () => {
@@ -34,11 +34,9 @@ describe("focused learning settings", () => {
     } as unknown as ChatResponse;
 
     const { container } = render(
-      <Sidebar
+      <SettingsPanel
         snapshot={snapshot}
         ragEnabled
-        ragUploadMode="upload"
-        setRagUploadMode={vi.fn()}
         setRagEnabled={vi.fn()}
         chatSettings={CHAT_SETTINGS_DEFAULTS}
         setChatSettings={vi.fn()}
@@ -52,11 +50,8 @@ describe("focused learning settings", () => {
         setKeepCurrentRole={vi.fn()}
         conversationInstruction=""
         setConversationInstruction={vi.fn()}
-        onNewSession={vi.fn()}
         isSending={false}
         refresh={vi.fn()}
-        onUploadClick={vi.fn()}
-        uploadState=""
         lastChat={lastChat}
       />,
     );
