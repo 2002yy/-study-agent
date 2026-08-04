@@ -4,6 +4,7 @@ import { useWorkspaceBootstrap } from "./WorkspaceBootstrap";
 import {
   CHAT_SETTINGS_DEFAULTS, RAG_SETTINGS_DEFAULTS
 } from "../layout/Sidebar";
+import { useResetResearchSelectionOnSessionChange } from "./useResetResearchSelectionOnSessionChange";
 import { useWorkspaceControllers } from "./useWorkspaceControllers";
 import { useWorkspaceRecovery } from "./useWorkspaceRecovery";
 import { WorkspaceView } from "./WorkspaceView";
@@ -75,7 +76,16 @@ export default function WorkspaceRuntime() {
       webLookup: setWebLookupRunId,
     },
   });
-  const { groupThreadId: wechatThreadId, chatController } = controllers;
+  const {
+    groupThreadId: wechatThreadId,
+    chatController,
+    webLookupController,
+  } = controllers;
+
+  useResetResearchSelectionOnSessionChange(
+    workspaceRuntime.activeChatThreadId,
+    webLookupController.setUseInChat,
+  );
 
   useWorkspaceRecovery({
     snapshot,
