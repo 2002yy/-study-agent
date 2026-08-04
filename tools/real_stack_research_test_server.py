@@ -16,12 +16,14 @@ from src.application.runtime_repository import (
 from src.application.web_lookup_service import WebLookupService
 from src.tools.web_agent import WebToolTrace
 
+RESEARCH_PREFIX = "请联网研究："
+
 
 class SlowDeterministicResearchGateway:
     """Pause external boundaries so the browser can cancel a running run."""
 
     def search(self, query: str, *, max_items: int = 10) -> list[dict[str, Any]]:
-        time.sleep(0.45)
+        time.sleep(2.0)
         return [
             {
                 "title": query,
@@ -61,7 +63,10 @@ def _resolve_deterministic_research(
     owner_turn_id: str | None = None,
     **_kwargs: Any,
 ) -> WebToolTrace:
-    """Replace only the external planner while preserving durable research owners."""
+    """Replace only explicit research planning and preserve other chat fixtures."""
+
+    if not user_input.strip().startswith(RESEARCH_PREFIX):
+        return WebToolTrace(enabled=False)
 
     service = _real_stack_web_lookup_service()
     run = service.create(
