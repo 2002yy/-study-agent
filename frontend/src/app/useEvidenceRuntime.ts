@@ -17,7 +17,6 @@ type FeatureLoader = (
 type OperationErrorSetter = Dispatch<SetStateAction<string>>;
 
 export function useEvidenceRuntime(options: {
-  snapshot: ApiSnapshot;
   refresh: () => Promise<void>;
   loadFeature: FeatureLoader;
   input: string;
