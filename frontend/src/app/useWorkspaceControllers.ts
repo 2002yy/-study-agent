@@ -8,14 +8,14 @@ import { useMemoryController } from "../features/learning-memory/memoryControlle
 import { useRagController } from "../features/rag/ragController";
 import { useUploadController } from "../features/rag/uploadController";
 import { useRoleController } from "../features/roles/roleController";
+import {
+  CHAT_SETTINGS_DEFAULTS,
+  RAG_SETTINGS_DEFAULTS,
+} from "../features/settings/SettingsPanel";
 import { useSettingsController } from "../features/settings/settingsController";
 import { useToolController } from "../features/tools/toolController";
 import { useWebLookupController } from "../features/web-lookup/webLookupController";
 import { useWorkflowController } from "../features/workflows/workflowController";
-import {
-  CHAT_SETTINGS_DEFAULTS,
-  RAG_SETTINGS_DEFAULTS,
-} from "../layout/Sidebar";
 import type { ApiSnapshot, ChatSettings, RagSettings } from "../types";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
