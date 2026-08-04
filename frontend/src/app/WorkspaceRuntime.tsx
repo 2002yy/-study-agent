@@ -2,8 +2,9 @@ import { useRef, useState } from "react";
 import { useWorkspace } from "./WorkspaceProvider";
 import { useWorkspaceBootstrap } from "./WorkspaceBootstrap";
 import {
-  CHAT_SETTINGS_DEFAULTS, RAG_SETTINGS_DEFAULTS
-} from "../layout/Sidebar";
+  CHAT_SETTINGS_DEFAULTS,
+  RAG_SETTINGS_DEFAULTS,
+} from "../features/settings/SettingsPanel";
 import { useResetResearchSelectionOnSessionChange } from "./useResetResearchSelectionOnSessionChange";
 import { useWorkspaceControllers } from "./useWorkspaceControllers";
 import { useWorkspaceRecovery } from "./useWorkspaceRecovery";
