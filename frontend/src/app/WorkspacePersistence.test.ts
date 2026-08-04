@@ -23,26 +23,28 @@ describe("WorkspacePersistence", () => {
     });
   });
 
-  it("reads a previous versioned envelope after a schema upgrade", () => {
-    expect(
-      parseWorkspaceRecovery(
-        JSON.stringify({
-          schemaVersion: 2,
-          savedAt: "2026-07-14T00:00:00Z",
-          workspace: {
-            singleChatSessionId: "chat-v2",
-            memoryRunId: "memory-v2",
-          },
-        })
-      )
-    ).toMatchObject({
-      singleChatSessionId: "chat-v2",
-      memoryRunId: "memory-v2",
+  it("reads a previous versioned envelope and drops the retired news run", () => {
+    const parsed = parseWorkspaceRecovery(
+      JSON.stringify({
+        schemaVersion: 3,
+        savedAt: "2026-07-14T00:00:00Z",
+        workspace: {
+          singleChatSessionId: "chat-v3",
+          memoryRunId: "memory-v3",
+          newsRunId: "news-retired",
+        },
+      })
+    );
+
+    expect(parsed).toMatchObject({
+      singleChatSessionId: "chat-v3",
+      memoryRunId: "memory-v3",
     });
+    expect(parsed).not.toHaveProperty("newsRunId");
   });
 
   it("migrates the unversioned legacy payload", () => {
-    expect(parseWorkspaceRecovery('{"sessionId":"legacy"}')).toMatchObject({
+    expect(parseWorkspaceRecovery('{"sessionId":"legacy","newsRunId":"old"}')).toEqual({
       sessionId: "legacy",
     });
   });
