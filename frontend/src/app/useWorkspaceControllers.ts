@@ -14,6 +14,7 @@ import { useSettingsController } from "../features/settings/settingsController";
 import { useToolController } from "../features/tools/toolController";
 import { useWorkflowController } from "../features/workflows/workflowController";
 import type { ApiSnapshot, ChatSettings } from "../types";
+import { selectActiveQuery } from "./activeQuerySelector";
 import type { EvidenceRuntime } from "./useEvidenceRuntime";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
@@ -149,8 +150,10 @@ export function useWorkspaceControllers(options: {
       if (forceRefresh) void webLookupController.refreshRun(runId);
     },
   });
-  const activeQuery =
-    options.input.trim() || chatController.lastChat?.rag?.query || "";
+  const activeQuery = selectActiveQuery({
+    input: options.input,
+    lastRagQuery: chatController.lastChat?.rag?.query,
+  });
   const currentToolInvocation: LocalKnowledgeInvocation = {
     query: activeQuery,
     retrievalMode: ragSettings.retrievalMode,
