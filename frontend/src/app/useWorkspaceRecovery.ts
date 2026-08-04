@@ -48,7 +48,6 @@ export function useWorkspaceRecovery(options: {
           lastRag: parsed.lastRag,
           lastSessionId: parsed.lastSessionId,
           cachedMessages: parsed.cachedMessages,
-          isSending: parsed.isSending,
         })
       ) {
         sessionSettingsRestoredRef.current = true;
