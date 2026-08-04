@@ -5,8 +5,6 @@ import { searchWechat } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import type { WechatSearchResponse, WechatStateResponse } from "../../types";
 import { displayValue } from "../../utils/format";
-import { NewsWorkspace } from "../news-workspace/NewsWorkspace";
-import type { NewsController } from "../news-workspace/newsController";
 import type { ResearchLookupResponse } from "../web-lookup/researchApi";
 import { speakerToRole } from "../roles/roleCatalog";
 
@@ -121,50 +119,34 @@ function researchStateText(value: ResearchLookupResponse): string {
 
 export function WechatPanel({
   wechat,
-  newsController,
   webLookup,
   useWebLookup,
   setUseWebLookup,
   wechatInput,
   setWechatInput,
-  newsQuery,
-  setNewsQuery,
-  readArticles,
-  setReadArticles,
   sessionId,
   onOpening,
   onReset,
   onMarkRead,
   onSendWechat,
   onStopWechat,
-  onLookupNews,
-  onStopLookup,
   isWechatBusy,
   error,
-  isNewsBusy
 }: {
   wechat: WechatStateResponse | null;
-  newsController: NewsController;
   webLookup: ResearchLookupResponse | null;
   useWebLookup: boolean;
   setUseWebLookup: (value: boolean) => void;
   wechatInput: string;
   setWechatInput: (value: string) => void;
-  newsQuery: string;
-  setNewsQuery: (value: string) => void;
-  readArticles: boolean;
-  setReadArticles: (value: boolean) => void;
   sessionId?: string;
   onOpening: () => void;
   onReset: () => void;
   onMarkRead: () => void;
   onSendWechat: (event: FormEvent) => void;
   onStopWechat?: () => void;
-  onLookupNews: () => void;
-  onStopLookup?: () => void;
   isWechatBusy: boolean;
   error: string;
-  isNewsBusy: boolean;
 }) {
   const [wechatSearchQuery, setWechatSearchQuery] = useState("");
   const [wechatSearch, setWechatSearch] = useState<WechatSearchResponse | null>(null);
@@ -316,17 +298,6 @@ export function WechatPanel({
           ) : null}
         </div>
       </form>
-
-      <NewsWorkspace
-        query={newsQuery}
-        setQuery={setNewsQuery}
-        readArticles={readArticles}
-        setReadArticles={setReadArticles}
-        controller={newsController}
-        onLookupNews={onLookupNews}
-        onStopLookup={onStopLookup}
-        isLookupBusy={isNewsBusy}
-      />
 
       {webLookup ? (
         <div className="news-result lookup-result">

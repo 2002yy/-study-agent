@@ -1,11 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-03
+> 更新：2026-08-04  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**仅检查和改进 Study Agent 本体的代码功能、核心学习流程与桌面/移动端体验。**  
-> 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**
-> 当前切片：**核心架构精简与真实全栈 CI 修复已提交 `main`，最终 SHA `9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`，GitHub Actions run `30826682687` 全绿。**
+> 当前主线：**停止横向扩张，集中梳理核心学习功能、产品入口、运行状态与桌面/移动端体验。**  
+> 冻结边界：**Provider replay 扩展、生产 claim producer / claim UI、生产 ChatTurn 接入、群聊能力扩张、新闻产品化与可执行 agent 均不是当前开发主线。**  
+> 当前切片：**Draft PR #97 已完成“新闻 / 联网研究”产品表面收拢和一次性研究资料选择边界；代码基线 commit `d35b63d8` 的 GitHub Actions run `30904257750` 全绿。后端 NewsRun / ResearchRun durable owner 未迁移。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
 
@@ -28,14 +28,25 @@
 - planned / attempted / partial / failed 不得覆盖 committed learning truth。
 - 当前冻结横向功能扩张，以主学习闭环是否清晰、可恢复、可验证、可在窄屏操作为判断标准。
 
+### 1.1 功能集中化目标
+
+普通用户最终只需要理解四个稳定入口：
+
+1. **学习会话**：提问、教学、练习、理解验证和恢复；
+2. **资料与来源**：上传资料、本次回答依据、联网来源和检索诊断；
+3. **学习成果**：本次收束、确认写入、归档与继续；
+4. **设置**：学习方式、资料使用、外部数据策略和少量高级参数。
+
+实验能力统一降级到单一“实验室”边界；群聊、手动工具和开发者诊断不再与主学习闭环争夺同等入口。新闻不作为独立顶级产品，而是联网研究的一种时效性预设。
+
 ## 2. 当前核心功能基线
 
-- 当前核心功能基线 SHA：`9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
-- PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`，最终 CI #1714；
-- PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`，最终 CI #1731；
-- PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`，合并前完整 CI 通过；
+- `main` 当前核心功能基线 SHA：`9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
+- PR #92：修复失败刷新恢复与长会话恢复入口，merge SHA `47d252e0bd33126022d76de324af8d67e62dac5e`；
+- PR #93：修复联网研究取消状态收口，merge SHA `b4a996bbed74beca5a861490e39b4b67d4abc8b5`；
+- PR #96：解释联网研究阶段与 partial 结果使用边界，merge SHA `a2eed731037f7dfa6970a26cf9f65a53fb919206`；
 - 核心架构精简与 CI 修复：删除旧 Streamlit 入口、收紧依赖与打包边界，并修复真实全栈 RAG 路径、查询规划和测试状态隔离，SHA `9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
-- 以上批次均只处理 Study Agent 核心流程，没有接入新的生产 Provider、claim UI 或可执行 agent。
+- Draft PR #97 代码基线 commit `d35b63d8081bdbe859243cb0cf02d171284386f8`；完整 CI run `30904257750` 已通过。
 
 ## 3. 已验证的产品闭环
 
@@ -44,7 +55,8 @@
 | 首次开始 | 真实全栈通过 | React -> FastAPI -> SQLite；无需先做配置决策 |
 | 返回学习 | 可恢复并继续 | 恢复目标、上下文和下一步，继续后刷新仍一致 |
 | 上传资料学习 | 真实全栈通过 | 文件合同、解析、document/revision、索引、EvidenceSnapshot、刷新恢复 |
-| 联网研究 | 取消与恢复闭环通过 | 慢研究 -> 请求取消 -> durable `cancelled` -> 刷新 -> 同 run 从 checkpoint 重试完成 |
+| 联网研究 | 取消与恢复闭环通过 | 聊天入口创建 durable ResearchRun -> 请求取消 -> `cancelled` -> 刷新 -> 同 run 重试完成 |
+| 研究资料选择 | 已收口 | run 与回答证据可恢复；“用于下一轮聊天”是一次性选择，刷新或切换会话后不会自动继承 |
 | 源码学习 | 展示与恢复可用 | symbol mapping 与 CI association 精度仍不足以证明稳定源码关系理解 |
 | 理解验证 | 真实全栈通过 | 空泛“懂了”不提交；正确推理才进入 committed truth 和 transfer |
 | 学习结束 | 真实全栈通过 | closure preview、确认写入、summary、刷新、归档并新建 |
@@ -53,83 +65,158 @@
 | 长会话恢复 | desktop / 390×844 / 360×520 通过 | 恢复卡位于当前 conversation viewport，不再落在历史顶部 |
 | 窄屏复杂内容 | 360×520 通过 | 长中文、长 URL、宽代码、IME、真实滚动、回到最新与刷新恢复 |
 
-## 4. 最近核心修复
+## 4. 功能集中化与体验审计
 
-### 4.1 失败刷新恢复与长会话入口
+### 4.1 已稳定、必须保护的产品骨架
 
-PR #92 修复两个 P0 恢复缺口：
+- `RestoreCard` 覆盖新用户、返回学习、失败重试和中断续写；
+- `LearningStrip` 把目标、阶段、缺口、下一步和验证状态压缩到会话顶部；
+- 上传资料后回到“系统学习 / 直接提问”，而不是把用户丢进资料管理页；
+- `SourcesPanel` 分成“本次回答依据 / 我的资料 / 检索诊断”，并区分候选资料与实际回答依据；
+- 学习结束经过 closure preview、用户确认和 hash-locked MemoryRun 后才写入；
+- durable run、刷新恢复、窄屏、IME 和复杂内容已有强回归门禁。
 
-- 最新 turn 为 `failed` 时，刷新后恢复为 retry-only 状态；
-- 零 token 失败不显示“从断点继续”，不伪造部分回答；
-- `interrupted` 仍保留同 turn 断点续写；
-- 恢复卡移动到最新对话上下文附近并在 viewport 内保持可见；
-- failed-before-reply 不显示“部分回答已保留/复制”；
-- 360×520 首轮门禁发现恢复卡顶部越界约 21px，最终通过短屏紧凑布局修复，而不是放宽断言；
-- 后端 `failed` / `interrupted` durable status 和 committed learning truth 均未改变。
+上述能力不是当前重构对象；任何集中化修改不得改变其 committed truth、持久化和恢复合同。
 
-### 4.2 联网研究取消状态收口
+### 4.2 已处理：新闻与联网研究的用户可见双轨
 
-PR #93 修复 ResearchRun 两阶段取消在前端没有收口的问题：
+原产品表面同时存在：
 
-- 服务端首次取消响应仍为 `running` 时，前端持续读取同一 durable run；
-- 只有 run 离开 `running` 后才解除忙碌状态；
-- 先发服务端取消请求，再中止浏览器中的旧执行请求；
-- 取消期间 `useInChat=false`，已有来源不会自动进入下一轮聊天；
-- 等待预算耗尽时保留 run ID，并提示刷新后继续查看或重试；
-- 刷新可恢复 `cancelled`、查询尝试和已有 checkpoint；
-- 同一查询从已取消 run 的 checkpoint 重试，不创建重复 ResearchRun；
-- 新增 desktop 与 390×844 真实全栈旅程，不通过 `page.route` 伪造核心 ResearchRun API。
+- 聊天内可恢复的 ResearchRun；
+- 独立 NewsWorkspace；
+- 群聊内部嵌入的第二份 NewsWorkspace。
 
-本批门禁连续发现并修复两个测试基础设施问题：
+PR #97 已将普通用户模型统一为：
 
-1. 静态 owner 测试只读取旧控制器入口，迁移为稳定 re-export 后需要同时审查入口与实现文件；
-2. 新增 real-stack 文件最初被普通 fixture Playwright 项目误收录，最终加入统一 `REAL_STACK_TESTS` 排除清单，由专用真实全栈配置运行。
+```text
+提出需要外部事实的问题
+-> 自动判断或显式选择联网研究
+-> ResearchRun 搜索、阅读、筛选、恢复
+-> 证据进入“资料与来源”
+-> 继续单人学习，或让群聊只读讨论已存在的研究结果
+```
 
-### 4.3 P1-R1 联网研究阶段解释（已合并）
+本批只收拢产品表面和前端 wiring，不同时删除 NewsRun 后端兼容能力，也不迁移数据库 durable owner。
 
-PR #96 收口“工程状态不可理解”的一处核心语义：
+### 4.3 已更正：operation scope 的真实问题
 
-- `partial` ResearchRun 保留查询、来源与 checkpoint，但不再自动作为下一轮聊天资料；学习者可显式选用，或重试补全；
-- 聊天恢复卡与群聊研究面板明确说明部分结果、已保留的查询/来源和重试语义；
-- Windows 真实全栈重置在释放缓存连接后再删除 SQLite 文件，desktop 与 390×844 可连续执行；
-- 已通过前端 222 项单元测试、TypeScript/Vite production build，以及 ResearchRun 取消—刷新—同 run 重试的 desktop 与 390×844 真实全栈旅程；
-- PR #96 的两项 GitHub Actions CI 已通过，覆盖全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁；随后已按用户确认合并到 `main`。
+最初静态审计注意到 reducer 的 `START_NEW_CHAT_SESSION` 会清除多类 run ID；深入生产调用链后确认：
 
-### 4.4 核心架构精简（当前批次）
+- 生产 `chatController.startNewSession()` 并不调用该 action；
+- 生产路径使用 `TRANSITION_CHAT_SESSION + clearChatArtifacts()`；
+- 因此不能把 `START_NEW_CHAT_SESSION` 的行为表述为已发生的生产 bug，它更可能是过时 action / 测试债务；
+- 已确认的实际风险是：completed ResearchRun 恢复后会自动设置 `useInChat=true`，且会话切换不复位这一一次性选择，可能把上一会话选择的研究资料带入下一会话。
 
-- 删除已无生产调用者的 `src/ui/*` Streamlit 展示层和仅服务该入口的健康检查；
-- 删除绑定旧 session state / 展示 helper 的死测试，保留 application service、API、repository 与 React 控制器覆盖；
-- `mode_manager` 不再依赖前端框架，配置读取继续以 YAML、校验和 mtime 同步为边界；
-- 打包门禁改为只要求 React + FastAPI 生产入口；
-- 从主依赖与锁文件移除 Streamlit 及其专属传递依赖；
-- 将 FastAPI 文件上传所需的 `python-multipart` 提升为显式主依赖，避免依赖旧 UI 的偶然传递安装；
-- README、用户指南和稳定架构文档统一为单一 React 前端事实。
-- RAG 默认索引路径改为请求时解析，避免真实全栈隔离路径在模块导入阶段被冻结；
-- 具体学习问题的检索查询不再混入教学指令，证据充分性只评估真实问题与学习目标；
-- 真实全栈 reset 先排空在途请求，再重建 SQLite schema，并隔离本机 frontend settings，消除跨旅程污染。
+PR #97 已修复真实风险：
 
-门禁证据：首批本地 136 个 pytest 文件共 888 项通过，修复批次相关后端测试 57 项通过；前端 224 项、production build 与既有 Chromium 旅程通过；desktop / 390×844 真实全栈共 14 项通过。GitHub Actions run `30826682687` 再次通过全量 pytest、RAG K1、Ruff、打包、detect-secrets、mypy、前端构建与两类浏览器门禁。
+- durable ResearchRun ID 和运行结果继续保留；
+- 已完成回答中的证据继续恢复；
+- 恢复已有 run 时默认只展示，不自动选为下一轮聊天资料；
+- active chat thread 变化时统一复位 `useInChat=false`；
+- 用户需要再次明确选择后，研究结果才进入下一轮聊天。
 
-## 5. 当前质量门禁
+### 4.4 仍待处理：Workspace 总线式集中
 
-当前核心基线 `9e0adb8` 的 GitHub Actions run `30826682687` 已完整通过：
+`App.tsx` 已是 composition-only，但 `WorkspaceRuntime`、`useWorkspaceControllers` 与 `WorkspaceView` 仍共同承载聊天、RAG、上传、研究、新闻兼容状态、群聊、工具、记忆、诊断和多类 run ID。
+
+目标边界：
+
+```text
+LearningSessionRuntime
+  -> chat / sessions / pedagogy / recovery / closure
+
+EvidenceRuntime
+  -> upload / RAG / research / GitHub evidence / sources
+
+ExtensionRuntime
+  -> group chat / legacy news / controlled tools / workflows
+```
+
+先清理无产品调用者的 NewsRun 前端状态，再按领域拆运行时；不得在同一批同时迁移前端 owner 和后端 durable entity。
+
+### 4.5 P1：普通用户可见系统能力仍偏多
+
+目标是普通模式仅保留会话历史、资料与来源、学习成果和设置；群聊、手动工具和开发者诊断统一进入实验室，并默认不加载。
+
+### 4.6 P1：学习成果与手动长期记忆管理混层
+
+默认学习结束流程只应回答“本次学了什么、确认了什么、还有什么不会、下一步是什么、将写入什么”。七类长期记忆目标、手动候选编辑、替换/追加和置信度明细应降到高级管理区。
+
+### 4.7 P1：样式 owner 分散
+
+同一组件的桌面、移动端、恢复、渐进披露和产品边界规则仍散落在多个按历史整改批次命名的 CSS 文件中。后续按组件迁移样式 owner；全局只保留 token、reset、accessibility 和应用布局基线。
+
+### 4.8 P2：兼容债务
+
+- CORS 仍由 `CORSMiddleware` 和手写安全中间件共同处理，应统一 owner；
+- deprecated / 410 路由仍挂载在生产 app，应在替代覆盖稳定后逐批删除；
+- `Sidebar` 兼容别名和 SettingsPanel 未使用 props 应清理；
+- `selectedPanel`、`START_NEW_CHAT_SESSION` 等不再对应当前生产调用链的状态/action 应在覆盖确认后删除；
+- Firefox、WebKit 和实体手机仍需要抽样。
+
+## 5. 当前执行切片：P0-R2 研究产品表面收拢
+
+- 分支：`agent/research-experience-consolidation`
+- Draft PR：`#97 收拢联网研究与新闻入口`
+- 代码基线：`d35b63d8081bdbe859243cb0cf02d171284386f8`
+- 完整 CI：run `30904257750`，结论 `success`
+
+### 5.1 已完成
+
+1. 从普通“更多”菜单移除独立“新闻研究”入口；
+2. 删除 `WorkspaceView` 中独立新闻抽屉；
+3. 群聊不再嵌入完整 `NewsWorkspace`；
+4. 从 `WorkspaceView -> WechatPanel` 及旧 `Inspector -> WechatPanel` wiring 删除 NewsController、新闻查询、正文读取和搜索/停止回调；
+5. 从 `WechatPanel` 公共 props 删除上述遗留依赖；
+6. 群聊只读展示已经存在的 ResearchRun，不再自行创建第二套研究真值；
+7. 聊天入口真实创建带 `owner_turn_id` 的 ResearchRun，并覆盖取消、刷新恢复和同 run 重试；
+8. 恢复已有 completed run 时不再自动选为聊天资料；
+9. 切换聊天线程时复位一次性 `useInChat` 选择，但不删除 run；
+10. 更新 ChatPanel、WechatPanel、WebLookup owner、hook 和浏览器产品边界测试。
+
+### 5.2 明确保留、未改动
+
+- NewsRun、NewsWorkspace 和新闻 API 仍作为兼容/实验能力保留；
+- ResearchRun 数据模型、SQLite schema、checkpoint、取消、恢复和 retry 语义未改；
+- partial 研究结果仍不会自动进入下一轮聊天；
+- RestoreCard、LearningStrip、SourcesPanel、RAG、MemoryRun 和学习结束 committed truth 未改；
+- `WorkspaceRuntime` / `useWorkspaceControllers` 中仍保留 NewsController、news query、readArticles 和 active NewsRun ID，等待确认无剩余调用者后再清理。
+
+### 5.3 门禁证据
+
+代码基线 run `30904257750` 已通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus 基线；
-- Ruff、项目打包检查、detect-secrets；
-- expanded mypy baseline；
-- 前端单元测试、TypeScript 与 Vite production build；
-- 38 条 Chromium fixture / narrow Golden Journeys；
-- desktop 与 390×844 专用真实全栈浏览器门禁，包含新增 ResearchRun 取消旅程。
+- Ruff；
+- 项目打包检查；
+- detect-secrets；
+- expanded mypy baseline gate；
+- 前端单元测试与 TypeScript/Vite production build；
+- desktop、mobile 和 360×520 fixture/narrow Golden Journeys；
+- 14 条真实 FastAPI + SQLite 浏览器旅程。
 
-测试边界：
+注意：原始 expanded mypy 命令仍有既有存量错误；本批通过的是既定 baseline gate，不得表述为仓库 raw mypy 全量无错误。
 
-- 浏览器门禁替换外部模型、搜索或文件来源时，仍保留生产 route、application service、transaction 和 repository；
+### 5.4 下一步
+
+1. 清理 WorkspaceRuntime / useWorkspaceControllers 中无产品调用者的 NewsRun 前端状态和控制器；
+2. 删除或收口 `DrawerId="news"`、`selectedPanel`、`START_NEW_CHAT_SESSION` 等残留类型/action；
+3. 决定 NewsRun 后端保留为实验 adapter，还是迁移为 ResearchRun 的新闻预设；
+4. 将 Workspace 总线拆成 Learning / Evidence / Extension 三个运行时边界；
+5. 在独立批次建立普通模式与“实验室”的稳定入口合同。
+
+## 6. 当前质量门禁
+
+当前门禁原则：
+
+- 浏览器测试替换外部模型、搜索或文件来源时，仍保留生产 route、application service、transaction 和 repository；
 - real-stack 核心 API 不使用 `page.route` 伪造；
+- 研究专用真实服务器只替换外部 planner 与网络 gateway，仍由生产 ChatRoute、WebLookupService、repository 和 cancel-by-turn 承担真值；
 - 每个真实旅程使用隔离的临时 SQLite、RAG、memory 和输出目录；
 - 失败必须暴露真实产品或测试建模问题，不通过降低断言强行变绿。
 
-## 6. 当前真实指标
+## 7. 当前真实指标
 
 ### RAG K1 固定回归
 
@@ -142,43 +229,50 @@ PR #96 收口“工程状态不可理解”的一处核心语义：
 
 ### 成功体验证据
 
-- 23 张已保留的真实 viewport PNG：desktop 1440×900 共 9 张、mobile 390×844 共 9 张、narrow 360×520 共 5 张；
+- 既有 23 张真实 viewport PNG：desktop 1440×900 共 9 张、mobile 390×844 共 9 张、narrow 360×520 共 5 张；
 - 360×520 对话可视高度 251px；
 - 真实 wheel 滚动后距底部 700px；“回到最新”和刷新后均恢复到 0；
 - 宽代码只在代码块内部横向滚动；长 URL 在消息边界内换行；
-- 浏览器 composition 事件验证：组合期间 Enter 不提交，composition end 后只提交一次。
+- composition 事件验证：组合期间 Enter 不提交，composition end 后只提交一次。
 
 ### 仍属冻结的评测能力
 
-仓库中仍保留 record-only AnswerClaim real-provider replay 与方舟 smoke/full 运行合同，但：
+仓库中仍保留 record-only AnswerClaim real-provider replay 与方舟 smoke/full 运行合同，但尚未执行实际 real-provider artifact；不得报告不存在的真实 coverage、alignment、latency、usage 或成本数字。
 
-- 实际 real-provider smoke / full artifact 均尚未执行；
-- 不存在可报告的真实 claim coverage、unsupported-claim rate、citation alignment、latency、usage 或成本数字；
-- 这些合同不是当前开发主线，不得推动生产 Provider、claim UI 或 ChatTurn 写入扩张。
+## 8. 后续优先级
 
-## 7. 当前缺口
+**P0：功能 owner 与状态真值**
 
-**P1：核心功能与体验**
+1. 清理剩余 NewsRun 前端运行状态；
+2. 删除已脱离生产调用链的 reducer action / 类型残留；
+3. 将 Workspace 总线拆成 Learning / Evidence / Extension 三个运行时边界。
 
-1. 继续逐批检查首次学习、返回学习、上传资料、理解验证和学习结束的真实交互细节，优先修阻断和高频困惑；
-2. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样；
-3. 加强源码学习的 symbol mapping、CI association precision 与 partial-result 用户解释。
+**P1：核心体验**
 
-**P2：兼容性与维护**
+1. 压缩普通用户功能入口，建立单一实验室；
+2. 拆分“本次学习成果”和“长期记忆高级管理”；
+3. 继续逐批检查首次学习、返回学习、上传资料、理解验证和学习结束的真实交互细节；
+4. 加强源码学习 symbol mapping、CI association precision 与 partial-result 用户解释；
+5. 对实体安卓/iOS 输入法、软键盘安全区、触摸惯性和返回键做实机抽样。
 
-1. 增加 Firefox / WebKit 兼容抽样；
-2. 继续统一 Golden Journey 的点击、决策、surface、恢复和耗时指标；
-3. 在替代覆盖稳定后逐批缩小 `src.api` compatibility exports 与旧 Markdown/YAML 状态视图。
+**P2：维护与兼容性**
 
-## 8. 执行规则
+1. 样式按组件 owner 收拢；
+2. 统一 CORS owner，逐批移除 410 / deprecated 路由；
+3. 清理 Sidebar 兼容别名和 SettingsPanel 未使用 props；
+4. 增加 Firefox / WebKit 兼容抽样；
+5. 继续统一 Golden Journey 的点击、决策、surface、恢复和耗时指标。
+
+## 9. 执行规则
 
 - 只从 Study Agent 核心学习流程出发选择下一批，不因为仓库已有实验合同就继续扩张；
 - 优先级：阻断 -> 高频体验问题 -> 状态真值错误 -> 可维护性 -> 低频兼容性；
-- 每批使用独立小分支 -> Draft PR -> 完整门禁 -> 全绿合并；
-- 新功能或修复必须同时给出单元、真实全栈或人工验收边界；
-- 不报告未实际运行的 Provider 指标，不把 deterministic / synthetic 结果冒充真实模型质量。
+- 每批使用独立小分支 -> Draft PR -> 完整门禁 -> 全绿后再决定是否合并；
+- 新功能或修复必须同时给出单元、浏览器真实旅程或人工验收边界；
+- 不报告未实际运行的 Provider 指标，不把 deterministic / synthetic 结果冒充真实模型质量；
+- 产品表面、前端 owner 与后端 durable owner 分批收拢，避免一次改动同时破坏多个稳定边界。
 
-## 9. 文档规则
+## 10. 文档规则
 
 - 当前状态只更新本文件；
 - `ARCHITECTURE_STATUS.md` 只维护稳定 owner / 边界；

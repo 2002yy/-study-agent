@@ -3,16 +3,11 @@ import { expect, test, type Page } from "@playwright/test";
 const API = "http://127.0.0.1:8000";
 const STORE = "study-agent-react-session";
 const QUERY = "Python object construction boundaries";
+const RESEARCH_QUERY = `请联网研究：${QUERY}`;
 
 test.beforeEach(async ({ request }) => {
   expect((await request.post(`${API}/__e2e__/reset`)).ok()).toBe(true);
 });
-
-async function open(page: Page, item: string, title: string) {
-  await page.locator("summary[aria-label='打开更多学习工具']").click();
-  await page.getByRole("menuitem").filter({ hasText: item }).click();
-  return page.getByRole("dialog", { name: title });
-}
 
 async function storedRunId(page: Page) {
   await page.waitForFunction((key) => {
@@ -29,21 +24,26 @@ async function run(page: Page, id: string) {
   return response.json();
 }
 
+async function startResearchFromChat(page: Page) {
+  await page.getByText("更多开始方式", { exact: true }).click();
+  await page.getByRole("button", { name: /联网研究/ }).click();
+  const composer = page.getByLabel("输入学习问题");
+  await expect(composer).toHaveValue("请联网研究：");
+  await composer.fill(RESEARCH_QUERY);
+  await page.getByRole("button", { name: "发送" }).click();
+}
+
 test("research stop survives refresh and retries the same run", async ({ page }) => {
   await page.goto("/");
-  const news = await open(page, "新闻研究", "新闻");
-  await news.getByLabel("联网检索").fill(QUERY);
-  await news.getByRole("button", { name: "研究并用于下一轮聊天" }).click();
-  const stop = news.getByRole("button", { name: "停止研究" });
-  await expect(stop).toBeVisible();
+  await startResearchFromChat(page);
   const id = await storedRunId(page);
-  await stop.click();
+  await page.getByRole("button", { name: "停止" }).click();
 
   await expect.poll(async () => (await run(page, id)).status).toBe("cancelled");
   const cancelled = await run(page, id);
   expect(cancelled).toMatchObject({
     id,
-    query: QUERY,
+    query: RESEARCH_QUERY,
     stage: "cancelled",
     stop_reason: "user_cancelled",
   });
@@ -52,18 +52,14 @@ test("research stop survives refresh and retries the same run", async ({ page })
   expect(cancelled.query_attempts.length).toBeGreaterThanOrEqual(1);
 
   await page.reload();
-  const group = await open(page, "群聊讨论", "群聊");
-  await expect(group.getByText("研究已停止", { exact: true })).toBeVisible();
-  await expect(group.getByLabel("仅用于下一轮单人聊天")).toBeDisabled();
+  await expect(page.getByText("研究已停止", { exact: true })).toBeVisible();
   expect(await storedRunId(page)).toBe(id);
 
-  await group.getByLabel("联网检索").fill(QUERY);
-  await group.getByRole("button", { name: "研究并用于下一轮聊天" }).click();
+  await page.getByRole("button", { name: "重试研究" }).click();
   await expect.poll(async () => (await run(page, id)).status).toBe("completed");
   const completed = await run(page, id);
   expect(completed.id).toBe(id);
   expect(completed.query_attempts).toEqual(cancelled.query_attempts);
   expect(completed.source_block).not.toBe("");
-  await expect(group.getByText("研究完成", { exact: true })).toBeVisible();
-  await expect(group.getByLabel("仅用于下一轮单人聊天")).toBeChecked();
+  await expect(page.getByText("联网研究已恢复", { exact: true })).toBeVisible();
 });

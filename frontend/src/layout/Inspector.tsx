@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 import { MemoryPanel } from "../features/learning-memory/MemoryPanel";
 import { useMemoryController } from "../features/learning-memory/memoryController";
 import { RoadmapPanel } from "../features/migration/RoadmapPanel";
-import type { NewsController } from "../features/news-workspace/newsController";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { useUploadController } from "../features/rag/uploadController";
 import { RoutePanel } from "../features/route/RoutePanel";
@@ -36,25 +35,18 @@ export function Inspector({
   toolController,
   onRestoreSession,
   onArchiveSession,
-  newsController,
   webLookup,
   useWebLookup,
   setUseWebLookup,
   wechatInput,
   setWechatInput,
-  newsQuery,
-  setNewsQuery,
-  readArticles,
-  setReadArticles,
   onWechatOpening,
   onWechatReset,
   onWechatMarkRead,
   onSendWechat,
   onStopWechat,
-  onLookupNews,
   isWechatBusy,
   wechatError,
-  isNewsBusy,
   isSending,
   memoryController,
   uploadController
@@ -71,25 +63,18 @@ export function Inspector({
   toolController: ToolController;
   onRestoreSession: (sessionId: string) => void;
   onArchiveSession: (sessionId: string) => void;
-  newsController: NewsController;
   webLookup: ResearchLookupResponse | null;
   useWebLookup: boolean;
   setUseWebLookup: (value: boolean) => void;
   wechatInput: string;
   setWechatInput: (value: string) => void;
-  newsQuery: string;
-  setNewsQuery: (value: string) => void;
-  readArticles: boolean;
-  setReadArticles: (value: boolean) => void;
   onWechatOpening: () => void;
   onWechatReset: () => void;
   onWechatMarkRead: () => void;
   onSendWechat: (event: FormEvent) => void;
   onStopWechat: () => void;
-  onLookupNews: () => void;
   isWechatBusy: boolean;
   wechatError: string;
-  isNewsBusy: boolean;
   isSending: boolean;
   memoryController: ReturnType<typeof useMemoryController>;
   uploadController: ReturnType<typeof useUploadController>;
@@ -105,26 +90,19 @@ export function Inspector({
       <RoutePanel lastChat={lastChat} />
       <WechatPanel
         wechat={snapshot.wechat}
-        newsController={newsController}
         webLookup={webLookup}
         useWebLookup={useWebLookup}
         setUseWebLookup={setUseWebLookup}
         wechatInput={wechatInput}
         setWechatInput={setWechatInput}
-        newsQuery={newsQuery}
-        setNewsQuery={setNewsQuery}
-        readArticles={readArticles}
-        setReadArticles={setReadArticles}
         sessionId={wechatThreadId}
         onOpening={onWechatOpening}
         onReset={onWechatReset}
         onMarkRead={onWechatMarkRead}
         onSendWechat={onSendWechat}
         onStopWechat={onStopWechat}
-        onLookupNews={onLookupNews}
         isWechatBusy={isWechatBusy}
         error={wechatError}
-        isNewsBusy={isNewsBusy}
       />
       <SourcesPanel
         lastChat={lastChat}

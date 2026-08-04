@@ -42,14 +42,17 @@ describe("recoverable web research composition", () => {
     expect(viteConfig).toContain('"/research-runs": API_TARGET');
   });
 
-  it("shows durable stages and exposes a server-side stop action", () => {
+  it("keeps durable research status in group display while chat owns cancellation", () => {
     const panel = read("features/wechat-workspace/WechatPanel.tsx");
-    const workspace = read("features/news-workspace/NewsWorkspace.tsx");
+    const chatController = read("features/chat/chatController.ts");
+    const legacyWorkspace = read("features/news-workspace/NewsWorkspace.tsx");
 
     expect(panel).toContain('searching: "正在广域搜索"');
     expect(panel).toContain('reading: "正在读取网页或源码"');
     expect(panel).toContain("这不代表目标不存在");
-    expect(panel).toContain("onStopLookup");
-    expect(workspace).toContain("停止研究");
+    expect(panel).not.toContain("onStopLookup");
+    expect(chatController).toContain("cancelChatResearchRuns");
+    expect(chatController).toContain("cancelActiveResearch(activeTurnId)");
+    expect(legacyWorkspace).toContain("停止研究");
   });
 });
