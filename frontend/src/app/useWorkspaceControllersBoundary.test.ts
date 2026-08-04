@@ -14,13 +14,16 @@ const evidenceSource = readFileSync(
   fileURLToPath(new URL("./useEvidenceRuntime.ts", import.meta.url)),
   "utf8"
 );
+const learningSource = readFileSync(
+  fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
+  "utf8"
+);
 
 const workspaceControllerHooks = [
   "useRoleController",
   "useWorkflowController",
   "useSettingsController",
   "useGroupChatController",
-  "useMemoryController",
   "useChatController",
   "useToolController",
 ];
@@ -57,6 +60,34 @@ describe("workspace controller composition boundary", () => {
     }
   });
 
+  it("makes LearningSessionRuntime the owner of learning settings, closure runs, and MemoryController", () => {
+    expect(runtimeSource).toContain("useLearningSessionRuntime({ refresh })");
+    expect(learningSource).toContain("useMemoryController({");
+    expect(compositionSource).not.toContain("useMemoryController(");
+    expect(runtimeSource).not.toContain("useMemoryController(");
+    expect(compositionSource).toContain("} = options.learning;");
+    expect(compositionSource).toContain("memoryController,");
+
+    for (const stateToken of [
+      "useState<ChatSettings>",
+      "activeMemoryRunId",
+      "activeLearningClosureRunId",
+      "SET_SESSION_SUMMARY",
+    ]) {
+      expect(learningSource).toContain(stateToken);
+      expect(runtimeSource).not.toContain(stateToken);
+      expect(compositionSource).not.toContain(stateToken);
+    }
+    for (const leakedSetter of [
+      "setMemoryRunId",
+      "setLearningClosureRunId",
+      "setKeepCurrentRole",
+      "setConversationInstruction",
+    ]) {
+      expect(runtimeSource).not.toContain(`const ${leakedSetter}`);
+    }
+  });
+
   it("loads the Sources drawer through EvidenceRuntime", () => {
     expect(evidenceSource).toContain('state.activeDrawer !== "sources"');
     expect(evidenceSource).toContain('options.loadFeature("rag")');
@@ -70,6 +101,7 @@ describe("workspace controller composition boundary", () => {
     expect(compositionSource).not.toContain("useNewsController");
     expect(compositionSource).not.toContain("newsController");
     expect(evidenceSource).not.toContain("useNewsController");
+    expect(learningSource).not.toContain("useNewsController");
     expect(runtimeSource).not.toContain("useNewsController");
   });
 
@@ -81,5 +113,6 @@ describe("workspace controller composition boundary", () => {
     expect(compositionSource).not.toContain("operationRegistry.cancelAll()");
     expect(runtimeSource).not.toContain("new WorkspaceCoordinator(");
     expect(evidenceSource).not.toContain("new WorkspaceCoordinator(");
+    expect(learningSource).not.toContain("new WorkspaceCoordinator(");
   });
 });
