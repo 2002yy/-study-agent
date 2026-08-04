@@ -4,7 +4,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { LocalKnowledgeInvocation } from "../api";
 import { createEmptyRag, useChatController } from "../features/chat/chatController";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
-import { useMemoryController } from "../features/learning-memory/memoryController";
 import { useRoleController } from "../features/roles/roleController";
 import {
   CHAT_SETTINGS_DEFAULTS,
@@ -13,9 +12,10 @@ import {
 import { useSettingsController } from "../features/settings/settingsController";
 import { useToolController } from "../features/tools/toolController";
 import { useWorkflowController } from "../features/workflows/workflowController";
-import type { ApiSnapshot, ChatSettings } from "../types";
+import type { ApiSnapshot } from "../types";
 import { selectActiveQuery } from "./activeQuerySelector";
 import type { EvidenceRuntime } from "./useEvidenceRuntime";
+import type { LearningSessionRuntime } from "./useLearningSessionRuntime";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
 import { useWorkspace } from "./WorkspaceProvider";
@@ -36,28 +36,19 @@ export function useWorkspaceControllers(options: {
   loadFeature: FeatureLoader;
   input: string;
   setInput: ValueSetter<string>;
-  chatSettings: ChatSettings;
-  setChatSettings: ValueSetter<ChatSettings>;
-  keepCurrentRole: boolean;
-  setKeepCurrentRole: ValueSetter<boolean>;
-  conversationInstruction: string;
-  setConversationInstruction: ValueSetter<string>;
   operationError: ValueSetter<string>;
   activeGroupThreadId?: string;
   evidence: EvidenceRuntime;
+  learning: LearningSessionRuntime;
   runIds: {
     tool?: string;
-    memory?: string;
-    learningClosure?: string;
   };
   setGroupThreadId: DirectSetter<string | undefined>;
   setRunId: {
     tool: DirectSetter<string | undefined>;
-    memory: DirectSetter<string | undefined>;
-    learningClosure: DirectSetter<string | undefined>;
   };
 }) {
-  const { state, dispatch } = useWorkspace();
+  const { state } = useWorkspace();
   const {
     ragEnabled,
     setRagEnabled,
@@ -67,10 +58,19 @@ export function useWorkspaceControllers(options: {
     ragController,
     uploadController,
   } = options.evidence;
-  const roleController = useRoleController(options.chatSettings.selectedRole);
+  const {
+    chatSettings,
+    setChatSettings,
+    keepCurrentRole,
+    setKeepCurrentRole,
+    conversationInstruction,
+    setConversationInstruction,
+    memoryController,
+  } = options.learning;
+  const roleController = useRoleController(chatSettings.selectedRole);
   const workflowController = useWorkflowController();
   const settingsController = useSettingsController({
-    chatSettings: options.chatSettings,
+    chatSettings,
     ragSettings,
     ragEnabled,
     setRuntimeSettings: (runtimeSettings) =>
@@ -84,18 +84,9 @@ export function useWorkspaceControllers(options: {
     wechat: options.snapshot.wechat,
     setWechat: (wechat) =>
       options.setSnapshot((current) => ({ ...current, wechat })),
-    chatSettings: options.chatSettings,
+    chatSettings,
     ragSettings,
     ragEnabled,
-  });
-  const memoryController = useMemoryController({
-    activeRunId: options.runIds.memory,
-    setActiveRunId: options.setRunId.memory,
-    activeClosureRunId: options.runIds.learningClosure,
-    setActiveClosureRunId: options.setRunId.learningClosure,
-    onMemoryChanged: options.refresh,
-    onSummaryChanged: (summary) =>
-      dispatch({ type: "SET_SESSION_SUMMARY", summary }),
   });
   const workspaceCoordinator = useMemo(
     () =>
@@ -123,18 +114,18 @@ export function useWorkspaceControllers(options: {
   const runtimeSettings = (options.snapshot.runtimeSettings?.settings ?? {}) as Record<string, unknown>;
   const webPolicy = String(runtimeSettings.web_policy ?? "auto");
   const chatController = useChatController({
-    chatSettings: options.chatSettings,
+    chatSettings,
     chatSettingsDefaults: CHAT_SETTINGS_DEFAULTS,
-    setChatSettings: options.setChatSettings,
+    setChatSettings,
     ragSettings,
     ragSettingsDefaults: RAG_SETTINGS_DEFAULTS,
     setRagSettings,
     ragEnabled,
     setRagEnabled,
-    keepCurrentRole: options.keepCurrentRole,
-    setKeepCurrentRole: options.setKeepCurrentRole,
-    conversationInstruction: options.conversationInstruction,
-    setConversationInstruction: options.setConversationInstruction,
+    keepCurrentRole,
+    setKeepCurrentRole,
+    conversationInstruction,
+    setConversationInstruction,
     webLookupSource: webLookupController.result?.source_block ?? "",
     webLookupRunId: webLookupController.result?.run_id,
     useWebLookup: webLookupController.useInChat,
