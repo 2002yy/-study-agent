@@ -3,7 +3,6 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { NewsController } from "../news-workspace/newsController";
 import { WechatPanel } from "./WechatPanel";
 
 describe("WechatPanel product boundary", () => {
@@ -11,27 +10,19 @@ describe("WechatPanel product boundary", () => {
     render(
       <WechatPanel
         wechat={null}
-        newsController={{} as NewsController}
         webLookup={null}
         useWebLookup={false}
         setUseWebLookup={vi.fn()}
         wechatInput=""
         setWechatInput={vi.fn()}
-        newsQuery="最新新闻 when:1d"
-        setNewsQuery={vi.fn()}
-        readArticles
-        setReadArticles={vi.fn()}
         sessionId="group-1"
         onOpening={vi.fn()}
         onReset={vi.fn()}
         onMarkRead={vi.fn()}
         onSendWechat={vi.fn()}
         onStopWechat={vi.fn()}
-        onLookupNews={vi.fn()}
-        onStopLookup={vi.fn()}
         isWechatBusy={false}
         error=""
-        isNewsBusy={false}
       />,
     );
 
