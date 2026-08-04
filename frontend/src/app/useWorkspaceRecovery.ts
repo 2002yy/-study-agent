@@ -22,7 +22,6 @@ export function useWorkspaceRecovery(options: {
   ids: {
     singleChat?: string;
     group?: string;
-    news?: string;
     tool?: string;
     memory?: string;
     learningClosure?: string;
@@ -32,7 +31,6 @@ export function useWorkspaceRecovery(options: {
   };
   setIds: {
     group: DirectSetter;
-    news: DirectSetter;
     tool: DirectSetter;
     memory: DirectSetter;
     learningClosure: DirectSetter;
@@ -69,7 +67,6 @@ export function useWorkspaceRecovery(options: {
     }
     const restoredThreadId = parsed.singleChatSessionId ?? parsed.sessionId ?? "";
     if (parsed.wechatThreadId) options.setIds.group(parsed.wechatThreadId);
-    if (parsed.newsRunId) options.setIds.news(parsed.newsRunId);
     if (parsed.toolRunId) options.setIds.tool(parsed.toolRunId);
     if (parsed.memoryRunId) options.setIds.memory(parsed.memoryRunId);
     if (parsed.learningClosureRunId) {
@@ -147,7 +144,6 @@ export function useWorkspaceRecovery(options: {
     () => ({
       singleChatSessionId: options.ids.singleChat,
       wechatThreadId: options.ids.group,
-      newsRunId: options.ids.news,
       toolRunId: options.ids.tool,
       memoryRunId: options.ids.memory,
       learningClosureRunId: options.ids.learningClosure,
