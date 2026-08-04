@@ -189,7 +189,10 @@ test("failed web research recovers in chat and grounds the next answer", async (
   await page.waitForTimeout(350);
   await page.reload();
   await expect(page.getByText(RESEARCH_REPLY, { exact: true })).toBeVisible();
-  await expect(page.getByText("联网研究已恢复", { exact: true })).toBeVisible();
+  await expect(page.getByText("联网研究已恢复", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("恢复结果已设为下一轮聊天资料。", { exact: true }),
+  ).toHaveCount(0);
   const restoredAdopted = await openEvidence(page);
   await expect(
     restoredAdopted.getByText(RESEARCH_SELECTED_TITLE, { exact: true }),
