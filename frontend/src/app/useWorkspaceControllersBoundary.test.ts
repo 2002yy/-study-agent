@@ -16,7 +16,6 @@ const controllerHooks = [
   "useWorkflowController",
   "useSettingsController",
   "useGroupChatController",
-  "useNewsController",
   "useWebLookupController",
   "useMemoryController",
   "useRagController",
@@ -26,7 +25,7 @@ const controllerHooks = [
 ];
 
 describe("workspace controller composition boundary", () => {
-  it("owns every feature-controller constructor outside WorkspaceRuntime", () => {
+  it("owns every active feature-controller constructor outside WorkspaceRuntime", () => {
     for (const hook of controllerHooks) {
       expect(compositionSource).toContain(`${hook}(`);
       expect(runtimeSource).not.toContain(`${hook}(`);
@@ -34,6 +33,12 @@ describe("workspace controller composition boundary", () => {
         new RegExp(`import .*${hook}`)
       );
     }
+  });
+
+  it("does not rebuild the retired NewsController in the main workspace", () => {
+    expect(compositionSource).not.toContain("useNewsController");
+    expect(compositionSource).not.toContain("newsController");
+    expect(runtimeSource).not.toContain("useNewsController");
   });
 
   it("owns cross-feature artifact cleanup while chat cancellation stays scoped", () => {
