@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const API = "http://127.0.0.1:8000";
 const STORE = "study-agent-react-session";
 const QUERY = "Python object construction boundaries";
+const RESEARCH_QUERY = `请联网研究：${QUERY}`;
 
 test.beforeEach(async ({ request }) => {
   expect((await request.post(`${API}/__e2e__/reset`)).ok()).toBe(true);
@@ -26,7 +27,9 @@ async function run(page: Page, id: string) {
 async function startResearchFromChat(page: Page) {
   await page.getByText("更多开始方式", { exact: true }).click();
   await page.getByRole("button", { name: /联网研究/ }).click();
-  await page.getByLabel("输入学习问题").fill(QUERY);
+  const composer = page.getByLabel("输入学习问题");
+  await expect(composer).toHaveValue("请联网研究：");
+  await composer.fill(RESEARCH_QUERY);
   await page.getByRole("button", { name: "发送" }).click();
 }
 
@@ -40,7 +43,7 @@ test("research stop survives refresh and retries the same run", async ({ page })
   const cancelled = await run(page, id);
   expect(cancelled).toMatchObject({
     id,
-    query: QUERY,
+    query: RESEARCH_QUERY,
     stage: "cancelled",
     stop_reason: "user_cancelled",
   });
