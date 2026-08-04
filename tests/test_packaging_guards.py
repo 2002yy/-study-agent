@@ -178,6 +178,9 @@ def test_frontend_chat_state_is_owned_by_workspace_provider():
     composition_text = Path(
         "frontend/src/app/useWorkspaceControllers.ts"
     ).read_text(encoding="utf-8")
+    learning_text = Path(
+        "frontend/src/app/useLearningSessionRuntime.ts"
+    ).read_text(encoding="utf-8")
     controller_text = Path(
         "frontend/src/features/chat/chatController.ts"
     ).read_text(encoding="utf-8")
@@ -186,7 +189,9 @@ def test_frontend_chat_state_is_owned_by_workspace_provider():
     assert "<WorkspaceProvider" in main_text
     assert "<WorkspaceRuntime" in app_text
     assert "useWorkspaceControllers({" in runtime_text
-    assert "useChatController({" in composition_text
+    assert "useLearningSessionRuntime({" in runtime_text
+    assert "useChatController({" in learning_text
+    assert "useChatController({" not in composition_text
     assert "useState<ChatMessage[]" not in app_text
     assert "useState<ChatResponse" not in app_text
     assert "useReducer(workspaceReducer" not in app_text
