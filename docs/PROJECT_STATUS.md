@@ -4,7 +4,7 @@
 > 更新：2026-08-04  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**停止横向扩张，按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复和窄屏闭环。**  
-> 当前切片：**PR #101 已合并 `main`；Draft PR #102 已将 Evidence 恢复字段收口为单一 recovery port，并确认 GitHub 源码学习继续复用通用 EvidenceSnapshot，而不是建立第二套 GitHub 状态。代码基线 CI run `30926017939` 全绿。**  
+> 当前切片：**PR #102 已合并 `main`，Evidence 恢复字段已收口为单一 recovery port；GitHub 源码学习继续复用通用 EvidenceSnapshot，不建立第二套 GitHub 状态。下一切片为单一 `activeQuery` 跨域 selector。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -36,14 +36,17 @@
 - PR #98：主工作区遗留 NewsRun 状态清理，merge SHA `6b357bfe3b63d072f9374f19e149866171145b7a`；
 - PR #99：前端类型、布局兼容壳和无效设置合同清理，merge SHA `04770915e08528cb639edeba9839223072340f61`；
 - PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`；
-- PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`。
+- PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`；
+- PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/evidence-recovery-contract`；
-- Draft PR：`#102 收窄 Evidence 恢复合同并归位源码证据`；
-- 代码基线 commit：`261e367fcc984d1b89b98b382c8bfb69230e72d2`；
-- 完整 CI：run `30926017939`，结论 `success`。
+- 当前 `main` 功能基线：PR #102 merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
+- PR #102 代码基线 commit：`261e367fcc984d1b89b98b382c8bfb69230e72d2`；
+- 代码基线 CI：run `30926017939`，结论 `success`；
+- 最终 PR head：`e87ec5e79fd54954f0812e3a3cca79afdc1916ce`；
+- 最终 head CI：run `30926562554`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -116,7 +119,7 @@ evidence: evidence.recovery
 - 唯一显式 GitHub 生产引用是 Golden Journey 标签“GitHub 源码学习 -> 阅读源码 -> 回到学习目标”；
 - 源码证据已经由 server `evidence-snapshot-v1`、`normalizeEvidence()` 和 `EvidenceTrail` 统一展示与恢复。
 
-因此最终没有创建 `GitHubEvidenceRuntime`。永久边界禁止新增 GitHub 专属运行时、controller、run ID 或第二套 durable owner。
+因此没有创建 `GitHubEvidenceRuntime`。永久边界禁止新增 GitHub 专属运行时、controller、run ID 或第二套 durable owner。
 
 ## 7. PR #102 验证证据
 
@@ -132,6 +135,8 @@ evidence: evidence.recovery
 - TypeScript / Vite production build；
 - 38 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
+
+状态文档同步前的最终 PR head commit `e87ec5e79fd54954f0812e3a3cca79afdc1916ce`，CI run `30926562554` 也已完整通过全部相同门禁。
 
 CI 首轮发现静态测试作用域过宽：合法的 WorkspaceView RAG UI 绑定被误判成 recovery 泄漏。最终把断言限定到 `useWorkspaceRecovery` 调用片段；没有为通过测试放宽真实恢复边界，也没有改变产品行为。
 
@@ -170,12 +175,3 @@ ExtensionRuntime
 - CORS 统一为单一 owner；
 - 410 tombstone 只在明确迁移窗口结束后单独删除；
 - 补 Firefox、WebKit 和实体手机抽样。
-
-## 9. PR #102 合并条件
-
-- 最新 head 完整 CI 全绿；
-- 状态文档与代码事实一致；
-- WorkspacePersistence schema 与字段保持不变；
-- 不创建 GitHub 专属运行时或第二套 evidence 真值；
-- 不改变 ResearchRun、RAG、MemoryRun 或 committed learning truth；
-- PR 保持可回滚，范围只包含 Evidence recovery contract 与源码证据 owner 边界。
