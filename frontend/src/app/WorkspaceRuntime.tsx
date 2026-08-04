@@ -31,7 +31,6 @@ export default function WorkspaceRuntime() {
     dispatchWorkspace({ type: "SET_ACTIVE_LEARNING_CLOSURE_RUN", runId });
 
   const evidence = useEvidenceRuntime({
-    snapshot,
     refresh,
     loadFeature,
     input,
