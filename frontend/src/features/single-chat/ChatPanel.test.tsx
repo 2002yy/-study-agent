@@ -137,7 +137,7 @@ describe("ChatPanel learning product boundary", () => {
     expect(html).toContain("设置");
     expect(html).toContain("实验功能");
     expect(html).toContain("群聊讨论");
-    expect(html).toContain("新闻研究");
+    expect(html).not.toContain("新闻研究");
     expect(html).toContain("受控工具");
     expect(html).toContain("开发者诊断");
     expect(html).not.toContain("检索当前问题");
