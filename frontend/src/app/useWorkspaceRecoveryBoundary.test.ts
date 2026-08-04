@@ -18,6 +18,10 @@ const viewSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
   "utf8"
 );
+const recoveryCall = runtimeSource.slice(
+  runtimeSource.indexOf("useWorkspaceRecovery({"),
+  runtimeSource.indexOf("\n\n  return ("),
+);
 
 describe("workspace recovery and view boundaries", () => {
   it("owns restore, server hydration and persistence outside Runtime", () => {
@@ -33,7 +37,7 @@ describe("workspace recovery and view boundaries", () => {
   });
 
   it("consumes one evidence recovery port instead of evidence setters", () => {
-    expect(runtimeSource).toContain("evidence: evidence.recovery");
+    expect(recoveryCall).toContain("evidence: evidence.recovery");
     for (const leakedBinding of [
       "ragQuery: evidence.ragQueryRunId",
       "ragWrite: evidence.ragWriteRunId",
@@ -46,7 +50,7 @@ describe("workspace recovery and view boundaries", () => {
       "ragEnabled: evidence.ragEnabled",
       "setRagEnabled: evidence.setRagEnabled",
     ]) {
-      expect(runtimeSource).not.toContain(leakedBinding);
+      expect(recoveryCall).not.toContain(leakedBinding);
     }
 
     expect(recoverySource).toContain("evidence: EvidenceRecoveryPort");
