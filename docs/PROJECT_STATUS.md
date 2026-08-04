@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**Draft PR #105 已完成 `useChatController`、chat/session 恢复与持久化 owner 向 LearningSessionRuntime 的迁移；代码基线 CI run `30933752318` 全绿。**  
+> 当前切片：**PR #105 已合并 `main`，LearningSessionRuntime 已接管唯一 ChatController、chat/session 恢复与持久化 owner；下一批收口学习会话派生视图。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -36,15 +36,17 @@
 - PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`；
 - PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
 - PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
-- PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`。
+- PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
+- PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/learning-chat-session-runtime`；
-- Draft PR：`#105 迁移 LearningSessionRuntime 的 chat/session owner`；
-- base：清理后的 `main` at `b0566d9d0a9c162818ddd8e9a3f644bd7609758b`；
-- 代码基线：`b45f8455abf210058a300a577d16ea28e70c2717`；
-- 完整 CI：run `30933752318`，结论 `success`。
+- 当前 `main` 功能基线：PR #105 merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
+- PR #105 代码基线：`b45f8455abf210058a300a577d16ea28e70c2717`；
+- 代码基线 CI：run `30933752318`，结论 `success`；
+- 最终 PR head：`79b74140d7dd45c4db57ae1c6120ae0707fd078b`；
+- 最终 head CI：run `30934297065`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -132,7 +134,7 @@ evidence.hydrateRuntimeSettings()
 
 ## 7. PR #105 验证证据
 
-代码基线 commit `b45f8455abf210058a300a577d16ea28e70c2717` 的 CI run `30933752318` 已完整通过：
+代码基线 commit `b45f8455abf210058a300a577d16ea28e70c2717` 的 CI run `30933752318` 与最终 head commit `79b74140d7dd45c4db57ae1c6120ae0707fd078b` 的 CI run `30934297065` 均完整通过：
 
 - 893 项 pytest；
 - RAG K1 固定 corpus；
