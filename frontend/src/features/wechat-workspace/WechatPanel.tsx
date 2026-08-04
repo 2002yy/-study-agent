@@ -5,7 +5,6 @@ import { searchWechat } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import type { WechatSearchResponse, WechatStateResponse } from "../../types";
 import { displayValue } from "../../utils/format";
-import type { NewsController } from "../news-workspace/newsController";
 import type { ResearchLookupResponse } from "../web-lookup/researchApi";
 import { speakerToRole } from "../roles/roleCatalog";
 
@@ -135,27 +134,19 @@ export function WechatPanel({
   error,
 }: {
   wechat: WechatStateResponse | null;
-  newsController: NewsController;
   webLookup: ResearchLookupResponse | null;
   useWebLookup: boolean;
   setUseWebLookup: (value: boolean) => void;
   wechatInput: string;
   setWechatInput: (value: string) => void;
-  newsQuery: string;
-  setNewsQuery: (value: string) => void;
-  readArticles: boolean;
-  setReadArticles: (value: boolean) => void;
   sessionId?: string;
   onOpening: () => void;
   onReset: () => void;
   onMarkRead: () => void;
   onSendWechat: (event: FormEvent) => void;
   onStopWechat?: () => void;
-  onLookupNews: () => void;
-  onStopLookup?: () => void;
   isWechatBusy: boolean;
   error: string;
-  isNewsBusy: boolean;
 }) {
   const [wechatSearchQuery, setWechatSearchQuery] = useState("");
   const [wechatSearch, setWechatSearch] = useState<WechatSearchResponse | null>(null);
@@ -317,7 +308,7 @@ export function WechatPanel({
           <label className="toggle-row">
             <input
               checked={useWebLookup}
-              disabled={!( ["completed", "partial"].includes(webLookup.status) && webLookup.news_items.length > 0)}
+              disabled={!(["completed", "partial"].includes(webLookup.status) && webLookup.news_items.length > 0)}
               onChange={(event) => setUseWebLookup(event.target.checked)}
               type="checkbox"
             />
