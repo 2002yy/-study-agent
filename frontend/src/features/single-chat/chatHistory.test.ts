@@ -69,7 +69,7 @@ describe("buildWorkspaceState", () => {
     expect(state.wechatThreadId).toBeUndefined();
   });
 
-  it("keeps single chat and wechat ids isolated", () => {
+  it("keeps single chat and wechat ids isolated while discarding retired news state", () => {
     const state = buildWorkspaceState({
       sessionId: "legacy-session",
       singleChatSessionId: "single-session",
@@ -79,7 +79,7 @@ describe("buildWorkspaceState", () => {
 
     expect(state.singleChatSessionId).toBe("single-session");
     expect(state.wechatThreadId).toBe("wechat-thread");
-    expect(state.newsRunId).toBe("news-run");
+    expect("newsRunId" in state).toBe(false);
   });
 });
 
