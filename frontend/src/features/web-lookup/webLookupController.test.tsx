@@ -85,6 +85,29 @@ describe("useWebLookupController", () => {
     expect(errors[errors.length - 1]).toBe("");
   });
 
+  it("restores a completed run for inspection without selecting it for chat", async () => {
+    apiMocks.loadResearchRun.mockResolvedValue(
+      runPayload({ run_id: "web_lookup_saved" }),
+    );
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "saved",
+        setOperationError: vi.fn(),
+        activeRunId: "web_lookup_saved",
+        setActiveRunId: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.result?.run_id).toBe("web_lookup_saved");
+    expect(result.current.result?.status).toBe("completed");
+    expect(result.current.useInChat).toBe(false);
+  });
+
   it("rehydrates and resumes a pending run instead of creating another", async () => {
     apiMocks.loadResearchRun.mockResolvedValue(
       runPayload({ run_id: "web_lookup_saved", query_text: "saved", status: "pending", stage: "planned", news_items: [] }),
