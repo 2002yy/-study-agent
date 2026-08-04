@@ -1,10 +1,10 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-04  
+> 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**停止横向扩张，按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复和窄屏闭环。**  
-> 当前切片：**PR #102 已合并 `main`，Evidence 恢复字段已收口为单一 recovery port；GitHub 源码学习继续复用通用 EvidenceSnapshot，不建立第二套 GitHub 状态。下一切片为单一 `activeQuery` 跨域 selector。**  
+> 当前切片：**PR #102 已合并 `main`；Draft PR #103 已完成单一 `activeQuery` 跨域 selector，代码基线 CI run `30928667587` 全绿。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -39,14 +39,13 @@
 - PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`；
 - PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`。
 
-## 3. 当前主线状态
+## 3. 当前待合并切片
 
-- 当前 `main` 功能基线：PR #102 merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
-- PR #102 代码基线 commit：`261e367fcc984d1b89b98b382c8bfb69230e72d2`；
-- 代码基线 CI：run `30926017939`，结论 `success`；
-- 最终 PR head：`e87ec5e79fd54954f0812e3a3cca79afdc1916ce`；
-- 最终 head CI：run `30926562554`，结论 `success`；
-- 当前没有待合并的功能 PR。
+- 分支：`agent/active-query-selector`；
+- Draft PR：`#103 收口 activeQuery 跨域 selector`；
+- base：`main` at `d798fe4294519063562d697ab05fef54a5a129dd`；
+- 代码基线 head：`484fe952a2860538f6bf10f83893f73f33bc22ef`；
+- 完整 CI：run `30928667587`，结论 `success`。
 
 ## 4. 必须保护的稳定闭环
 
@@ -82,8 +81,6 @@
 - Sources 的实际加载只能由 EvidenceRuntime 执行；
 - WorkspaceCoordinator 继续属于跨域组合层。
 
-最终 head CI run `30918520288` 已完整通过全部门禁。
-
 ## 6. PR #102：Evidence 恢复合同收口
 
 ### 6.1 新恢复端口
@@ -94,7 +91,7 @@ EvidenceRuntime 新增：
 - `EvidenceRecoveryState`：只读提供持久化所需 evidence 字段；
 - `EvidenceRecoveryPort`：统一暴露 `state`、`restore()`、`hydrateRuntimeSettings()`。
 
-`WorkspaceRuntime` 现在只向 `useWorkspaceRecovery` 传入：
+`WorkspaceRuntime` 只向 `useWorkspaceRecovery` 传入：
 
 ```text
 evidence: evidence.recovery
@@ -102,28 +99,75 @@ evidence: evidence.recovery
 
 不再逐项传入 evidence run ID、setter、RAG settings 和 enabled。`useWorkspaceRecovery` 不能直接操作 EvidenceRuntime setter，只能调用窄端口。
 
-### 6.2 持久化兼容
+### 6.2 持久化与源码证据边界
 
 - `WorkspacePersistence` schema 仍为 v4；
 - localStorage 字段名和旧 payload 恢复格式均未改变；
-- `ragQueryRunId`、`ragWriteRunId`、`webLookupRunId`、`ragSettings`、`ragEnabled` 仍按原字段持久化；
 - 没有迁移 API、SQLite schema 或 durable entity；
-- 没有改变 ResearchRun、RAG、MemoryRun 或 committed learning truth。
+- GitHub 源码学习继续复用 server `evidence-snapshot-v1`、`normalizeEvidence()` 和 `EvidenceTrail`；
+- 永久边界禁止 GitHub 专属 runtime、controller、run ID 或第二套 durable owner。
 
-### 6.3 GitHub 源码证据审计
+## 7. PR #103：activeQuery 跨域 selector
 
-受控 inventory CI run `30925191599` 扫描生产前端，结论：
+### 7.1 生产引用审计
 
-- 不存在 GitHub 专属 controller；
-- 不存在 GitHub 专属 run ID、repository state 或 symbol mapping state owner；
-- 唯一显式 GitHub 生产引用是 Golden Journey 标签“GitHub 源码学习 -> 阅读源码 -> 回到学习目标”；
-- 源码证据已经由 server `evidence-snapshot-v1`、`normalizeEvidence()` 和 `EvidenceTrail` 统一展示与恢复。
+受控 inventory CI run `30928295744` 扫描生产前端，确认真正属于 activeQuery 合同的引用只有：
 
-因此没有创建 `GitHubEvidenceRuntime`。永久边界禁止新增 GitHub 专属运行时、controller、run ID 或第二套 durable owner。
+1. `useWorkspaceControllers` 中“当前输入，否则上一轮 RAG query”的唯一推导；
+2. `WorkspaceView` 中 Sources 检索消费 `activeQuery`；
+3. 受控工具 invocation 使用 `query: activeQuery`。
 
-## 7. PR #102 验证证据
+以下 `input.trim()` 属于各自领域的提交校验，不属于 activeQuery：
 
-代码基线 commit `261e367fcc984d1b89b98b382c8bfb69230e72d2` 的 CI run `30926017939` 已完整通过：
+- 单聊发送；
+- ChatPanel 回车与发送按钮可用性；
+- 群聊发送。
+
+因此本批没有把聊天输入校验下沉到 selector，也没有改变发送行为。
+
+### 7.2 单一 selector
+
+新增 `frontend/src/app/activeQuerySelector.ts`：
+
+```text
+selectActiveQuery
+-> trim 当前输入
+-> 当前输入非空：返回当前输入
+-> 当前输入为空：返回 trim 后的上一轮 RAG query
+-> 两者都为空：返回空字符串
+```
+
+selector 是纯函数：
+
+- 不引入 React hook；
+- 不创建 state；
+- 不持久化 query；
+- 不拥有 RAG、Tool 或 Learning runtime；
+- 只在跨域组合层 `useWorkspaceControllers` 求值一次。
+
+### 7.3 消费边界
+
+- `currentToolInvocation.query` 使用同一个 `activeQuery`；
+- Sources 搜索继续调用 `ragController.search(activeQuery)`；
+- `WorkspaceView` 不重新推导 query；
+- EvidenceRuntime 与 ToolController 不新增 fallback 逻辑；
+- 生产代码中只有 `useWorkspaceControllers` 声明 `const activeQuery =`。
+
+### 7.4 回归合同
+
+新增永久测试覆盖：
+
+- 当前输入优先且去除首尾空白；
+- 输入为空时回退到上一轮 RAG query；
+- 两者均为空时返回空字符串；
+- selector 不依赖 React；
+- 生产代码只有一个 activeQuery 声明 owner；
+- Tool invocation 与 Sources 搜索共享该结果；
+- 旧内联推导表达式不得恢复。
+
+## 8. PR #103 验证证据
+
+代码基线 commit `484fe952a2860538f6bf10f83893f73f33bc22ef` 的 CI run `30928667587` 已完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -131,22 +175,14 @@ evidence: evidence.recovery
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 65 个前端测试文件、234 项测试；
+- 66 个前端测试文件、238 项测试；
 - TypeScript / Vite production build；
 - 38 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
-状态文档同步前的最终 PR head commit `e87ec5e79fd54954f0812e3a3cca79afdc1916ce`，CI run `30926562554` 也已完整通过全部相同门禁。
-
-CI 首轮发现静态测试作用域过宽：合法的 WorkspaceView RAG UI 绑定被误判成 recovery 泄漏。最终把断言限定到 `useWorkspaceRecovery` 调用片段；没有为通过测试放宽真实恢复边界，也没有改变产品行为。
-
 说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
 
-## 8. 下一执行顺序
-
-### P1-R3：收口 activeQuery 跨域 selector
-
-当前工具调用与 Sources 检索都依赖“输入框文本，否则使用上一轮 RAG query”的推导。下一批应建立单一 selector，避免 Learning / Evidence / Tool 各自重新推导查询。
+## 9. 下一执行顺序
 
 ### P1-R4：抽离 LearningSessionRuntime
 
@@ -155,7 +191,15 @@ LearningSessionRuntime
 -> chat / sessions / pedagogy / recovery / closure
 ```
 
-先移动 owner，不改变 session、turn、closure、MemoryRun 或 committed truth。
+第一批只移动 owner 与恢复端口：
+
+- chat controller；
+- active session / session summary selector；
+- session restore / new / archive；
+- pedagogy phase 与 RestoreCard 所需状态；
+- closure / MemoryRun 的会话侧入口。
+
+不得改变 session、turn、closure、MemoryRun、WorkspacePersistence 或 committed truth。
 
 ### P1-R5：抽离 ExtensionRuntime
 
@@ -175,3 +219,11 @@ ExtensionRuntime
 - CORS 统一为单一 owner；
 - 410 tombstone 只在明确迁移窗口结束后单独删除；
 - 补 Firefox、WebKit 和实体手机抽样。
+
+## 10. PR #103 合并条件
+
+- 最新 head 完整 CI 全绿；
+- 状态文档与代码事实一致；
+- 不改变聊天发送、Sources 搜索或 Tool invocation 的用户可见语义；
+- 不改变 WorkspacePersistence、API、SQLite schema 或 committed learning truth；
+- PR 保持可回滚，范围只包含 activeQuery selector 与边界测试。
