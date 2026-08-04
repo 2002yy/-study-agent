@@ -35,14 +35,17 @@ describe("frontend state consolidation boundary", () => {
   it("uses SettingsPanel directly without legacy layout shells", () => {
     const view = read("./WorkspaceView.tsx");
     const controllers = read("./useWorkspaceControllers.ts");
+    const learning = read("./useLearningSessionRuntime.ts");
     const settings = read("../features/settings/SettingsPanel.tsx");
 
     expect(view).toContain('from "../features/settings/SettingsPanel"');
     expect(view).toContain("<SettingsPanel");
     expect(view).not.toContain("../layout/Sidebar");
     expect(view).not.toContain("<Sidebar");
-    expect(controllers).toContain('from "../features/settings/SettingsPanel"');
+    expect(learning).toContain('from "../features/settings/SettingsPanel"');
+    expect(controllers).not.toContain('from "../features/settings/SettingsPanel"');
     expect(controllers).not.toContain("../layout/Sidebar");
+    expect(learning).not.toContain("../layout/Sidebar");
 
     for (const retiredProp of [
       "ragUploadMode",

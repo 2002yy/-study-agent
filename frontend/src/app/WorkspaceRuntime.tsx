@@ -27,14 +27,22 @@ export default function WorkspaceRuntime() {
     activeChatThreadId: workspaceRuntime.activeChatThreadId,
     setOperationError,
   });
-  const learning = useLearningSessionRuntime({ refresh });
+  const webPolicy = String(
+    snapshot.runtimeSettings?.settings?.web_policy ?? "auto",
+  );
+  const learning = useLearningSessionRuntime({
+    refresh,
+    setInput,
+    setOperationError,
+    evidence: evidence.learning,
+    webPolicy,
+  });
   const controllers = useWorkspaceControllers({
     snapshot,
     setSnapshot,
     refresh,
     loadFeature,
     input,
-    setInput,
     operationError: setOperationError,
     activeGroupThreadId: workspaceRuntime.activeGroupThreadId,
     evidence,
@@ -47,13 +55,11 @@ export default function WorkspaceRuntime() {
       tool: setToolRunId,
     },
   });
-  const { groupThreadId: wechatThreadId, chatController } = controllers;
+  const { groupThreadId: wechatThreadId } = controllers;
 
   useWorkspaceRecovery({
     snapshot,
-    chatController,
     ids: {
-      singleChat: chatController.threadId,
       group: wechatThreadId,
       tool: toolRunId,
     },

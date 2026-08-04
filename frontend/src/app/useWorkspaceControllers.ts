@@ -2,13 +2,8 @@ import { useEffect, useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { LocalKnowledgeInvocation } from "../api";
-import { createEmptyRag, useChatController } from "../features/chat/chatController";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useRoleController } from "../features/roles/roleController";
-import {
-  CHAT_SETTINGS_DEFAULTS,
-  RAG_SETTINGS_DEFAULTS,
-} from "../features/settings/SettingsPanel";
 import { useSettingsController } from "../features/settings/settingsController";
 import { useToolController } from "../features/tools/toolController";
 import { useWorkflowController } from "../features/workflows/workflowController";
@@ -35,7 +30,6 @@ export function useWorkspaceControllers(options: {
   refresh: () => Promise<void>;
   loadFeature: FeatureLoader;
   input: string;
-  setInput: ValueSetter<string>;
   operationError: ValueSetter<string>;
   activeGroupThreadId?: string;
   evidence: EvidenceRuntime;
@@ -51,21 +45,15 @@ export function useWorkspaceControllers(options: {
   const { state } = useWorkspace();
   const {
     ragEnabled,
-    setRagEnabled,
     ragSettings,
-    setRagSettings,
     webLookupController,
     ragController,
     uploadController,
   } = options.evidence;
   const {
     chatSettings,
-    setChatSettings,
-    keepCurrentRole,
-    setKeepCurrentRole,
-    conversationInstruction,
-    setConversationInstruction,
     memoryController,
+    chatController,
   } = options.learning;
   const roleController = useRoleController(chatSettings.selectedRole);
   const workflowController = useWorkflowController();
@@ -101,7 +89,7 @@ export function useWorkspaceControllers(options: {
           clearRag: ragController.clear,
           clearToolRun: () => options.setRunId.tool(undefined),
           clearWorkflow: workflowController.clear,
-        }
+        },
       ),
     [
       groupController.cancelWorkspace,
@@ -109,38 +97,18 @@ export function useWorkspaceControllers(options: {
       ragController.clear,
       workflowController.clear,
       options.setRunId.tool,
-    ]
+    ],
   );
-  const runtimeSettings = (options.snapshot.runtimeSettings?.settings ?? {}) as Record<string, unknown>;
-  const webPolicy = String(runtimeSettings.web_policy ?? "auto");
-  const chatController = useChatController({
-    chatSettings,
-    chatSettingsDefaults: CHAT_SETTINGS_DEFAULTS,
-    setChatSettings,
-    ragSettings,
-    ragSettingsDefaults: RAG_SETTINGS_DEFAULTS,
-    setRagSettings,
-    ragEnabled,
-    setRagEnabled,
-    keepCurrentRole,
-    setKeepCurrentRole,
-    conversationInstruction,
-    setConversationInstruction,
-    webLookupSource: webLookupController.result?.source_block ?? "",
-    webLookupRunId: webLookupController.result?.run_id,
-    useWebLookup: webLookupController.useInChat,
-    webPolicy,
-    setUseWebLookup: webLookupController.setUseInChat,
-    setInput: options.setInput,
-    setOperationError: options.operationError,
-    clearChatArtifacts:
-      workspaceCoordinator.clearChatArtifacts.bind(workspaceCoordinator),
-    refresh: options.refresh,
-    onResearchRunDiscovered: (runId, forceRefresh = false) => {
-      options.evidence.setWebLookupRunId(runId);
-      if (forceRefresh) void webLookupController.refreshRun(runId);
-    },
-  });
+
+  useEffect(
+    () =>
+      options.learning.bindArtifactPort({
+        clearChatArtifacts:
+          workspaceCoordinator.clearChatArtifacts.bind(workspaceCoordinator),
+      }),
+    [options.learning.bindArtifactPort, workspaceCoordinator],
+  );
+
   const activeQuery = selectActiveQuery({
     input: options.input,
     lastRagQuery: chatController.lastChat?.rag?.query,
@@ -216,6 +184,5 @@ export function useWorkspaceControllers(options: {
     uploadController,
     chatController,
     toolController,
-    createEmptyRag,
   };
 }

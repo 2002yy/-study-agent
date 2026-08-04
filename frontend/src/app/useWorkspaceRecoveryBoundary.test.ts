@@ -4,23 +4,23 @@ import { describe, expect, it } from "vitest";
 
 const runtimeSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceRuntime.tsx", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const recoverySource = readFileSync(
   fileURLToPath(new URL("./useWorkspaceRecovery.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const evidenceSource = readFileSync(
   fileURLToPath(new URL("./useEvidenceRuntime.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const learningSource = readFileSync(
   fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const viewSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const recoveryCall = runtimeSource.slice(
   runtimeSource.indexOf("useWorkspaceRecovery({"),
@@ -28,16 +28,22 @@ const recoveryCall = runtimeSource.slice(
 );
 
 describe("workspace recovery and view boundaries", () => {
-  it("owns restore, server hydration and persistence outside Runtime", () => {
+  it("owns persistence orchestration outside Runtime while Learning owns chat hydration", () => {
     for (const token of [
       "useWorkspacePersistence({",
-      "hydrateSession(",
-      "runtimeSettings?.settings",
       "sessionSettingsRestoredRef",
     ]) {
       expect(recoverySource).toContain(token);
       expect(runtimeSource).not.toContain(token);
     }
+    expect(recoverySource).toContain("runtimeSettings?.settings");
+    expect(runtimeSource).toContain(
+      "snapshot.runtimeSettings?.settings?.web_policy",
+    );
+    expect(runtimeSource).not.toContain("hydrateRuntimeSettings(");
+    expect(learningSource).toContain("chatController.hydrateSession(");
+    expect(recoverySource).not.toContain("hydrateSession(");
+    expect(runtimeSource).not.toContain("hydrateSession(");
   });
 
   it("consumes one evidence recovery port instead of evidence setters", () => {
@@ -73,8 +79,9 @@ describe("workspace recovery and view boundaries", () => {
     expect(evidenceSource).toContain("hydrateRuntimeSettings,");
   });
 
-  it("consumes one learning recovery port instead of learning setters", () => {
+  it("consumes one learning recovery port for learning and chat state", () => {
     expect(recoveryCall).toContain("learning: learning.recovery");
+    expect(recoveryCall).not.toContain("chatController");
     for (const leakedBinding of [
       "memory: learning.memoryRunId",
       "learningClosure: learning.learningClosureRunId",
@@ -92,8 +99,10 @@ describe("workspace recovery and view boundaries", () => {
 
     expect(recoverySource).toContain("learning: LearningRecoveryPort");
     expect(recoverySource).toContain("learning.restore({");
+    expect(recoverySource).toContain("learning.restore(null)");
     expect(recoverySource).toContain("learning.hydrateRuntimeSettings(settings)");
     expect(recoverySource).toContain("...learning.state");
+    expect(recoverySource).not.toContain("chatController");
     expect(recoverySource).not.toContain("setChatSettings");
     expect(recoverySource).not.toContain("setKeepCurrentRole");
     expect(recoverySource).not.toContain("setConversationInstruction");
@@ -101,6 +110,8 @@ describe("workspace recovery and view boundaries", () => {
     expect(recoverySource).not.toContain("setLearningClosureRunId");
 
     expect(learningSource).toContain("export type LearningRecoveryPort");
+    expect(learningSource).toContain("singleChatSessionId: chatController.threadId");
+    expect(learningSource).toContain("cachedMessages: chatController.messages");
     expect(learningSource).toContain("const recovery = useMemo<LearningRecoveryPort>");
     expect(learningSource).toContain("restore,");
     expect(learningSource).toContain("hydrateRuntimeSettings,");

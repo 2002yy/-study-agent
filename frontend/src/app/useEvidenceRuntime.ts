@@ -48,6 +48,18 @@ export type EvidenceRecoveryPort = {
   hydrateRuntimeSettings: (settings: RuntimeSettings) => void;
 };
 
+export type EvidenceLearningPort = {
+  ragEnabled: boolean;
+  setRagEnabled: Dispatch<SetStateAction<boolean>>;
+  ragSettings: RagSettings;
+  setRagSettings: Dispatch<SetStateAction<RagSettings>>;
+  webLookupSource: string;
+  webLookupRunId?: string;
+  useWebLookup: boolean;
+  setUseWebLookup: Dispatch<SetStateAction<boolean>>;
+  onResearchRunDiscovered: (runId: string, forceRefresh?: boolean) => void;
+};
+
 export function useEvidenceRuntime(options: {
   refresh: () => Promise<void>;
   loadFeature: FeatureLoader;
@@ -93,6 +105,14 @@ export function useEvidenceRuntime(options: {
     setOperationError: options.setOperationError,
     onChanged: options.refresh,
   });
+
+  const onResearchRunDiscovered = useCallback(
+    (runId: string, forceRefresh = false) => {
+      setWebLookupRunId(runId);
+      if (forceRefresh) void webLookupController.refreshRun(runId);
+    },
+    [setWebLookupRunId, webLookupController.refreshRun],
+  );
 
   const restore = useCallback(
     (recovery: EvidenceRecoveryInput) => {
@@ -147,6 +167,28 @@ export function useEvidenceRuntime(options: {
     ],
   );
 
+  const learning = useMemo<EvidenceLearningPort>(
+    () => ({
+      ragEnabled,
+      setRagEnabled,
+      ragSettings,
+      setRagSettings,
+      webLookupSource: webLookupController.result?.source_block ?? "",
+      webLookupRunId: webLookupController.result?.run_id,
+      useWebLookup: webLookupController.useInChat,
+      setUseWebLookup: webLookupController.setUseInChat,
+      onResearchRunDiscovered,
+    }),
+    [
+      ragEnabled,
+      ragSettings,
+      webLookupController.result,
+      webLookupController.useInChat,
+      webLookupController.setUseInChat,
+      onResearchRunDiscovered,
+    ],
+  );
+
   useResetResearchSelectionOnSessionChange(
     options.activeChatThreadId,
     webLookupController.setUseInChat,
@@ -189,6 +231,7 @@ export function useEvidenceRuntime(options: {
     ragController,
     uploadController,
     recovery,
+    learning,
   };
 }
 

@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**PR #104 已合并 `main`，LearningSessionRuntime 已接管学习设置、MemoryRun/ClosureRun、MemoryController 与恢复端口；下一批迁移 chat/session owner。**  
+> 当前切片：**Draft PR #105 已完成 `useChatController`、chat/session 恢复与持久化 owner 向 LearningSessionRuntime 的迁移；代码基线 CI run `30933752318` 全绿。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -38,21 +38,20 @@
 - PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
 - PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`。
 
-## 3. 当前主线状态
+## 3. 当前待合并切片
 
-- 当前 `main` 功能基线：PR #104 merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
-- PR #104 代码基线：`33b19c41bc9ca102417b9de01416142fb45eda17`；
-- 代码基线 CI：run `30930508714`，结论 `success`；
-- 最终 PR head：`7df757d404bca8133b28b76a7222787ec1f60116`；
-- 最终 head CI：run `30930983820`，结论 `success`；
-- 当前没有待合并的功能 PR。
+- 分支：`agent/learning-chat-session-runtime`；
+- Draft PR：`#105 迁移 LearningSessionRuntime 的 chat/session owner`；
+- base：清理后的 `main` at `b0566d9d0a9c162818ddd8e9a3f644bd7609758b`；
+- 代码基线：`b45f8455abf210058a300a577d16ea28e70c2717`；
+- 完整 CI：run `30933752318`，结论 `success`。
 
 ## 4. 必须保护的稳定闭环
 
 | 闭环 | 当前结论 | 真实证据边界 |
 |---|---|---|
 | 首次开始 | 真实全栈通过 | React -> FastAPI -> SQLite；无需先配置 |
-| 返回学习 | 可恢复并继续 | 目标、上下文、设置、run ID 与下一步恢复 |
+| 返回学习 | 可恢复并继续 | 目标、上下文、设置、run ID、消息与下一步恢复 |
 | 上传资料学习 | 真实全栈通过 | 文件合同、索引、EvidenceSnapshot、刷新恢复 |
 | 联网研究 | 取消与恢复通过 | durable ResearchRun、同 run 重试与恢复 |
 | 源码学习 | 展示与恢复可用 | 通用 EvidenceSnapshot / EvidenceTrail |
@@ -63,123 +62,116 @@
 
 必须继续保护：`RestoreCard`、`LearningStrip`、`SourcesPanel`、MemoryRun、ResearchRun、RAG query/write run、WorkspacePersistence v4 和学习结束 committed truth。
 
-## 5. Evidence 与查询边界
+## 5. 当前运行时 owner
 
 ### EvidenceRuntime
 
-`useEvidenceRuntime` 集中拥有：
+`useEvidenceRuntime` 集中拥有 RAG settings/enabled、RagQueryRun、RagWriteRun、ResearchRun、RAG/上传/联网研究 controller、Sources 实际加载和 `EvidenceRecoveryPort`。
 
-- RAG enabled/settings；
-- RagQueryRun、RagWriteRun、ResearchRun ID；
-- RAG、上传、联网研究 controller；
-- Sources 抽屉实际数据加载；
-- `EvidenceRecoveryPort`。
+为 Learning chat 提供窄 `EvidenceLearningPort`，只暴露聊天所需的 RAG 与联网研究依赖，不把 Evidence controller owner 迁入 Learning。
 
-WorkspaceRuntime 和恢复层不得重新直接持有 evidence setter。
+### LearningSessionRuntime
 
-### activeQuery
+`useLearningSessionRuntime` 现在集中拥有：
 
-`selectActiveQuery()` 是唯一跨域查询推导：
+- `chatSettings`、角色保持与会话指令；
+- MemoryRun、LearningClosureRun 与 `useMemoryController`；
+- 唯一生产 `useChatController`；
+- chat/session 消息、thread、lastChat、stream recovery 与发送状态；
+- `LearningRecoveryPort`；
+- 跨域清理窄端口 `LearningArtifactPort`。
 
-```text
-当前输入非空 -> 当前输入
-否则 -> 上一轮 RAG query
-均为空 -> 空字符串
-```
+`useWorkspaceControllers` 不再 import 或构造 `useChatController` / `useMemoryController`，只消费 Learning runtime。
 
-Sources 搜索和受控 Tool invocation 共用同一结果；聊天发送和群聊发送的 `input.trim()` 仍属于各自提交校验。
+## 6. PR #105：chat/session owner 迁移
 
-## 6. LearningSessionRuntime 第一批
+### 6.1 解除 WorkspaceCoordinator 循环依赖
 
-`frontend/src/app/useLearningSessionRuntime.ts` 已集中拥有：
+`useChatController` 在恢复、新建和归档会话时需要清理 RAG、ToolRun 与 Workflow。跨域清理仍由 `WorkspaceCoordinator` 拥有，没有迁入 LearningRuntime。
 
-- `chatSettings`；
-- `keepCurrentRole`；
-- `conversationInstruction`；
-- MemoryRun ID；
-- LearningClosureRun ID；
-- `useMemoryController`；
-- session summary 写入 dispatch；
-- `LearningRecoveryPort`。
-
-### 6.1 WorkspaceRuntime 收口
-
-WorkspaceRuntime 不再直接声明：
-
-- `useState<ChatSettings>`；
-- keep-current-role state；
-- conversation-instruction state；
-- MemoryRun / ClosureRun setter；
-- MemoryController。
-
-它只创建：
+新增：
 
 ```text
-const learning = useLearningSessionRuntime({ refresh })
+LearningArtifactPort
+-> clearChatArtifacts()
 ```
 
-并把 `learning` 交给跨域组合层、视图绑定和恢复端口。
+LearningRuntime 持有稳定 callback；跨域组合层通过 `bindArtifactPort()` 绑定 Coordinator 实现。禁止复制 controller 或创建第二套 chat state。
 
-### 6.2 跨域组合层
+### 6.2 chat/session 恢复与持久化
 
-`useWorkspaceControllers`：
+`LearningRecoveryPort` 现在统一处理：
 
-- 不再 import 或构造 `useMemoryController`；
-- 从 `options.learning` 读取学习设置和 `memoryController`；
-- 当前仍构造唯一的 `useChatController`；
-- WorkspaceCoordinator 继续属于跨域组合层。
+- `singleChatSessionId` 与兼容 `sessionId`；
+- MemoryRun / LearningClosureRun；
+- chat settings、角色保持、会话指令；
+- `lastRoute`、`lastRag`、`lastSessionId`；
+- `cachedMessages`；
+- hydrate session、seed messages 与 restored lastChat。
 
-### 6.3 Learning recovery port
-
-`LearningRecoveryPort` 统一暴露：
+`useWorkspaceRecovery` 不再 import、接收或调用 ChatController，只编排：
 
 ```text
-state
-restore()
-hydrateRuntimeSettings()
+learning.restore()
+evidence.restore()
+learning.hydrateRuntimeSettings()
+evidence.hydrateRuntimeSettings()
 ```
 
-`useWorkspaceRecovery` 只接收 `learning: learning.recovery`，不得直接调用学习 setter。
+`isSending` 仍只属于 `WorkspacePersistenceState`，用于写入节流，不进入恢复 payload。
 
-### 6.4 兼容边界
+### 6.3 兼容边界
 
 - WorkspacePersistence schema 仍为 v4；
-- `memoryRunId`、`learningClosureRunId`、`chatSettings`、`keepCurrentRole`、`conversationInstruction` 字段名不变；
+- 原 localStorage 字段名不变；
 - session/turn/recovery API 不变；
 - SQLite schema 与 durable entity 不变；
-- MemoryRun 与 closure 确认语义不变；
-- committed learning truth 不变。
+- MemoryRun、closure 与 committed learning truth 不变；
+- WorkspaceCoordinator 仍是跨域清理 owner；
+- 用户界面和交互入口不变。
 
-## 7. PR #104 验证证据
+## 7. PR #105 验证证据
 
-代码基线 commit `33b19c41bc9ca102417b9de01416142fb45eda17` 的 CI run `30930508714` 与最终 head commit `7df757d404bca8133b28b76a7222787ec1f60116` 的 CI run `30930983820` 均完整通过：
+代码基线 commit `b45f8455abf210058a300a577d16ea28e70c2717` 的 CI run `30933752318` 已完整通过：
 
-- 全量 pytest；
+- 893 项 pytest；
 - RAG K1 固定 corpus；
 - Ruff；
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 67 个前端测试文件、240 项测试；
+- 67 个前端测试文件、243 项测试；
 - TypeScript / Vite production build；
 - 38 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
-说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
+说明：raw expanded mypy 仍有既有存量错误；run 中 baseline 为 current=125、baseline=127、resolved=2，未宣称 raw mypy 全量清零。
 
-## 8. 下一执行顺序
+### 受控失败记录
 
-### P1-R4B：迁移 chat/session owner
+- CI `30932705424`：892 项测试通过，旧 packaging guard 仍要求 ChatController 在跨域组合层；更新为验证 LearningRuntime 唯一 owner。
+- CI `30932952815`：后端门禁通过，两个旧前端静态断言绑定旧 Settings/recovery owner；收窄到真实职责。
+- CI `30933377232`：67/67 文件、243/243 测试通过；TypeScript 发现 `isSending` 被误放入恢复类型，修正为只持久化、不恢复。
 
-下一批继续将以下职责归入 LearningSessionRuntime：
+这些修正没有放宽实际 owner、持久化或产品行为边界。
 
-- `useChatController`；
-- active session 与 session summary selector；
-- session restore / new / archive 的会话侧 owner；
-- pedagogy phase 和 RestoreCard 所需的会话状态；
-- chat persistence/recovery port。
+## 8. 操作审计
 
-必须先解决 WorkspaceCoordinator 与 chat controller 的跨域清理依赖，不得通过复制 controller 或新增第二套 chat state 绕开。
+本批开始时误将临时 `noop` 文件写入 `main`，commit `79065ae99593e0a9edf2e8007dd4acc39a80dd2e`；随后立即以 commit `b0566d9d0a9c162818ddd8e9a3f644bd7609758b` 删除。主线无净文件变化，功能分支从清理后的 commit 建立。
+
+## 9. 下一执行顺序
+
+### P1-R4C：收口学习会话派生视图
+
+下一批将 WorkspaceView 中仍在现场推导的学习会话状态归入 LearningSessionRuntime 的 view model：
+
+- active session selector；
+- server/local session summary 合并规则；
+- 新建会话确认语义；
+- interrupted-turn abandon action；
+- pedagogy phases 与 RestoreCard 所需会话派生状态。
+
+只移动派生逻辑与 action owner，不改变界面、确认文案、session API 或 committed truth。
 
 ### P1-R5：抽离 ExtensionRuntime
 
@@ -190,7 +182,7 @@ ExtensionRuntime
 
 ### P1-R6：普通模式与单一实验室入口
 
-普通模式只保留：会话历史、资料与来源、学习成果、设置。群聊、工具和开发者诊断进入单一实验室，默认不加载。
+普通模式只保留学习会话、资料与来源、学习成果、设置。群聊、工具和开发者诊断进入单一实验室，默认不加载。
 
 ### 剩余债务
 

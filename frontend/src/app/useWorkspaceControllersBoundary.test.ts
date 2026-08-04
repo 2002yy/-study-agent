@@ -4,19 +4,19 @@ import { describe, expect, it } from "vitest";
 
 const runtimeSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceRuntime.tsx", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const compositionSource = readFileSync(
   fileURLToPath(new URL("./useWorkspaceControllers.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const evidenceSource = readFileSync(
   fileURLToPath(new URL("./useEvidenceRuntime.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 const learningSource = readFileSync(
   fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
-  "utf8"
+  "utf8",
 );
 
 const workspaceControllerHooks = [
@@ -24,7 +24,6 @@ const workspaceControllerHooks = [
   "useWorkflowController",
   "useSettingsController",
   "useGroupChatController",
-  "useChatController",
   "useToolController",
 ];
 const evidenceControllerHooks = [
@@ -58,15 +57,21 @@ describe("workspace controller composition boundary", () => {
       expect(evidenceSource).toContain(stateToken);
       expect(runtimeSource).not.toContain(stateToken);
     }
+    expect(evidenceSource).toContain("export type EvidenceLearningPort");
+    expect(evidenceSource).toContain("const learning = useMemo<EvidenceLearningPort>");
   });
 
-  it("makes LearningSessionRuntime the owner of learning settings, closure runs, and MemoryController", () => {
-    expect(runtimeSource).toContain("useLearningSessionRuntime({ refresh })");
+  it("makes LearningSessionRuntime the owner of chat, learning settings, closure runs, and MemoryController", () => {
+    expect(runtimeSource).toContain("useLearningSessionRuntime({");
     expect(learningSource).toContain("useMemoryController({");
+    expect(learningSource).toContain("useChatController({");
     expect(compositionSource).not.toContain("useMemoryController(");
+    expect(compositionSource).not.toContain("useChatController(");
     expect(runtimeSource).not.toContain("useMemoryController(");
+    expect(runtimeSource).not.toContain("useChatController(");
     expect(compositionSource).toContain("} = options.learning;");
     expect(compositionSource).toContain("memoryController,");
+    expect(compositionSource).toContain("chatController,");
 
     for (const stateToken of [
       "useState<ChatSettings>",
@@ -107,6 +112,7 @@ describe("workspace controller composition boundary", () => {
 
   it("owns cross-feature artifact cleanup while chat cancellation stays scoped", () => {
     expect(compositionSource).toContain("new WorkspaceCoordinator(");
+    expect(compositionSource).toContain("options.learning.bindArtifactPort({");
     expect(compositionSource).toContain("clearChatArtifacts:");
     expect(compositionSource).toContain('cancelChat: () => operationRegistry.invalidate("chat")');
     expect(compositionSource).not.toContain("onWorkspaceCancelled:");
