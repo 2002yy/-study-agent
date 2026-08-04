@@ -61,7 +61,8 @@ describe("workspace controller composition boundary", () => {
     expect(evidenceSource).toContain('state.activeDrawer !== "sources"');
     expect(evidenceSource).toContain('options.loadFeature("rag")');
     expect(evidenceSource).toContain("uploadController.refreshDocuments()");
-    expect(compositionSource).not.toContain('drawer === "sources"');
+    expect(compositionSource).toContain('if (!drawer || drawer === "sources") return;');
+    expect(compositionSource).not.toContain('options.loadFeature("rag")');
     expect(compositionSource).not.toContain("refreshDocuments()");
   });
 
