@@ -14,6 +14,10 @@ const evidenceSource = readFileSync(
   fileURLToPath(new URL("./useEvidenceRuntime.ts", import.meta.url)),
   "utf8"
 );
+const learningSource = readFileSync(
+  fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
+  "utf8"
+);
 const viewSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
   "utf8"
@@ -67,6 +71,39 @@ describe("workspace recovery and view boundaries", () => {
     expect(evidenceSource).toContain("const recovery = useMemo<EvidenceRecoveryPort>");
     expect(evidenceSource).toContain("restore,");
     expect(evidenceSource).toContain("hydrateRuntimeSettings,");
+  });
+
+  it("consumes one learning recovery port instead of learning setters", () => {
+    expect(recoveryCall).toContain("learning: learning.recovery");
+    for (const leakedBinding of [
+      "memory: learning.memoryRunId",
+      "learningClosure: learning.learningClosureRunId",
+      "memory: learning.setMemoryRunId",
+      "learningClosure: learning.setLearningClosureRunId",
+      "chatSettings: learning.chatSettings",
+      "setChatSettings: learning.setChatSettings",
+      "keepCurrentRole: learning.keepCurrentRole",
+      "setKeepCurrentRole: learning.setKeepCurrentRole",
+      "conversationInstruction: learning.conversationInstruction",
+      "setConversationInstruction: learning.setConversationInstruction",
+    ]) {
+      expect(recoveryCall).not.toContain(leakedBinding);
+    }
+
+    expect(recoverySource).toContain("learning: LearningRecoveryPort");
+    expect(recoverySource).toContain("learning.restore({");
+    expect(recoverySource).toContain("learning.hydrateRuntimeSettings(settings)");
+    expect(recoverySource).toContain("...learning.state");
+    expect(recoverySource).not.toContain("setChatSettings");
+    expect(recoverySource).not.toContain("setKeepCurrentRole");
+    expect(recoverySource).not.toContain("setConversationInstruction");
+    expect(recoverySource).not.toContain("setMemoryRunId");
+    expect(recoverySource).not.toContain("setLearningClosureRunId");
+
+    expect(learningSource).toContain("export type LearningRecoveryPort");
+    expect(learningSource).toContain("const recovery = useMemo<LearningRecoveryPort>");
+    expect(learningSource).toContain("restore,");
+    expect(learningSource).toContain("hydrateRuntimeSettings,");
   });
 
   it("owns feature view binding outside Runtime", () => {
