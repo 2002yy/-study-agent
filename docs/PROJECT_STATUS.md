@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**Draft PR #107 已抽离 ExtensionRuntime 第一批 owner；代码基线 CI run `30994619469` 完整通过。**  
+> 当前切片：**PR #107 已合并 `main`，ExtensionRuntime 已接管第一批扩展 owner；下一批收口扩展 view model 与实验室装载边界。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -38,15 +38,17 @@
 - PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
 - PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
 - PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
-- PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`。
+- PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`；
+- PR #107：ExtensionRuntime 第一批 owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/extension-runtime-foundation`；
-- Draft PR：`#107 抽离 ExtensionRuntime 第一批 owner`；
-- base：`main` at `f60e93d8285c204be69cbe2d5f5f49429817d156`；
-- 代码基线：`36d9cef3dfb611313a967574889601433ff68cc7`；
-- 代码基线 CI：run `30994619469`，结论 `success`。
+- 当前 `main` 功能基线：PR #107 merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
+- PR #107 代码基线：`36d9cef3dfb611313a967574889601433ff68cc7`；
+- 代码基线 CI：run `30994619469`，结论 `success`；
+- 最终 PR head：`2f847d4c7ba09a118002b5c1a731562e7260ef20`；
+- 最终 head CI：run `30995090765`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -176,7 +178,7 @@ WorkspaceCoordinator 没有迁入 ExtensionRuntime，也没有创建第二套协
 
 ## 7. PR #107 验证证据
 
-代码基线 commit `36d9cef3dfb611313a967574889601433ff68cc7` 的 CI run `30994619469` 完整通过：
+代码基线 commit `36d9cef3dfb611313a967574889601433ff68cc7` 的 CI run `30994619469` 与最终 head commit `2f847d4c7ba09a118002b5c1a731562e7260ef20` 的 CI run `30995090765` 均完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -195,9 +197,9 @@ WorkspaceCoordinator 没有迁入 ExtensionRuntime，也没有创建第二套协
 
 - CI `30993884476`：新增 ExtensionRuntime owner 边界按预期失败；后端、RAG、Ruff、打包、密钥与 mypy baseline 均通过，证明旧 owner 尚在组合层。
 - CI `30994190845`：ExtensionRuntime、recovery 与 controller 边界已通过；70 个前端文件中仅旧 `activeQuerySelector` 静态断言仍要求组合层 owner，实际 selector 已随 Tool owner 迁入 ExtensionRuntime。
-- commit `36d9cef3dfb611313a967574889601433ff68cc7` 更新为验证 ExtensionRuntime 单一声明、组合层消费和 Sources / tools 共用，随后完整 CI 全绿。
+- commit `36d9cef3dfb611313a967574889601433ff68cc7` 更新为验证 ExtensionRuntime 单一声明、组合层消费和 Sources / tools 共用，随后两轮完整 CI 全绿。
 
-这些修正没有放宽 controller、query、恢复、持久化或产品行为合同。
+这些修正没有放宽 controller、query、恢复、持久化或产品行为边界。
 
 ## 8. 下一执行顺序
 
