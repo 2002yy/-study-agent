@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理均已完成；P2-B 平台配置与 CORS 单一 owner 已完成实现并通过代码基线。**  
-> 当前切片：**Draft PR #111；代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`，CI run `31011592445` 完整通过。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置与 CORS 单一 owner 均已完成并合并。**  
+> 当前切片：**PR #111 已 squash 合并 `main`；最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23` 的 CI run `31012164767` 完整通过，功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。**  
 > 下一主线：**P2-C 兼容层退出，先证明无生产调用与无恢复数据依赖，再删除 410 tombstone 和旧实验入口 adapter。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -62,9 +62,10 @@
 
 ### 2.5 平台配置与 CORS owner
 
-- Draft PR #111：单一 CORS policy owner、环境分层、输入校验和永久边界；
-- 代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`；
-- CI run `31011592445` 完整通过。
+- PR #111：单一 CORS policy owner、环境分层、输入校验和永久边界；
+- 代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`，CI run `31011592445` 完整通过；
+- 最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23`，CI run `31012164767` 完整通过；
+- 功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。
 
 ## 3. 当前运行时架构
 
@@ -261,13 +262,16 @@ production  -> 无默认来源
 - commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：39/41 浏览器旅程通过；两项 bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败；
 - commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
 
-### 7.2 PR #111 代码基线
+### 7.2 PR #111
 
 - 分支：`agent/cors-single-owner`；
 - 代码基线 head：`4a7f47614d466ba18713536469b34bcf9611a075`；
-- 代码基线 CI：run `31011592445`，结论 `success`。
+- 代码基线 CI：run `31011592445`，结论 `success`；
+- 最终 PR head：`1b10820574c73fec864ab44f0e81c7c86ef02c23`；
+- 最终 head CI：run `31012164767`，结论 `success`；
+- 功能 merge SHA：`6f743db0750e5cacf6370b2fee3cdd091b946f78`。
 
-该基线完整通过：
+两轮基线均完整通过：
 
 - 全量 pytest，包括新增 CORS policy 与单一 owner 边界；
 - RAG K1 固定 corpus；
@@ -302,7 +306,7 @@ production  -> 无默认来源
 
 ## 9. 阶段判断
 
-P2-B 代码实现与第一轮完整基线已完成：
+P2-B 已合并完成：
 
 - CORS 从两套规则收口为一个 policy owner；
 - development / test / production 默认来源显式分离；
@@ -310,4 +314,4 @@ P2-B 代码实现与第一轮完整基线已完成：
 - 应用装配层不再拥有来源字面量或响应头实现；
 - 现有 FastAPI、token、前端和真实浏览器闭环未发生回归。
 
-当前 Draft PR #111 等待状态文档 commit 的最终 CI；通过后可合并，主线转入 P2-C 兼容层退出。
+当前没有待合并的功能 PR，主线已转入 P2-C 兼容层退出。
