@@ -18,11 +18,17 @@ const learningSource = readFileSync(
   fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
   "utf8",
 );
+const extensionSource = readFileSync(
+  fileURLToPath(new URL("./useExtensionRuntime.ts", import.meta.url)),
+  "utf8",
+);
 
 const workspaceControllerHooks = [
   "useRoleController",
-  "useWorkflowController",
   "useSettingsController",
+];
+const extensionControllerHooks = [
+  "useWorkflowController",
   "useGroupChatController",
   "useToolController",
 ];
@@ -33,11 +39,21 @@ const evidenceControllerHooks = [
 ];
 
 describe("workspace controller composition boundary", () => {
-  it("keeps cross-domain controller construction outside WorkspaceRuntime", () => {
+  it("keeps remaining cross-domain controller construction outside WorkspaceRuntime", () => {
     for (const hook of workspaceControllerHooks) {
       expect(compositionSource).toContain(`${hook}(`);
       expect(runtimeSource).not.toContain(`${hook}(`);
       expect(runtimeSource).not.toMatch(new RegExp(`import .*${hook}`));
+    }
+  });
+
+  it("makes ExtensionRuntime the only owner of extension controllers", () => {
+    expect(runtimeSource).toContain("useExtensionRuntime({");
+    expect(compositionSource).toContain("} = options.extension;");
+    for (const hook of extensionControllerHooks) {
+      expect(extensionSource).toContain(`${hook}(`);
+      expect(compositionSource).not.toContain(`${hook}(`);
+      expect(runtimeSource).not.toContain(`${hook}(`);
     }
   });
 
@@ -97,7 +113,6 @@ describe("workspace controller composition boundary", () => {
     expect(evidenceSource).toContain('state.activeDrawer !== "sources"');
     expect(evidenceSource).toContain('options.loadFeature("rag")');
     expect(evidenceSource).toContain("uploadController.refreshDocuments()");
-    expect(compositionSource).toContain('if (!drawer || drawer === "sources") return;');
     expect(compositionSource).not.toContain('options.loadFeature("rag")');
     expect(compositionSource).not.toContain("refreshDocuments()");
   });
@@ -107,11 +122,13 @@ describe("workspace controller composition boundary", () => {
     expect(compositionSource).not.toContain("newsController");
     expect(evidenceSource).not.toContain("useNewsController");
     expect(learningSource).not.toContain("useNewsController");
+    expect(extensionSource).not.toContain("useNewsController");
     expect(runtimeSource).not.toContain("useNewsController");
   });
 
-  it("owns cross-feature artifact cleanup while chat cancellation stays scoped", () => {
+  it("owns cross-feature coordination while consuming narrow extension ports", () => {
     expect(compositionSource).toContain("new WorkspaceCoordinator(");
+    expect(compositionSource).toContain("options.extension.coordinator");
     expect(compositionSource).toContain("options.learning.bindArtifactPort({");
     expect(compositionSource).toContain("clearChatArtifacts:");
     expect(compositionSource).toContain('cancelChat: () => operationRegistry.invalidate("chat")');
@@ -120,5 +137,6 @@ describe("workspace controller composition boundary", () => {
     expect(runtimeSource).not.toContain("new WorkspaceCoordinator(");
     expect(evidenceSource).not.toContain("new WorkspaceCoordinator(");
     expect(learningSource).not.toContain("new WorkspaceCoordinator(");
+    expect(extensionSource).not.toContain("new WorkspaceCoordinator(");
   });
 });
