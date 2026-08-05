@@ -2,7 +2,6 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 
 import AppShell from "../AppShell";
 import { SlideOver } from "../components/SlideOver";
-import { abandonInterruptedTurn } from "../features/chat/recoveryApi";
 import { LearningStrip } from "../features/learning/LearningStrip";
 import { MemoryPanel } from "../features/learning-memory/MemoryPanel";
 import { SourcesPanel } from "../features/rag/SourcesPanel";
@@ -11,18 +10,17 @@ import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadC
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
-import type { SemanticSessionRow } from "../features/sessions/sessionNavigation";
-import type { SessionSummary } from "../features/sessions/sessionSummary";
 import { ToolPanel } from "../features/tools/ToolPanel";
 import { WechatPanel } from "../features/wechat-workspace/WechatPanel";
 import { TimelinePanel } from "../features/workflows/TimelinePanel";
 import { GlobalNotices } from "../layout/GlobalNotices";
-import type { ApiSnapshot, ChatSettings, DrawerId, RagSettings, SessionRow } from "../types";
+import type { ApiSnapshot, ChatSettings, DrawerId, RagSettings } from "../types";
+import type { LearningSessionRuntime } from "./useLearningSessionRuntime";
 import { useWorkspace } from "./WorkspaceProvider";
 import type { useWorkspaceControllers } from "./useWorkspaceControllers";
 
 type Controllers = ReturnType<typeof useWorkspaceControllers>;
-type SessionRowWithSummary = SessionRow & { summary?: SessionSummary };
+type LearningView = LearningSessionRuntime["view"];
 
 export function WorkspaceView({
   snapshot,
@@ -30,6 +28,7 @@ export function WorkspaceView({
   fileInputRef,
   ui,
   controllers,
+  learningView,
 }: {
   snapshot: ApiSnapshot;
   refresh: () => Promise<void>;
@@ -51,6 +50,7 @@ export function WorkspaceView({
     setOperationError: Dispatch<SetStateAction<string>>;
   };
   controllers: Controllers;
+  learningView: LearningView;
 }) {
   const {
     activeQuery,
@@ -69,57 +69,10 @@ export function WorkspaceView({
   const { state, dispatch } = useWorkspace();
   const openDrawer = (drawer: DrawerId) => dispatch({ type: "OPEN_DRAWER", drawer });
   const closeDrawer = () => dispatch({ type: "CLOSE_DRAWER" });
-  const activeSession = snapshot.sessions.find(
-    (session) => session.session_id === chatController.threadId,
-  ) as SemanticSessionRow | undefined;
-  const serverSummary = (activeSession as SessionRowWithSummary | undefined)?.summary;
-  const localSummary =
-    state.sessionSummary?.thread_id === chatController.threadId
-      ? state.sessionSummary
-      : null;
-  const sessionSummary =
-    serverSummary?.status === "not_summarized" &&
-    localSummary &&
-    localSummary.status !== "not_summarized"
-      ? localSummary
-      : serverSummary ?? localSummary;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     await chatController.send(ui.input.trim());
-  };
-
-  const requestNewSession = () => {
-    const hasMessages = chatController.messages.some((message) => message.role === "user");
-    if (
-      hasMessages &&
-      !window.confirm(
-        sessionSummary?.status === "summarized"
-          ? "当前会话已整理但尚未归档。直接开始新会话时，旧会话会保留在历史中。继续吗？"
-          : "当前学习尚未整理，直接开始新会话？旧会话会保留在历史中。",
-      )
-    ) {
-      return;
-    }
-    void chatController.startNewSession();
-  };
-
-  const abandonRecovery = async () => {
-    const recovery = chatController.streamRecovery;
-    if (!recovery) return;
-    if (!recovery.sessionId || !recovery.turnId) {
-      chatController.setStreamRecovery(null);
-      return;
-    }
-    try {
-      await abandonInterruptedTurn(recovery.sessionId, recovery.turnId);
-      chatController.setStreamRecovery(null);
-      await refresh();
-    } catch (error) {
-      ui.setOperationError(
-        `放弃恢复失败：${error instanceof Error ? error.message : "未知错误"}`,
-      );
-    }
   };
 
   const requestUpload = (mode: "upload" | "rebuild" = "upload") => {
@@ -167,17 +120,17 @@ export function WorkspaceView({
       </span>
       <SessionNavigator
         sessions={snapshot.sessions}
-        activeSessionId={chatController.threadId}
-        isSending={chatController.isSending}
+        activeSessionId={learningView.sessionId}
+        isSending={learningView.isSending}
         onRestore={chatController.restoreSession}
         onArchive={chatController.archiveCurrentSession}
-        onNewSession={requestNewSession}
+        onNewSession={learningView.requestNewSession}
         onSessionChanged={refresh}
       />
       <div className="chat-column">
         <LearningStrip
           lastChat={chatController.lastChat}
-          visitedPhases={state.pedagogyPhases}
+          visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}
         />
         <UploadLearningPrompt
@@ -200,32 +153,32 @@ export function WorkspaceView({
           onDismiss={uploadController.dismissFlow}
         />
         <ChatPanel
-          sessionId={chatController.threadId}
-          sessionNavigation={activeSession ?? null}
+          sessionId={learningView.sessionId}
+          sessionNavigation={learningView.activeSession}
           messages={chatController.messages}
           input={ui.input}
           setInput={ui.setInput}
-          isSending={chatController.isSending}
+          isSending={learningView.isSending}
           onSubmit={submit}
           onStop={chatController.stop}
-          streamRecovery={chatController.streamRecovery}
+          streamRecovery={learningView.streamRecovery}
           onContinueInterruptedReply={chatController.continueInterrupted}
           onRetry={chatController.retry}
-          onAbandonInterruptedReply={abandonRecovery}
+          onAbandonInterruptedReply={learningView.abandonRecovery}
           onCopyInterruptedReply={chatController.copyInterrupted}
           onUploadClick={() => requestUpload("upload")}
           onSearchSources={() => ragController.search(activeQuery)}
           isSearching={ragController.isSearching}
           hasSearchQuery={Boolean(activeQuery)}
           onQuickPrompt={ui.setInput}
-          onStartNewTopic={requestNewSession}
+          onStartNewTopic={learningView.requestNewSession}
           lastChat={chatController.lastChat}
           ragEnabled={ui.ragEnabled}
           memoryStatus={snapshot.memoryStatus}
           onOpenDrawer={openDrawer}
           onEndSession={async () => {
-            if (!chatController.threadId) return;
-            await memoryController.generateFromSession(chatController.threadId);
+            if (!learningView.sessionId) return;
+            await memoryController.generateFromSession(learningView.sessionId);
             openDrawer("memory");
           }}
           isEndingSession={memoryController.isPreviewing}
@@ -243,11 +196,11 @@ export function WorkspaceView({
       <SlideOver open={state.activeDrawer === "sessions"} title="会话历史" onClose={closeDrawer}>
         <SessionNavigator
           sessions={snapshot.sessions}
-          activeSessionId={chatController.threadId}
-          isSending={chatController.isSending}
+          activeSessionId={learningView.sessionId}
+          isSending={learningView.isSending}
           onRestore={chatController.restoreSession}
           onArchive={chatController.archiveCurrentSession}
-          onNewSession={requestNewSession}
+          onNewSession={learningView.requestNewSession}
           onSessionChanged={refresh}
           variant="panel"
         />
@@ -270,7 +223,7 @@ export function WorkspaceView({
           setKeepCurrentRole={ui.setKeepCurrentRole}
           conversationInstruction={ui.conversationInstruction}
           setConversationInstruction={ui.setConversationInstruction}
-          isSending={chatController.isSending}
+          isSending={learningView.isSending}
           refresh={refresh}
           lastChat={chatController.lastChat}
         />
@@ -314,11 +267,11 @@ export function WorkspaceView({
         <MemoryPanel
           memoryStatus={snapshot.memoryStatus}
           controller={memoryController}
-          sessionSummary={sessionSummary}
+          sessionSummary={learningView.sessionSummary}
           onContinueCurrent={closeDrawer}
           onArchiveAndNew={async () => {
-            if (!chatController.threadId) return;
-            await chatController.archiveCurrentSession(chatController.threadId);
+            if (!learningView.sessionId) return;
+            await chatController.archiveCurrentSession(learningView.sessionId);
             closeDrawer();
           }}
         />
