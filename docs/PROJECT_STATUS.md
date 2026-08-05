@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**Draft PR #106 已把 active session、summary 合并、新建确认、中断放弃与 pedagogy phases 收口到 LearningSessionRuntime view model；代码基线 CI run `30987459136` 全绿。**  
+> 当前切片：**PR #106 已合并 `main`，LearningSessionRuntime 已接管学习会话派生 view model；下一批开始抽离 ExtensionRuntime。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -37,15 +37,17 @@
 - PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
 - PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
 - PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
-- PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`。
+- PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
+- PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/learning-session-view-model`；
-- Draft PR：`#106 收口 LearningSessionRuntime 会话派生视图`；
-- base：`main` at `d8b6aba970c982c6444f72c34cdc0296e219bdcc`；
-- 代码基线：`63224367f13551762fbf214f5388d8db41f104cd`；
-- 代码基线 CI：run `30987459136`，结论 `success`。
+- 当前 `main` 功能基线：PR #106 merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`；
+- PR #106 代码基线：`63224367f13551762fbf214f5388d8db41f104cd`；
+- 代码基线 CI：run `30987459136`，结论 `success`；
+- 最终 PR head：`5f6cb32e8b60fba52eee06dac851e48b796286c8`；
+- 最终 head CI：run `30987952199`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -151,7 +153,7 @@ WorkspaceView 已删除：
 
 ## 7. PR #106 验证证据
 
-代码基线 commit `63224367f13551762fbf214f5388d8db41f104cd` 的 CI run `30987459136` 完整通过：
+代码基线 commit `63224367f13551762fbf214f5388d8db41f104cd` 的 CI run `30987459136` 与最终 head commit `5f6cb32e8b60fba52eee06dac851e48b796286c8` 的 CI run `30987952199` 均完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -170,7 +172,7 @@ WorkspaceView 已删除：
 
 - CI `30986833827`：新增边界测试按预期失败，证明 selector、summary、确认与 abandon owner 仍在 WorkspaceView；其他前置门禁通过。
 - CI `30987103482`：69/69 前端测试文件、249/249 测试通过；TypeScript 发现无 active thread 时 selector 参数类型过窄。
-- commit `63224367f13551762fbf214f5388d8db41f104cd` 将 thread 参数改为可空并补无 thread 单测，随后完整 CI 全绿。
+- commit `63224367f13551762fbf214f5388d8db41f104cd` 将 thread 参数改为可空并补无 thread 单测，随后两轮完整 CI 全绿。
 
 这些修正没有放宽 owner、确认、恢复、持久化或产品行为边界。
 
