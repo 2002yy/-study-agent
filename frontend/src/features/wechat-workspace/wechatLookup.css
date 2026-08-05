@@ -1,0 +1,54 @@
+.wechat-lookup-result {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.wechat-lookup-result pre {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.wechat-lookup-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wechat-lookup-item {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.wechat-lookup-item strong,
+.wechat-lookup-item a,
+.wechat-lookup-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wechat-lookup-item a {
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.wechat-lookup-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wechat-lookup-item small {
+  color: #52646c;
+  font-size: 11px;
+  line-height: 1.4;
+}
