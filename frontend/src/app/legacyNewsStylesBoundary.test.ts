@@ -23,6 +23,14 @@ function productionTypeScriptSources(directory: string): string[] {
   return sources;
 }
 
+function staticClassNameTokens(source: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const match of source.matchAll(/className\s*=\s*["'`]([^"'`]*)["'`]/g)) {
+    for (const token of match[1].split(/\s+/).filter(Boolean)) tokens.add(token);
+  }
+  return tokens;
+}
+
 describe("retired NewsWorkspace style boundary", () => {
   it("does not keep NewsWorkspace selectors after the product surface is removed", () => {
     expect(existsSync(stylesPath)).toBe(true);
@@ -33,12 +41,11 @@ describe("retired NewsWorkspace style boundary", () => {
   });
 
   it("does not reintroduce retired NewsWorkspace class names in production DOM source", () => {
-    const productionSource = productionTypeScriptSources(sourceRoot).join("\n");
+    const classNames = staticClassNameTokens(
+      productionTypeScriptSources(sourceRoot).join("\n"),
+    );
     for (const className of legacyNewsClasses) {
-      const literalClassName = new RegExp(
-        "className\\s*=\\s*[\"'`][^\"'`]*\\b" + className + "\\b",
-      );
-      expect(productionSource).not.toMatch(literalClassName);
+      expect(classNames).not.toContain(className);
     }
   });
 });
