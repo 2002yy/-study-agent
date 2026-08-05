@@ -11,6 +11,7 @@ import {
   createEmptyRag,
   useChatController,
 } from "../features/chat/chatController";
+import { abandonInterruptedTurn } from "../features/chat/recoveryApi";
 import { useMemoryController } from "../features/learning-memory/memoryController";
 import {
   CHAT_SETTINGS_DEFAULTS,
@@ -19,6 +20,11 @@ import {
 } from "../features/settings/SettingsPanel";
 import { seedMessages } from "../features/single-chat/chatHistory";
 import type { ApiSnapshot, ChatSettings } from "../types";
+import {
+  selectActiveLearningSession,
+  selectLearningSessionSummary,
+  selectNewSessionConfirmation,
+} from "./learningSessionViewModel";
 import type { EvidenceLearningPort } from "./useEvidenceRuntime";
 import type { WorkspaceRecovery } from "./WorkspacePersistence";
 import { useWorkspace } from "./WorkspaceProvider";
@@ -68,6 +74,7 @@ export type LearningRecoveryPort = {
 
 export function useLearningSessionRuntime(options: {
   refresh: () => Promise<void>;
+  sessions: ApiSnapshot["sessions"];
   setInput: Dispatch<SetStateAction<string>>;
   setOperationError: Dispatch<SetStateAction<string>>;
   evidence: EvidenceLearningPort;
@@ -142,6 +149,53 @@ export function useLearningSessionRuntime(options: {
     refresh: options.refresh,
     onResearchRunDiscovered: options.evidence.onResearchRunDiscovered,
   });
+
+  const activeSession = useMemo(
+    () =>
+      selectActiveLearningSession(options.sessions, chatController.threadId),
+    [options.sessions, chatController.threadId],
+  );
+  const sessionSummary = useMemo(
+    () =>
+      selectLearningSessionSummary(
+        activeSession,
+        state.sessionSummary,
+        chatController.threadId,
+      ),
+    [activeSession, state.sessionSummary, chatController.threadId],
+  );
+
+  const requestNewSession = useCallback(() => {
+    const confirmation = selectNewSessionConfirmation(
+      chatController.messages,
+      sessionSummary,
+    );
+    if (confirmation && !window.confirm(confirmation)) return;
+    void chatController.startNewSession();
+  }, [chatController.messages, chatController.startNewSession, sessionSummary]);
+
+  const abandonRecovery = useCallback(async () => {
+    const interrupted = chatController.streamRecovery;
+    if (!interrupted) return;
+    if (!interrupted.sessionId || !interrupted.turnId) {
+      chatController.setStreamRecovery(null);
+      return;
+    }
+    try {
+      await abandonInterruptedTurn(interrupted.sessionId, interrupted.turnId);
+      chatController.setStreamRecovery(null);
+      await options.refresh();
+    } catch (error) {
+      options.setOperationError(
+        `放弃恢复失败：${error instanceof Error ? error.message : "未知错误"}`,
+      );
+    }
+  }, [
+    chatController.streamRecovery,
+    chatController.setStreamRecovery,
+    options.refresh,
+    options.setOperationError,
+  ]);
 
   const restore = useCallback(
     (recovery: LearningRecoveryInput | null) => {
@@ -245,6 +299,29 @@ export function useLearningSessionRuntime(options: {
     ],
   );
 
+  const view = useMemo(
+    () => ({
+      activeSession,
+      sessionSummary,
+      sessionId: chatController.threadId,
+      isSending: chatController.isSending,
+      streamRecovery: chatController.streamRecovery,
+      visitedPhases: state.pedagogyPhases,
+      requestNewSession,
+      abandonRecovery,
+    }),
+    [
+      activeSession,
+      sessionSummary,
+      chatController.threadId,
+      chatController.isSending,
+      chatController.streamRecovery,
+      state.pedagogyPhases,
+      requestNewSession,
+      abandonRecovery,
+    ],
+  );
+
   return {
     chatSettings,
     setChatSettings,
@@ -260,6 +337,7 @@ export function useLearningSessionRuntime(options: {
     chatController,
     bindArtifactPort,
     recovery,
+    view,
   };
 }
 

@@ -32,6 +32,7 @@ export default function WorkspaceRuntime() {
   );
   const learning = useLearningSessionRuntime({
     refresh,
+    sessions: snapshot.sessions,
     setInput,
     setOperationError,
     evidence: evidence.learning,
@@ -77,6 +78,7 @@ export default function WorkspaceRuntime() {
       refresh={refresh}
       fileInputRef={fileInputRef}
       controllers={controllers}
+      learningView={learning.view}
       ui={{
         input,
         setInput,
