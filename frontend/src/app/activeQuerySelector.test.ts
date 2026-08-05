@@ -10,6 +10,10 @@ const compositionSource = readFileSync(
   fileURLToPath(new URL("./useWorkspaceControllers.ts", import.meta.url)),
   "utf8",
 );
+const extensionSource = readFileSync(
+  fileURLToPath(new URL("./useExtensionRuntime.ts", import.meta.url)),
+  "utf8",
+);
 const viewSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
   "utf8",
@@ -47,15 +51,19 @@ describe("active query selector", () => {
   });
 
   it("is the single production derivation shared by Sources and tools", () => {
-    expect(compositionSource).toContain('import { selectActiveQuery } from "./activeQuerySelector";');
-    expect(compositionSource).toContain("const activeQuery = selectActiveQuery({");
-    expect(compositionSource).toContain("input: options.input,");
-    expect(compositionSource).toContain(
-      "lastRagQuery: chatController.lastChat?.rag?.query,",
+    expect(extensionSource).toContain(
+      'import { selectActiveQuery } from "./activeQuerySelector";',
+    );
+    expect(extensionSource).toContain("const activeQuery = selectActiveQuery({");
+    expect(extensionSource).toContain("input: options.input,");
+    expect(extensionSource).toContain("lastRagQuery: options.lastRagQuery,");
+    expect(extensionSource).not.toContain(
+      'options.input.trim() || options.lastRagQuery || ""',
     );
     expect(compositionSource).not.toContain(
-      'options.input.trim() || chatController.lastChat?.rag?.query || ""',
+      'import { selectActiveQuery } from "./activeQuerySelector";',
     );
+    expect(compositionSource).toContain("activeQuery,");
     expect(selectorSource).not.toContain('from "react"');
     expect(selectorSource).toContain("const currentInput = input.trim();");
     expect(selectorSource).toContain('return lastRagQuery?.trim() ?? "";');
@@ -65,9 +73,9 @@ describe("active query selector", () => {
         ? [relative(srcRoot, path)]
         : [],
     );
-    expect(declarationOwners).toEqual(["app/useWorkspaceControllers.ts"]);
+    expect(declarationOwners).toEqual(["app/useExtensionRuntime.ts"]);
 
-    expect(compositionSource).toContain("query: activeQuery,");
+    expect(extensionSource).toContain("query: activeQuery,");
     expect(viewSource).toContain(
       "onSearchSources={() => ragController.search(activeQuery)}",
     );
