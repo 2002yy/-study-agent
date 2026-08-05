@@ -1,15 +1,11 @@
 import { useEffect, useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { LocalKnowledgeInvocation } from "../api";
-import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useRoleController } from "../features/roles/roleController";
 import { useSettingsController } from "../features/settings/settingsController";
-import { useToolController } from "../features/tools/toolController";
-import { useWorkflowController } from "../features/workflows/workflowController";
 import type { ApiSnapshot } from "../types";
-import { selectActiveQuery } from "./activeQuerySelector";
 import type { EvidenceRuntime } from "./useEvidenceRuntime";
+import type { ExtensionRuntime } from "./useExtensionRuntime";
 import type { LearningSessionRuntime } from "./useLearningSessionRuntime";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
@@ -17,7 +13,6 @@ import { useWorkspace } from "./WorkspaceProvider";
 import type { WorkspaceFeature } from "./workspaceDataLoader";
 
 type ValueSetter<T> = Dispatch<SetStateAction<T>>;
-type DirectSetter<T> = (value: T) => void;
 
 type FeatureLoader = (
   feature: WorkspaceFeature,
@@ -25,22 +20,13 @@ type FeatureLoader = (
 ) => Promise<Partial<ApiSnapshot>>;
 
 export function useWorkspaceControllers(options: {
-  snapshot: ApiSnapshot;
   setSnapshot: React.Dispatch<React.SetStateAction<ApiSnapshot>>;
   refresh: () => Promise<void>;
   loadFeature: FeatureLoader;
-  input: string;
   operationError: ValueSetter<string>;
-  activeGroupThreadId?: string;
   evidence: EvidenceRuntime;
   learning: LearningSessionRuntime;
-  runIds: {
-    tool?: string;
-  };
-  setGroupThreadId: DirectSetter<string | undefined>;
-  setRunId: {
-    tool: DirectSetter<string | undefined>;
-  };
+  extension: ExtensionRuntime;
 }) {
   const { state } = useWorkspace();
   const {
@@ -55,8 +41,15 @@ export function useWorkspaceControllers(options: {
     memoryController,
     chatController,
   } = options.learning;
+  const {
+    activeQuery,
+    groupThreadId,
+    workflowController,
+    groupController,
+    toolController,
+  } = options.extension;
+  const extensionCoordinator = options.extension.coordinator;
   const roleController = useRoleController(chatSettings.selectedRole);
-  const workflowController = useWorkflowController();
   const settingsController = useSettingsController({
     chatSettings,
     ragSettings,
@@ -66,37 +59,25 @@ export function useWorkspaceControllers(options: {
     setOperationError: options.operationError,
     refresh: options.refresh,
   });
-  const groupThreadId =
-    options.activeGroupThreadId ?? options.snapshot.wechat?.group_thread_id;
-  const groupController = useGroupChatController({
-    wechat: options.snapshot.wechat,
-    setWechat: (wechat) =>
-      options.setSnapshot((current) => ({ ...current, wechat })),
-    chatSettings,
-    ragSettings,
-    ragEnabled,
-  });
   const workspaceCoordinator = useMemo(
     () =>
       new WorkspaceCoordinator(
         {
           cancelChat: () => operationRegistry.invalidate("chat"),
-          cancelGroup: groupController.cancelWorkspace,
+          cancelGroup: extensionCoordinator.cancelGroup,
           cancelWebLookup: webLookupController.cancel,
-          invalidateTool: () => operationRegistry.invalidate("tool"),
+          invalidateTool: extensionCoordinator.invalidateTool,
         },
         {
           clearRag: ragController.clear,
-          clearToolRun: () => options.setRunId.tool(undefined),
-          clearWorkflow: workflowController.clear,
+          clearToolRun: extensionCoordinator.clearToolRun,
+          clearWorkflow: extensionCoordinator.clearWorkflow,
         },
       ),
     [
-      groupController.cancelWorkspace,
+      extensionCoordinator,
       webLookupController.cancel,
       ragController.clear,
-      workflowController.clear,
-      options.setRunId.tool,
     ],
   );
 
@@ -109,59 +90,16 @@ export function useWorkspaceControllers(options: {
     [options.learning.bindArtifactPort, workspaceCoordinator],
   );
 
-  const activeQuery = selectActiveQuery({
-    input: options.input,
-    lastRagQuery: chatController.lastChat?.rag?.query,
-  });
-  const currentToolInvocation: LocalKnowledgeInvocation = {
-    query: activeQuery,
-    retrievalMode: ragSettings.retrievalMode,
-    topK: ragSettings.chatTopK,
-    minScore: ragSettings.minScore,
-  };
-  const toolController = useToolController({
-    invocation: currentToolInvocation,
-    activeRunId: options.runIds.tool,
-    setActiveRunId: options.setRunId.tool,
-    onCalled: options.refresh,
-  });
-
   useEffect(() => {
-    const serverThreadId = options.snapshot.wechat?.group_thread_id;
-    if (serverThreadId && options.activeGroupThreadId !== serverThreadId) {
-      options.setGroupThreadId(serverThreadId);
-    }
-  }, [
-    options.snapshot.wechat?.group_thread_id,
-    options.activeGroupThreadId,
-    options.setGroupThreadId,
-  ]);
-
-  useEffect(() => {
-    const drawer = state.activeDrawer;
-    if (!drawer || drawer === "sources") return;
+    if (state.activeDrawer !== "memory") return;
     let active = true;
     const load = async () => {
       try {
-        if (drawer === "group") {
-          await options.loadFeature("wechat", { groupThreadId });
-        } else if (drawer === "tools") {
-          await options.loadFeature("tools");
-        } else if (drawer === "timeline") {
-          await options.loadFeature("workflows");
-        } else if (drawer === "memory") {
-          await options.loadFeature("memory");
-        }
+        await options.loadFeature("memory");
       } catch (error) {
         if (!active) return;
-        const labels: Partial<Record<typeof drawer, string>> = {
-          group: "群聊",
-          tools: "工具",
-          timeline: "开发者诊断",
-          memory: "学习成果",
-        };
         options.operationError(
-          `${labels[drawer] ?? "功能"}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
+          `学习成果加载失败：${error instanceof Error ? error.message : "读取失败"}`,
         );
       }
     };
