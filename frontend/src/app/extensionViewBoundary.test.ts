@@ -14,12 +14,14 @@ const extensionRuntimeSource = sourceOf("./useExtensionRuntime.ts");
 const extensionDrawersSource = sourceOf("./ExtensionDrawers.tsx");
 const chatPanelSource = sourceOf("../features/single-chat/ChatPanel.tsx");
 const launcherSource = sourceOf("../features/extensions/ExtensionLauncher.tsx");
+const labPanelSource = sourceOf("../features/extensions/ExtensionLabPanel.tsx");
 
 describe("Extension view ownership boundary", () => {
   it("passes one Extension view model from Runtime to WorkspaceView", () => {
     expect(extensionRuntimeSource).toContain("export type ExtensionViewModel");
     expect(extensionRuntimeSource).toContain("const view:");
-    expect(extensionRuntimeSource).toContain("activeDrawer:");
+    expect(extensionRuntimeSource).toContain("activeSurface,");
+    expect(extensionRuntimeSource).toContain("activeCapability,");
     expect(extensionRuntimeSource).toContain("group:");
     expect(extensionRuntimeSource).toContain("tools:");
     expect(extensionRuntimeSource).toContain("timeline:");
@@ -47,18 +49,22 @@ describe("Extension view ownership boundary", () => {
     }
   });
 
-  it("uses an explicit extension drawer contract and does not load by default", () => {
-    expect(extensionRuntimeSource).toContain("selectExtensionDrawer(state.activeDrawer)");
-    expect(extensionRuntimeSource).toContain("if (!activeDrawer) return;");
-    expect(extensionRuntimeSource).toContain("EXTENSION_DRAWER_CONFIG[activeDrawer]");
+  it("uses an explicit capability contract and does not load the lab home", () => {
+    expect(extensionRuntimeSource).toContain("selectExtensionSurface(state.activeDrawer)");
+    expect(extensionRuntimeSource).toContain("if (!activeCapability) return;");
+    expect(extensionRuntimeSource).toContain("EXTENSION_DRAWER_CONFIG[activeCapability]");
     expect(extensionRuntimeSource).not.toContain('["group", "tools", "timeline"].includes');
   });
 
-  it("isolates legacy experiment entries behind one launcher", () => {
+  it("isolates experimental choices behind one laboratory launcher", () => {
     expect(launcherSource).toContain("export function ExtensionLauncher");
-    expect(launcherSource).toContain('onOpen("group"');
-    expect(launcherSource).toContain('onOpen("tools"');
-    expect(launcherSource).toContain('onOpen("timeline"');
+    expect(launcherSource).toContain("onOpen(LAB_DRAWER");
+    expect(launcherSource).not.toContain('onOpen("group"');
+    expect(launcherSource).not.toContain('onOpen("tools"');
+    expect(launcherSource).not.toContain('onOpen("timeline"');
+    expect(labPanelSource).toContain('id: "group"');
+    expect(labPanelSource).toContain('id: "tools"');
+    expect(labPanelSource).toContain('id: "timeline"');
     expect(chatPanelSource).toContain("<ExtensionLauncher");
     expect(chatPanelSource).not.toContain('openFromMenu("group"');
     expect(chatPanelSource).not.toContain('openFromMenu("tools"');
