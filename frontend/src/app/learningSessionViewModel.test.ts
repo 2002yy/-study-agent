@@ -32,6 +32,17 @@ describe("learning session view selectors", () => {
       objective: "Learn B",
     });
     expect(selectActiveLearningSession(sessions, "missing")).toBeNull();
+    expect(selectActiveLearningSession(sessions, undefined)).toBeNull();
+  });
+
+  it("does not expose a session summary before a thread exists", () => {
+    expect(
+      selectLearningSessionSummary(
+        null,
+        summary("thread-a", "summarized"),
+        undefined,
+      ),
+    ).toBeNull();
   });
 
   it("prefers a newer local summary over a stale not-summarized server row", () => {
