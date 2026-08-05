@@ -35,9 +35,7 @@ describe("retired NewsWorkspace style boundary", () => {
   it("does not reintroduce retired NewsWorkspace class names in production DOM source", () => {
     const productionSource = productionTypeScriptSources(sourceRoot).join("\n");
     for (const className of legacyNewsClasses) {
-      expect(productionSource).not.toMatch(
-        new RegExp(`[\"'\\`]${className}[\"'\\`]`),
-      );
+      expect(productionSource).not.toContain(className);
     }
   });
 });
