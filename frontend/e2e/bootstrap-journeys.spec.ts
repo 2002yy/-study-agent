@@ -46,6 +46,14 @@ async function openMoreDrawer(page: Page, menuName: RegExp, title: string) {
   return dialog;
 }
 
+async function openLabCapability(page: Page, capabilityName: RegExp, title: string) {
+  const laboratory = await openMoreDrawer(page, /实验室/, "实验室");
+  await laboratory.getByRole("button", { name: capabilityName }).click();
+  const dialog = page.getByRole("dialog", { name: title });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 async function closeDrawer(page: Page, title: string) {
   const dialog = page.getByRole("dialog", { name: title });
   await dialog.getByRole("button", { name: `关闭${title}` }).last().click();
@@ -89,20 +97,20 @@ test("feature drawers load only their own data on demand", async ({ page }) => {
   expect(requestCount(requests, "/wechat")).toBe(0);
   await closeDrawer(page, "资料与来源");
 
-  await openMoreDrawer(page, /群聊讨论/, "群聊");
+  await openLabCapability(page, /群聊讨论/, "群聊");
   await expect.poll(() => requestCount(requests, "/wechat")).toBe(1);
   expect(requestCount(requests, "/tools")).toBe(0);
   expect(requestCount(requests, "/workflows/runs")).toBe(0);
   expect(requestCount(requests, "/memory")).toBe(0);
   await closeDrawer(page, "群聊");
 
-  await openMoreDrawer(page, /受控工具/, "工具");
+  await openLabCapability(page, /受控工具/, "工具");
   await expect.poll(() => requestCount(requests, "/tools")).toBe(1);
   expect(requestCount(requests, "/workflows/runs")).toBe(0);
   expect(requestCount(requests, "/memory")).toBe(0);
   await closeDrawer(page, "工具");
 
-  await openMoreDrawer(page, /开发者诊断/, "开发者诊断");
+  await openLabCapability(page, /开发者诊断/, "开发者诊断");
   await expect.poll(() => requestCount(requests, "/workflows/runs")).toBe(1);
   expect(requestCount(requests, "/memory")).toBe(0);
   await closeDrawer(page, "开发者诊断");
