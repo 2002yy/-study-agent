@@ -3,9 +3,9 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口已完成，转入独立、低耦合的 P2 清理与增强批次。**  
-> 当前切片：**PR #109 已合并 `main`，P1-R6 单一“实验室”入口完成；功能 merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。**  
-> 下一主线：**P2-A 遗留产品面与无 owner 样式清理。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口已完成，P2-A 遗留产品面与样式 owner 清理已完成代码基线。**  
+> 当前切片：**Draft PR #110 已完成 NewsWorkspace 遗留样式清理与 WeChat 联网结果样式归属迁移；代码基线 `f1b7cacb106ef249ab68ab498ea395864a7636c1` 的 CI run `31008156692` 完整通过。**  
+> 下一主线：**P2-B 平台配置与 CORS 单一 owner。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -27,17 +27,19 @@
 - planned / attempted / partial / failed 不得覆盖 committed learning truth。
 - 普通用户稳定入口为：学习会话、资料与来源、学习成果、设置。
 - 群聊、受控工具与开发者诊断属于实验能力，只能从单一“实验室”入口进入，默认休眠。
+- 产品面退场后，其 CSS、DOM class 和兼容命名必须同步证明 owner；不能只凭名称猜测“死代码”。
 
-## 2. 当前总体进度
+## 2. 已完成主线
 
-### 2.1 遗留产品面清理
+### 2.1 遗留 News 产品面退场
 
 - PR #97：联网研究产品表面集中化，merge SHA `3b1b9ef92c0496a659e2be3bf6075d529eb01826`；
 - PR #98：主工作区遗留 NewsRun 状态清理，merge SHA `6b357bfe3b63d072f9374f19e149866171145b7a`；
 - PR #99：前端兼容壳与无效设置合同清理，merge SHA `04770915e08528cb639edeba9839223072340f61`；
-- PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`。
+- PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`；
+- Draft PR #110：退场样式与现役 WeChat lookup owner 清理，代码基线已全绿。
 
-旧 News 产品面已经不再拥有独立 runtime、drawer 或 durable truth。
+旧 News 产品面已经不再拥有独立 runtime、drawer 或 durable truth。保留的 `NewsRunResponse` 等 API 兼容类型不等于生产 DOM 或样式 owner，不在 P2-A 中误删。
 
 ### 2.2 EvidenceRuntime 收口
 
@@ -53,7 +55,7 @@ EvidenceRuntime 已统一拥有 RAG、上传、联网研究、恢复和 Sources 
 - PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
 - PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`。
 
-LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 和学习会话 view。WorkspaceView 不再现场推导 active session、summary、新会话确认或中断恢复动作。
+LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 和学习会话 view。
 
 ### 2.4 ExtensionRuntime 与普通模式收口
 
@@ -61,51 +63,9 @@ LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryCont
 - PR #108：Extension view model 与扩展面板装载边界，merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`；
 - PR #109：普通模式与单一实验室入口，merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
 
-ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、按需加载、面板 view 和实验室当前能力选择。跨域组合层只消费窄 `ExtensionCoordinatorPort`。P1 运行时 owner 与普通模式收口已完成，当前没有待合并的功能 PR。
+ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、按需加载、面板 view 和实验室当前能力选择。跨域组合层只消费窄 `ExtensionCoordinatorPort`。
 
-## 3. P1-R6 单一实验室入口
-
-### 3.1 普通菜单
-
-普通学习菜单只直接展示：
-
-- 资料与来源；
-- 学习成果；
-- 设置；
-- 一个明确标注为实验功能的“实验室”入口。
-
-“群聊讨论 / 受控工具 / 开发者诊断”不再作为三个并列菜单项暴露。
-
-### 3.2 实验室内部导航
-
-打开实验室后再选择：
-
-```text
-实验室
-├─ 群聊讨论
-├─ 受控工具
-└─ 开发者诊断
-```
-
-从具体能力返回实验室时，键盘焦点恢复到刚才选择的能力卡片。实验室卡片具备桌面、移动端和 360×520 窄屏下的触控尺寸、换行与焦点样式。
-
-### 3.3 默认休眠与选择性加载
-
-- 打开实验室首页时，`activeCapability = null`；
-- 首页不请求 `/wechat`、`/tools` 或 `/workflows/runs`；
-- 选择群聊时只加载 wechat；
-- 选择受控工具时只加载 tools；
-- 选择开发者诊断时只加载 workflows；
-- 普通 drawer 不触发任何扩展 loader。
-
-### 3.4 短期兼容
-
-- 新 UI 只发出集中式 `LAB_DRAWER`；
-- 旧 `group / tools / timeline` drawer ID 仍可被读取，作为恢复链接与旧调用的短期兼容 surface；
-- 兼容 surface 直接映射到原能力，不经过实验室首页；
-- 本批不修改 WorkspacePersistence schema v4、API、SQLite schema 或 durable entity。
-
-## 4. 当前运行时架构
+## 3. 当前运行时架构
 
 ```text
 EvidenceRuntime
@@ -117,21 +77,79 @@ WorkspaceCoordinator
 WorkspaceView
 ```
 
-### EvidenceRuntime
+- **EvidenceRuntime**：RAG、上传、ResearchRun、RagQueryRun、RagWriteRun、Sources、EvidenceRecoveryPort。
+- **LearningSessionRuntime**：ChatController、MemoryController、学习设置、会话、流式恢复、LearningClosure、LearningRecoveryPort、LearningArtifactPort。
+- **ExtensionRuntime**：group、tool、workflow controller，扩展恢复、选择性加载、实验室 surface / capability view。
+- **WorkspaceCoordinator**：只负责真正跨域的取消、清理和重置顺序，不拥有第二份领域状态。
 
-拥有 RAG、上传、ResearchRun、RagQueryRun、RagWriteRun、Sources 数据加载、EvidenceRecoveryPort 和给 Learning 使用的窄证据端口。
+## 4. P2-A 遗留样式与 owner 清理
 
-### LearningSessionRuntime
+### 4.1 审计结论
 
-拥有 ChatController、MemoryController、学习设置、会话与消息、流式恢复、LearningClosure、LearningRecoveryPort、LearningArtifactPort 和会话派生 view。
+最初发现全局 `styles.css` 仍包含：
 
-### ExtensionRuntime
+```text
+.news-form
+.news-result
+.news-list
+.news-item
+```
 
-拥有 group、tool、workflow controller，扩展恢复、选择性加载、activeQuery 消费、实验室 surface / capability view 和跨域协调窄端口。
+逐项核对后得到两类不同结论：
 
-### WorkspaceCoordinator
+- `.news-form` 已无生产 DOM owner，属于真正死样式，直接删除；
+- `.news-result / .news-list / .news-item` 仍被现役 `WechatPanel` 的联网研究结果复用，不可直接删除，否则会造成实验室群聊视觉回归。
 
-只负责真正跨域的取消、清理和重置顺序，不拥有任何领域 controller 的第二份状态。
+因此本批不是机械删除全部 `.news-*`，而是“死样式删除 + 活样式 owner 迁移”。
+
+### 4.2 WeChat 样式所有权迁移
+
+`WechatPanel` 的现役 DOM 与样式统一迁移为：
+
+```text
+wechat-lookup-result
+wechat-lookup-list
+wechat-lookup-item
+```
+
+对应视觉声明移入：
+
+```text
+frontend/src/features/wechat-workspace/wechatLookup.css
+```
+
+`WechatPanel.tsx` 显式导入该文件。原有间距、边框、背景、链接强调、长文本换行、字号与状态文本样式保持不变；helper 名称也从 `newsItem*` 调整为 `lookupItem*`，避免退场产品语义继续污染现役 owner。
+
+### 4.3 永久边界
+
+`legacyNewsStylesBoundary.test.ts` 持续检查：
+
+- 全局 `styles.css` 不得重新出现 `.news-form / .news-result / .news-list / .news-item`；
+- 生产 TS/TSX 的静态 `className` token 不得重新出现上述旧类名；
+- `WechatPanel` 必须继续显式导入局部 lookup CSS；
+- `wechat-lookup-result / list / item` 必须同时存在于 owner DOM 和 owner CSS 中。
+
+### 4.4 浏览器故障注入修正
+
+P2-A 首次完整浏览器运行揭示：旧 bootstrap fixture 使用 `**/wechat*` 模糊 glob 注入 `/wechat` 接口故障，误把新静态资源 `wechatLookup.css` 返回为 503，导致 Vite 根模块无法渲染。
+
+当前 fixture 只在以下条件同时满足时注入隐藏能力故障：
+
+- resource type 为 `fetch` 或 `xhr`；
+- URL pathname 精确等于一个隐藏后端端点。
+
+CSS、TS、图片和其他静态资源一律 fallback。真实 `/wechat`、`/tools`、`/memory` 等接口仍保持严格故障注入。
+
+### 4.5 未改变边界
+
+本批没有修改：
+
+- API 路由或响应 schema；
+- SQLite schema 或 durable entity；
+- WorkspacePersistence schema v4；
+- Learning、Evidence、Extension 业务行为；
+- committed learning truth；
+- 实验室默认休眠与选择性加载合同。
 
 ## 5. 必须保护的稳定闭环
 
@@ -147,19 +165,19 @@ WorkspaceView
 | 中断续写 | 真实全栈通过 | partial 保存、同 turn 续写、只提交一次 |
 | 长会话与窄屏 | desktop / mobile / 360×520 通过 | 恢复卡、宽代码、长链接、IME、滚动与刷新恢复 |
 | 实验室休眠 | desktop / mobile / 360×520 通过 | 首页零扩展请求；选择后只加载对应能力 |
+| WeChat lookup 样式 | desktop / mobile / 360×520 通过 | 局部 owner CSS 正常加载，无旧 `.news-*` DOM/CSS |
 
 继续保护：RestoreCard、LearningStrip、SourcesPanel、MemoryRun、ResearchRun、RAG query/write run、WorkspacePersistence v4 和学习结束 committed truth。
 
-## 6. PR #109 验证证据
+## 6. PR #110 验证证据
 
-- 首个永久红边界 commit：`dad38e425fe161ee83ab53e94b6d1d47ce438c7d`；
-- 代码基线 commit：`53ddc3d25be6d68b5a80088ff421d7e569b064fb`；
-- 代码基线 CI：run `31002902303`，结论 `success`；
-- 最终 PR head：`68f6352bb1a0b0de7f9b7caddc773810cb8ba8d9`；
-- 最终 head CI：run `31004145615`，结论 `success`；
-- 功能 merge SHA：`af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
+### 绿色代码基线
 
-两轮绿色基线均通过：
+- 代码基线 commit：`f1b7cacb106ef249ab68ab498ea395864a7636c1`；
+- CI run：`31008156692`；
+- 结论：`success`。
+
+完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -167,37 +185,32 @@ WorkspaceView
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 73 个前端测试文件、270 项测试；
+- 74 个前端测试文件、273 项测试；
 - TypeScript / Vite production build；
 - 41 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
 说明：raw expanded mypy 仍有既有存量错误；baseline 为 `current=125, baseline=127, resolved=2`，未宣称 raw mypy 全量清零。
 
-### 受控失败记录
+### 受控失败与审计修正
 
-- CI `31001393724`：永久红边界按预期失败；四项新断言证明旧 UI 仍直出三个实验入口，尚无实验室 panel、首页休眠或兼容 surface 合同。
-- CI `31001749588`：实现与 TypeScript 基本成立；仅三项旧静态测试仍要求 `activeDrawer` 直接装载，并继续寻找旧菜单入口。
-- CI `31002211520`：73 个前端文件、270 项测试与 build 已通过；浏览器失败来自两处旧入口旅程、专项测试误把实验室副标题识别为直接菜单项，以及一次窄屏长链接样式读取波动。
-- commit `53ddc3d25be6d68b5a80088ff421d7e569b064fb` 更新真实浏览器合同并保持原窄屏断言不变，随后 41 条旅程与真实栈全部通过。
-- CI `31003422141`：文档 head 的 73/270、build 与 40/41 浏览器旅程通过；唯一失败是窄屏长链接在 DOM / 样式恢复切换后立即读取 `getComputedStyle().overflowWrap` 偶发得到空字符串，几何边界仍正确，真实栈因浏览器 Gate 未继续。
-- commit `c6244c41576fa2366074ff70c6670db7c48a1005` 在读取指标前等待同一严格样式合同达到 `anywhere` 或 `break-word`，保留后续几何与枚举双重断言；最终 run `31004145615` 完整通过。
+- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在模板字符串转义语法错误，不作为有效红边界证据；旧 73/270 仍通过。
+- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明 `.news-*` CSS 仍存在；同时发现源码扫描过宽，会误把 API 兼容类型当 DOM。
+- run `31006158792` 与 `31006427898`：CSS 删除边界已通过，静态扫描器仍因跨文件或缺少来源信息误报，促使边界改为逐文件静态 class token 审计。
+- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用 `news-result / news-list / news-item`，纠正了“全部是死 CSS”的初始判断。
+- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：74/273 与 build 通过，39/41 浏览器旅程通过；desktop/mobile bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败，真实栈未继续。
+- commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
 
-这些修正没有放宽默认休眠、选择性加载、恢复、持久化、移动端或 committed learning truth 边界。
+这些失败记录说明审计必须同时验证 CSS、DOM owner、静态资源装载和真实用户旅程，不能只依赖名称或全文搜索。
 
 ## 7. 后续任务
 
-### P2-A：遗留产品面与样式清理
+### P2-B：平台配置与 CORS 单一 owner
 
-1. 盘点并删除 NewsWorkspace 退场后无 owner、无 DOM 命中的 CSS selector；
-2. 为删除项增加静态引用检查和桌面 / 移动端视觉回归；
-3. 不修改现有 Learning、Evidence 或 Extension 产品行为。
-
-### P2-B：平台配置 owner
-
-1. 将 CORS 配置统一到单一 owner；
-2. 保留开发、测试和生产来源的显式合同；
-3. 增加错误配置与重复配置边界测试。
+1. 盘点 CORS 来源在应用工厂、环境配置、测试 fixture 与启动入口中的全部定义；
+2. 建立单一解析 owner，显式区分开发、测试、生产来源；
+3. 增加重复配置、空值、通配符与 credentials 冲突的永久边界；
+4. 保持现有 FastAPI 路由和真实浏览器闭环不变。
 
 ### P2-C：兼容层退出
 
@@ -215,12 +228,12 @@ WorkspaceView
 
 ## 8. 阶段判断
 
-P1 运行时 owner 与普通模式收口已经完成：
+P2-A 已完成代码基线：
 
-- 领域 controller 不再散落；
-- 跨域组合只经过窄端口；
-- WorkspaceView 只消费 view model；
-- 普通学习入口稳定；
-- 实验能力集中且默认休眠。
+- 真正无 owner 的 NewsWorkspace 样式已删除；
+- 仍在使用的 lookup 样式已迁移到 WeChat owner；
+- 旧 `.news-*` CSS 与 DOM 命名受到永久边界保护；
+- 浏览器故障注入不再误伤静态资源；
+- 产品行为与持久化边界未改变。
 
-后续不再进行大规模运行时搬迁，转为独立、可验证、低耦合的 P2 清理与增强批次。
+PR #110 合并后，当前主线转入 P2-B 平台配置与 CORS 单一 owner。
