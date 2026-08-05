@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -8,8 +8,10 @@ const sourceRoot = join(appDir, "..");
 const stylesPath = join(sourceRoot, "styles.css");
 const legacyNewsClasses = ["news-form", "news-result", "news-list", "news-item"] as const;
 
-function productionTypeScriptSources(directory: string): string[] {
-  const sources: string[] = [];
+type SourceFile = { path: string; source: string };
+
+function productionTypeScriptSources(directory: string): SourceFile[] {
+  const sources: SourceFile[] = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
     const stats = statSync(path);
@@ -18,7 +20,7 @@ function productionTypeScriptSources(directory: string): string[] {
       continue;
     }
     if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
-    sources.push(readFileSync(path, "utf8"));
+    sources.push({ path: relative(sourceRoot, path), source: readFileSync(path, "utf8") });
   }
   return sources;
 }
@@ -41,11 +43,12 @@ describe("retired NewsWorkspace style boundary", () => {
   });
 
   it("does not reintroduce retired NewsWorkspace class names in production DOM source", () => {
-    const classNames = staticClassNameTokens(
-      productionTypeScriptSources(sourceRoot).join("\n"),
-    );
-    for (const className of legacyNewsClasses) {
-      expect(classNames).not.toContain(className);
-    }
+    const offenders = productionTypeScriptSources(sourceRoot).flatMap(({ path, source }) => {
+      const classNames = staticClassNameTokens(source);
+      return legacyNewsClasses
+        .filter((className) => classNames.has(className))
+        .map((className) => `${path}:${className}`);
+    });
+    expect(offenders).toEqual([]);
   });
 });
