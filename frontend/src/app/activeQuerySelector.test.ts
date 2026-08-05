@@ -57,13 +57,15 @@ describe("active query selector", () => {
     expect(extensionSource).toContain("const activeQuery = selectActiveQuery({");
     expect(extensionSource).toContain("input: options.input,");
     expect(extensionSource).toContain("lastRagQuery: options.lastRagQuery,");
+    expect(extensionSource).toContain("query: activeQuery,");
+    expect(extensionSource).toContain("activeQuery,");
     expect(extensionSource).not.toContain(
       'options.input.trim() || options.lastRagQuery || ""',
     );
     expect(compositionSource).not.toContain(
       'import { selectActiveQuery } from "./activeQuerySelector";',
     );
-    expect(compositionSource).toContain("activeQuery,");
+    expect(compositionSource).not.toContain("activeQuery,");
     expect(selectorSource).not.toContain('from "react"');
     expect(selectorSource).toContain("const currentInput = input.trim();");
     expect(selectorSource).toContain('return lastRagQuery?.trim() ?? "";');
@@ -75,9 +77,8 @@ describe("active query selector", () => {
     );
     expect(declarationOwners).toEqual(["app/useExtensionRuntime.ts"]);
 
-    expect(extensionSource).toContain("query: activeQuery,");
     expect(viewSource).toContain(
-      "onSearchSources={() => ragController.search(activeQuery)}",
+      "onSearchSources={() => ragController.search(extensionView.activeQuery)}",
     );
   });
 });
