@@ -56,6 +56,7 @@ export default defineConfig({
       name: "narrow-chromium",
       testMatch: [
         "**/complex-content.spec.ts",
+        "**/extension-lab-journeys.spec.ts",
         "**/recovery-visibility.spec.ts",
       ],
       testIgnore: REAL_STACK_TESTS,
