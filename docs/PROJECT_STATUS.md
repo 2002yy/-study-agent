@@ -4,7 +4,7 @@
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**Learning / Evidence / Extension 三个领域的运行时 owner 已基本收口，正在完成实验能力与普通学习界面的最后隔离。**  
-> 当前切片：**Draft PR #108 已完成 ExtensionRuntime view model、扩展面板绑定和默认不加载边界；代码基线 CI run `30997820310` 完整通过。**  
+> 当前切片：**PR #108 已合并 `main`，P1-R5 ExtensionRuntime controller / recovery / view 收口完成。**  
 > 下一主线：**P1-R6 普通模式与单一“实验室”入口。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -54,20 +54,21 @@ EvidenceRuntime 已统一拥有 RAG、上传、联网研究、恢复和 Sources 
 
 LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 与学习会话 view；WorkspaceView 不再现场推导 active session、summary、确认或中断恢复动作。
 
-### 2.4 Extension 领域进度
+### 2.4 已完成的 Extension 领域收口
 
 - PR #107：ExtensionRuntime 第一批 controller / recovery owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
-- Draft PR #108：Extension view model 与实验能力装载边界，代码基线 `368e94e83fe5347851dffdc8ae43aa008bd79eb8`，CI run `30997820310` 完整通过。
+- PR #108：Extension view model 与实验能力装载边界，merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`。
 
-P1-R5 完成后，ExtensionRuntime 将同时拥有 controller、恢复、按需加载和面板所需 view，不再经由跨域组合层或 WorkspaceView 中转扩展内部状态。
+P1-R5 已完成。ExtensionRuntime 同时拥有 controller、恢复、按需加载和面板所需 view，不再经由跨域组合层或 WorkspaceView 中转扩展内部状态。
 
-## 3. 当前待合并切片
+## 3. 当前主线状态
 
-- 分支：`agent/extension-view-model`；
-- Draft PR：`#108 收口 ExtensionRuntime 扩展视图边界`；
-- base：`main` at `f4ebf9c3ea21987896332d65da19ae1a7789763b`；
-- 代码基线：`368e94e83fe5347851dffdc8ae43aa008bd79eb8`；
-- 代码基线 CI：run `30997820310`，结论 `success`。
+- 当前 `main` 功能基线：PR #108 merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`；
+- PR #108 代码基线：`368e94e83fe5347851dffdc8ae43aa008bd79eb8`；
+- 代码基线 CI：run `30997820310`，结论 `success`；
+- 最终 PR head：`c6794341ea2ed88aee7a91ec40aabeec4b12d46c`；
+- 最终 head CI：run `30998346437`，结论 `success`；
+- 当前没有待合并的功能 PR。
 
 ## 4. 必须保护的稳定闭环
 
@@ -202,7 +203,7 @@ selectExtensionDrawer()
 
 ## 7. PR #108 验证证据
 
-代码基线 commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 的 CI run `30997820310` 完整通过：
+代码基线 commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 的 CI run `30997820310` 与最终 head commit `c6794341ea2ed88aee7a91ec40aabeec4b12d46c` 的 CI run `30998346437` 均完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -221,7 +222,7 @@ selectExtensionDrawer()
 
 - CI `30996958715`：首个 Extension view 边界按预期失败；70 个既有前端文件、257 项测试仍通过，证明 panel binding、drawer contract 和 launcher owner 尚未迁移。
 - CI `30997472272`：实际实现和 TypeScript 类型已通过大部分合同；仅 3 项旧静态断言仍要求组合层中转扩展字段，且过宽 FeatureLoader 类型残留 `groupThreadId`。
-- commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 将组合层 loader 收窄为 memory-only，并更新为“组合层只消费 ExtensionCoordinatorPort”的真实合同，随后完整 CI 全绿。
+- commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 将组合层 loader 收窄为 memory-only，并更新为“组合层只消费 ExtensionCoordinatorPort”的真实合同，随后两轮完整 CI 全绿。
 
 这些修正没有放宽 view owner、默认不加载、恢复、持久化或产品行为边界。
 
