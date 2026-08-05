@@ -1,0 +1,43 @@
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const appDir = dirname(fileURLToPath(import.meta.url));
+const sourceRoot = join(appDir, "..");
+const stylesPath = join(sourceRoot, "styles.css");
+const legacyNewsClasses = ["news-form", "news-result", "news-list", "news-item"] as const;
+
+function productionTypeScriptSources(directory: string): string[] {
+  const sources: string[] = [];
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    const stats = statSync(path);
+    if (stats.isDirectory()) {
+      sources.push(...productionTypeScriptSources(path));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
+    sources.push(readFileSync(path, "utf8"));
+  }
+  return sources;
+}
+
+describe("retired NewsWorkspace style boundary", () => {
+  it("does not keep NewsWorkspace selectors after the product surface is removed", () => {
+    expect(existsSync(stylesPath)).toBe(true);
+    const styles = readFileSync(stylesPath, "utf8");
+    for (const className of legacyNewsClasses) {
+      expect(styles).not.toContain(`.${className}`);
+    }
+  });
+
+  it("does not reintroduce retired NewsWorkspace class names in production DOM source", () => {
+    const productionSource = productionTypeScriptSources(sourceRoot).join("\n");
+    for (const className of legacyNewsClasses) {
+      expect(productionSource).not.toMatch(
+        new RegExp(`[\"'\\`]${className}[\"'\\`]`),
+      );
+    }
+  });
+});
