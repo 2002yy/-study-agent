@@ -7,18 +7,18 @@ const sourceOf = (relativePath: string) => {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 };
 
-const typesSource = sourceOf("../types.ts");
 const chatPanelSource = sourceOf("../features/single-chat/ChatPanel.tsx");
 const launcherSource = sourceOf("../features/extensions/ExtensionLauncher.tsx");
+const contractSource = sourceOf("../features/extensions/extensionDrawerContract.ts");
 const labPanelSource = sourceOf("../features/extensions/ExtensionLabPanel.tsx");
 const runtimeSource = sourceOf("./useExtensionRuntime.ts");
 const drawersSource = sourceOf("./ExtensionDrawers.tsx");
 
 describe("single laboratory product boundary", () => {
   it("keeps one laboratory entry in the ordinary learning menu", () => {
-    expect(typesSource).toContain('| "lab"');
+    expect(contractSource).toContain('export const LAB_DRAWER = "lab" as DrawerId');
     expect(chatPanelSource).toContain("<ExtensionLauncher");
-    expect(launcherSource).toContain('onOpen("lab"');
+    expect(launcherSource).toContain("onOpen(LAB_DRAWER");
     expect(launcherSource).toContain("实验室");
     expect(launcherSource).not.toContain('onOpen("group"');
     expect(launcherSource).not.toContain('onOpen("tools"');
