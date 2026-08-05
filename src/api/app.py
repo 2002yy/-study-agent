@@ -10,29 +10,23 @@ import os
 import secrets
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.tools.registry import create_default_tool_registry
 
+from .cors import (
+    add_cors_headers,
+    build_cors_preflight_response,
+    is_cors_preflight,
+    resolve_cors_policy,
+)
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 ASSETS_DIR = ROOT / "assets"
 
 app = FastAPI(title="Study Agent API", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:4173",
-        "http://localhost:4173",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
 if ASSETS_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
@@ -74,32 +68,6 @@ def _api_token() -> str:
     return os.getenv("STUDY_AGENT_API_TOKEN", "").strip()
 
 
-def _allowed_cors_origins() -> set[str]:
-    raw = os.getenv("STUDY_AGENT_CORS_ORIGINS", "")
-    if not raw.strip():
-        return {
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "http://127.0.0.1:4173",
-            "http://localhost:4173",
-        }
-    return {origin.strip() for origin in raw.split(",") if origin.strip()}
-
-
-def _is_cors_origin_allowed(origin: str, allowed_origins: set[str]) -> bool:
-    return "*" in allowed_origins or origin in allowed_origins
-
-
-def _add_cors_headers(response: Response, origin: str, allowed_origins: set[str]) -> None:
-    if not origin or not _is_cors_origin_allowed(origin, allowed_origins):
-        return
-    response.headers["Access-Control-Allow-Origin"] = "*" if "*" in allowed_origins else origin
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Authorization,Content-Type,X-Study-Agent-Token"
-    if "*" not in allowed_origins:
-        response.headers["Vary"] = "Origin"
-
-
 def _request_token(request: Request) -> str:
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
@@ -117,22 +85,18 @@ def _is_authorized(request: Request) -> bool:
 
 @app.middleware("http")
 async def api_security_middleware(request: Request, call_next):
-    allowed_origins = _allowed_cors_origins()
+    cors_policy = resolve_cors_policy()
     origin = request.headers.get("origin", "")
 
-    if request.method == "OPTIONS" and request.headers.get("access-control-request-method"):
-        if origin and _is_cors_origin_allowed(origin, allowed_origins):
-            response = Response(status_code=204)
-            _add_cors_headers(response, origin, allowed_origins)
-            return response
-        return JSONResponse({"detail": "CORS origin not allowed"}, status_code=403)
+    if is_cors_preflight(request):
+        return build_cors_preflight_response(request, cors_policy)
 
     public_path = request.url.path == "/health" or request.url.path.startswith("/assets/")
     if not public_path and not _is_authorized(request):
         response = JSONResponse({"detail": "Missing or invalid API token"}, status_code=401)
-        _add_cors_headers(response, origin, allowed_origins)
+        add_cors_headers(response, origin, cors_policy)
         return response
 
     response = await call_next(request)
-    _add_cors_headers(response, origin, allowed_origins)
+    add_cors_headers(response, origin, cors_policy)
     return response
