@@ -17,10 +17,14 @@ test("laboratory stays dormant until selection and restores focus on return", as
 
   await page.getByLabel("打开更多学习工具").click();
   const labEntry = page.getByRole("menuitem", { name: /实验室/ });
+  const directMenuLabels = page.locator(
+    'details.workspace-menu [role="menuitem"] strong',
+  );
   await expect(labEntry).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: /群聊讨论/ })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: /受控工具/ })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: /开发者诊断/ })).toHaveCount(0);
+  await expect(directMenuLabels.filter({ hasText: "实验室" })).toHaveCount(1);
+  await expect(directMenuLabels.filter({ hasText: "群聊讨论" })).toHaveCount(0);
+  await expect(directMenuLabels.filter({ hasText: "受控工具" })).toHaveCount(0);
+  await expect(directMenuLabels.filter({ hasText: "开发者诊断" })).toHaveCount(0);
   await labEntry.click();
 
   const lab = page.getByRole("dialog", { name: "实验室" });
