@@ -3,8 +3,9 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**按 Learning / Evidence / Extension 三个领域收口运行时 owner，并保护真实持久化、恢复、学习结束与窄屏闭环。**  
-> 当前切片：**PR #107 已合并 `main`，ExtensionRuntime 已接管第一批扩展 owner；下一批收口扩展 view model 与实验室装载边界。**  
+> 当前主线：**Learning / Evidence / Extension 三个领域的运行时 owner 已基本收口，正在完成实验能力与普通学习界面的最后隔离。**  
+> 当前切片：**Draft PR #108 已完成 ExtensionRuntime view model、扩展面板绑定和默认不加载边界；代码基线 CI run `30997820310` 完整通过。**  
+> 下一主线：**P1-R6 普通模式与单一“实验室”入口。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -26,29 +27,47 @@
 - planned / attempted / partial / failed 不得覆盖 committed learning truth。
 - 普通用户最终只保留学习会话、资料与来源、学习成果、设置四个稳定入口。
 
-## 2. 已合并主线
+## 2. 当前总体进度
 
-- 核心真实全栈基线：`9e0adb8c6833b4e1733dfb897d5fc7a92c9df5ab`；
+### 2.1 已完成的产品与遗留清理
+
 - PR #97：联网研究产品表面集中化，merge SHA `3b1b9ef92c0496a659e2be3bf6075d529eb01826`；
 - PR #98：主工作区遗留 NewsRun 状态清理，merge SHA `6b357bfe3b63d072f9374f19e149866171145b7a`；
 - PR #99：前端兼容壳与无效设置合同清理，merge SHA `04770915e08528cb639edeba9839223072340f61`；
-- PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`；
+- PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`。
+
+这组工作完成了旧 News 产品面的退场，避免其继续拥有独立 runtime、drawer 或 durable truth。
+
+### 2.2 已完成的 Evidence 领域收口
+
 - PR #101：EvidenceRuntime 第一批 owner 抽离，merge SHA `a5db630c1758cbb5019b6fc035c90d26cf54ec05`；
 - PR #102：Evidence recovery port 与源码证据 owner 边界，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
-- PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`；
+- PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`。
+
+EvidenceRuntime 已统一拥有 RAG、上传、联网研究、恢复和 Sources 数据加载；GitHub 源码学习继续落入通用 EvidenceSnapshot。
+
+### 2.3 已完成的 Learning 领域收口
+
 - PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
 - PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
-- PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`；
-- PR #107：ExtensionRuntime 第一批 owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`。
+- PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`。
 
-## 3. 当前主线状态
+LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 与学习会话 view；WorkspaceView 不再现场推导 active session、summary、确认或中断恢复动作。
 
-- 当前 `main` 功能基线：PR #107 merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
-- PR #107 代码基线：`36d9cef3dfb611313a967574889601433ff68cc7`；
-- 代码基线 CI：run `30994619469`，结论 `success`；
-- 最终 PR head：`2f847d4c7ba09a118002b5c1a731562e7260ef20`；
-- 最终 head CI：run `30995090765`，结论 `success`；
-- 当前没有待合并的功能 PR。
+### 2.4 Extension 领域进度
+
+- PR #107：ExtensionRuntime 第一批 controller / recovery owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
+- Draft PR #108：Extension view model 与实验能力装载边界，代码基线 `368e94e83fe5347851dffdc8ae43aa008bd79eb8`，CI run `30997820310` 完整通过。
+
+P1-R5 完成后，ExtensionRuntime 将同时拥有 controller、恢复、按需加载和面板所需 view，不再经由跨域组合层或 WorkspaceView 中转扩展内部状态。
+
+## 3. 当前待合并切片
+
+- 分支：`agent/extension-view-model`；
+- Draft PR：`#108 收口 ExtensionRuntime 扩展视图边界`；
+- base：`main` at `f4ebf9c3ea21987896332d65da19ae1a7789763b`；
+- 代码基线：`368e94e83fe5347851dffdc8ae43aa008bd79eb8`；
+- 代码基线 CI：run `30997820310`，结论 `success`。
 
 ## 4. 必须保护的稳定闭环
 
@@ -70,9 +89,14 @@
 
 ### EvidenceRuntime
 
-`useEvidenceRuntime` 集中拥有 RAG settings/enabled、RagQueryRun、RagWriteRun、ResearchRun、RAG/上传/联网研究 controller、Sources 实际加载和 `EvidenceRecoveryPort`。
+`useEvidenceRuntime` 集中拥有：
 
-为 Learning chat 提供窄 `EvidenceLearningPort`，只暴露聊天所需的 RAG 与联网研究依赖，不把 Evidence controller owner 迁入 Learning。
+- RAG settings / enabled；
+- RagQueryRun、RagWriteRun、ResearchRun；
+- RAG、上传、联网研究 controller；
+- Sources 实际加载；
+- `EvidenceRecoveryPort`；
+- 提供给 Learning 的窄 `EvidenceLearningPort`。
 
 ### LearningSessionRuntime
 
@@ -88,97 +112,97 @@
 
 ### ExtensionRuntime
 
-`useExtensionRuntime` 第一批集中拥有：
+`useExtensionRuntime` 集中拥有：
 
 - 唯一生产 `useGroupChatController`；
 - 唯一生产 `useToolController`；
 - 唯一生产 `useWorkflowController`；
 - group thread 与 ToolRun ID；
 - `ExtensionRecoveryPort`；
-- group / tools / timeline drawer 数据加载；
-- 单一 `activeQuery` 派生及 Tool invocation；
-- `ExtensionCoordinatorPort` 的 group cancel、tool invalidate、ToolRun clear 与 workflow clear。
+- 单一 `activeQuery` 与 Tool invocation；
+- `ExtensionCoordinatorPort`；
+- group / tools / timeline 显式 drawer contract 与按需加载；
+- `ExtensionViewModel`。
 
-`WorkspaceCoordinator` 仍是跨域协调 owner，只消费 ExtensionRuntime 的窄端口；Memory drawer、Learning、Evidence、普通设置和 durable truth 未迁入 ExtensionRuntime。
+`WorkspaceCoordinator` 仍是跨域协调 owner，只消费各领域窄端口；Memory、Evidence、Learning、普通设置与 durable truth 未迁入 ExtensionRuntime。
 
-## 6. PR #107：ExtensionRuntime 第一批 owner
+## 6. PR #108：扩展 view model 与装载边界
 
-### 6.1 controller owner
+### 6.1 单一 ExtensionViewModel
 
-原先由 `useWorkspaceControllers` 直接构造的三个扩展 controller 已迁入：
+ExtensionRuntime 现在通过一个 view 暴露：
 
 ```text
-useExtensionRuntime
--> useGroupChatController
--> useToolController
--> useWorkflowController
+activeDrawer
+activeQuery
+group
+  -> wechat / web lookup / session / controller
+tools
+  -> tool count / controller
+timeline
+  -> workflow runs / controller
 ```
 
-`WorkspaceRuntime` 只构造一次 ExtensionRuntime；`useWorkspaceControllers` 只消费 runtime 输出并继续负责跨域 Role、Settings 与 WorkspaceCoordinator 组合。
+WorkspaceRuntime 只把 `extension.view` 直接交给 WorkspaceView；`useWorkspaceControllers` 只消费 `extension.coordinator`，不再中转扩展 controller、activeQuery 或 view 状态。
 
-### 6.2 恢复与持久化
+### 6.2 ExtensionDrawers
+
+新增 `ExtensionDrawers.tsx`，集中绑定：
+
+```text
+group -> WechatPanel
+tools -> ToolPanel
+timeline -> TimelinePanel
+```
+
+WorkspaceView 已删除对这三个 panel 和 controller 的直接认识，只保留：
+
+```text
+<ExtensionDrawers view={extensionView} />
+```
+
+### 6.3 显式 drawer contract 与默认不加载
 
 新增：
 
 ```text
-ExtensionRecoveryPort
--> wechatThreadId
--> toolRunId
--> restore()
+EXTENSION_DRAWERS = [group, tools, timeline]
+selectExtensionDrawer()
 ```
 
-`useWorkspaceRecovery` 不再接收 group/tool setter，而是统一组合：
+规则：
 
-```text
-extension.state
-learning.state
-evidence.state
-```
+- 没有 drawer 时返回 `null`；
+- sessions / sources / memory / settings 等普通 drawer 返回 `null`；
+- 只有 group / tools / timeline 才触发 Extension 数据加载；
+- 普通学习路径不会预加载 wechat、tools 或 workflows。
 
-WorkspacePersistence schema 仍为 v4，`wechatThreadId` 与 `toolRunId` 字段名保持不变。
+### 6.4 兼容入口隔离
 
-### 6.3 drawer lazy-load
+现有“群聊讨论 / 受控工具 / 开发者诊断”三个入口暂时保持原行为，但已从 ChatPanel 的内联实现迁入唯一 `ExtensionLauncher`。
 
-ExtensionRuntime 只在对应 drawer 打开时请求：
+这一步不是最终“实验室”产品面；它只建立兼容 adapter 的唯一 owner，下一批可以把三个入口替换成一个实验室入口，而不再次修改 ChatPanel 核心学习逻辑。
 
-```text
-group -> wechat
-tools -> tools
-timeline -> workflows
-```
+### 6.5 activeQuery 共享
 
-Memory drawer 仍由学习侧组合层加载；Sources drawer 仍由 EvidenceRuntime 加载。
+`selectActiveQuery()` 仍是唯一 selector。ExtensionRuntime 生成同一 `activeQuery`：
 
-### 6.4 跨域协调
-
-新增窄端口：
-
-```text
-ExtensionCoordinatorPort
--> cancelGroup()
--> invalidateTool()
--> clearToolRun()
--> clearWorkflow()
-```
-
-WorkspaceCoordinator 没有迁入 ExtensionRuntime，也没有创建第二套协调状态。Chat 与 Web Research 的取消、RAG clear 仍由原领域 owner 提供。
-
-### 6.5 activeQuery 单一 owner
-
-`selectActiveQuery()` 仍是唯一 selector；生产代码中 `const activeQuery =` 只在 ExtensionRuntime 声明一次。工具 invocation 与 WorkspaceView 的 Sources 搜索继续共享同一个值，没有复制 fallback 逻辑。
+- Tool invocation 使用它；
+- WorkspaceView 的 Sources 搜索通过 `extensionView.activeQuery` 使用它；
+- `useWorkspaceControllers` 不再中转或复制它。
 
 ### 6.6 兼容边界
 
+- 三个现有实验入口的文案、点击和面板行为不变；
 - 群聊确认、发送、停止、重置与错误文案不变；
 - ToolRun、Workflow 与 operation registry 行为不变；
-- group/tool 恢复字段不变；
 - WorkspacePersistence schema 仍为 v4；
 - API、SQLite schema 与 durable entity 不变；
-- UI 布局、普通用户入口和 committed learning truth 不变。
+- 普通学习、Memory、Evidence 和 committed learning truth 不变。
 
-## 7. PR #107 验证证据
+## 7. PR #108 验证证据
 
-代码基线 commit `36d9cef3dfb611313a967574889601433ff68cc7` 的 CI run `30994619469` 与最终 head commit `2f847d4c7ba09a118002b5c1a731562e7260ef20` 的 CI run `30995090765` 均完整通过：
+代码基线 commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 的 CI run `30997820310` 完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -186,7 +210,7 @@ WorkspaceCoordinator 没有迁入 ExtensionRuntime，也没有创建第二套协
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 70 个前端测试文件、257 项测试；
+- 72 个前端测试文件、264 项测试；
 - TypeScript / Vite production build；
 - 38 条 desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
@@ -195,32 +219,56 @@ WorkspaceCoordinator 没有迁入 ExtensionRuntime，也没有创建第二套协
 
 ### 受控失败记录
 
-- CI `30993884476`：新增 ExtensionRuntime owner 边界按预期失败；后端、RAG、Ruff、打包、密钥与 mypy baseline 均通过，证明旧 owner 尚在组合层。
-- CI `30994190845`：ExtensionRuntime、recovery 与 controller 边界已通过；70 个前端文件中仅旧 `activeQuerySelector` 静态断言仍要求组合层 owner，实际 selector 已随 Tool owner 迁入 ExtensionRuntime。
-- commit `36d9cef3dfb611313a967574889601433ff68cc7` 更新为验证 ExtensionRuntime 单一声明、组合层消费和 Sources / tools 共用，随后两轮完整 CI 全绿。
+- CI `30996958715`：首个 Extension view 边界按预期失败；70 个既有前端文件、257 项测试仍通过，证明 panel binding、drawer contract 和 launcher owner 尚未迁移。
+- CI `30997472272`：实际实现和 TypeScript 类型已通过大部分合同；仅 3 项旧静态断言仍要求组合层中转扩展字段，且过宽 FeatureLoader 类型残留 `groupThreadId`。
+- commit `368e94e83fe5347851dffdc8ae43aa008bd79eb8` 将组合层 loader 收窄为 memory-only，并更新为“组合层只消费 ExtensionCoordinatorPort”的真实合同，随后完整 CI 全绿。
 
-这些修正没有放宽 controller、query、恢复、持久化或产品行为边界。
+这些修正没有放宽 view owner、默认不加载、恢复、持久化或产品行为边界。
 
-## 8. 下一执行顺序
-
-### P1-R5B：收口扩展视图与实验室装载边界
-
-下一批将 `WorkspaceView` 中的扩展组件绑定收口为单一 Extension view model，并为普通模式默认不加载实验能力建立边界：
-
-- group / tools / timeline 的 view props；
-- extension drawer 可见性与加载条件；
-- 扩展错误状态与 busy 状态；
-- compatibility adapters 的唯一入口；
-- 不移动 Learning、Evidence、Memory 或普通设置。
+## 8. 后续任务
 
 ### P1-R6：普通模式与单一实验室入口
 
-普通模式只保留学习会话、资料与来源、学习成果、设置。群聊、工具和开发者诊断进入单一实验室，默认不加载。
+目标：普通模式只展示稳定学习功能；实验能力进入一个明确、默认休眠的入口。
 
-### 剩余债务
+执行项：
 
-- GitHub symbol mapping 与 CI association 增强，但继续写入通用 EvidenceSnapshot；
-- 删除 NewsWorkspace 遗留无 owner CSS selector；
-- CORS 统一为单一 owner；
-- 410 tombstone 只在迁移窗口结束后单独删除；
-- 补 Firefox、WebKit 和实体手机抽样。
+1. ChatPanel 的普通菜单只保留资料与来源、学习成果、设置；
+2. 用一个“实验室”入口替换三个独立实验入口；
+3. 实验室内部再选择群聊、受控工具、开发者诊断；
+4. 未打开实验室时不请求 wechat、tools、workflows；
+5. 保持旧 drawer ID 的短期兼容，但新 UI 不直接依赖它们；
+6. 增加 desktop / mobile / 360×520 的实验室打开、返回和焦点测试。
+
+### P2：平台债务清理
+
+按风险与独立性拆分：
+
+1. 删除 NewsWorkspace 遗留、无 owner 的 CSS selector；
+2. CORS 配置统一为单一 owner；
+3. 410 tombstone 在迁移窗口结束后单独删除；
+4. GitHub symbol mapping 与 CI association 增强，但继续写入通用 EvidenceSnapshot；
+5. 清理兼容 adapter，只在新实验室入口稳定后执行。
+
+### P2：验证覆盖补强
+
+- Firefox 抽样；
+- WebKit 抽样；
+- 至少一台实体手机的输入法、滚动、drawer 与恢复流程抽样；
+- 保留 Chromium 全量 Golden Journeys 与真实 FastAPI + SQLite 门禁。
+
+## 9. 阶段判断
+
+当前系统已经完成运行时架构的主体收口：
+
+```text
+EvidenceRuntime
+LearningSessionRuntime
+ExtensionRuntime
+        ↓ 窄端口
+WorkspaceCoordinator
+        ↓ view model
+WorkspaceView
+```
+
+剩余主线不再是大规模 controller 搬迁，而是产品入口简化、兼容层退出与平台债务清理。P1-R6 完成后，可结束本轮“运行时 owner + 普通模式收口”阶段，转入独立、小批量的 P2 整理与能力增强。

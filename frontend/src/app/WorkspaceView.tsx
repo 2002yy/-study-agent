@@ -10,11 +10,10 @@ import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadC
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
-import { ToolPanel } from "../features/tools/ToolPanel";
-import { WechatPanel } from "../features/wechat-workspace/WechatPanel";
-import { TimelinePanel } from "../features/workflows/TimelinePanel";
 import { GlobalNotices } from "../layout/GlobalNotices";
 import type { ApiSnapshot, ChatSettings, DrawerId, RagSettings } from "../types";
+import { ExtensionDrawers } from "./ExtensionDrawers";
+import type { ExtensionViewModel } from "./useExtensionRuntime";
 import type { LearningSessionRuntime } from "./useLearningSessionRuntime";
 import { useWorkspace } from "./WorkspaceProvider";
 import type { useWorkspaceControllers } from "./useWorkspaceControllers";
@@ -29,6 +28,7 @@ export function WorkspaceView({
   ui,
   controllers,
   learningView,
+  extensionView,
 }: {
   snapshot: ApiSnapshot;
   refresh: () => Promise<void>;
@@ -51,20 +51,16 @@ export function WorkspaceView({
   };
   controllers: Controllers;
   learningView: LearningView;
+  extensionView: ExtensionViewModel;
 }) {
   const {
-    activeQuery,
-    groupThreadId,
     roleController,
-    workflowController,
     settingsController,
-    groupController,
     webLookupController,
     memoryController,
     ragController,
     uploadController,
     chatController,
-    toolController,
   } = controllers;
   const { state, dispatch } = useWorkspace();
   const openDrawer = (drawer: DrawerId) => dispatch({ type: "OPEN_DRAWER", drawer });
@@ -167,9 +163,9 @@ export function WorkspaceView({
           onAbandonInterruptedReply={learningView.abandonRecovery}
           onCopyInterruptedReply={chatController.copyInterrupted}
           onUploadClick={() => requestUpload("upload")}
-          onSearchSources={() => ragController.search(activeQuery)}
+          onSearchSources={() => ragController.search(extensionView.activeQuery)}
           isSearching={ragController.isSearching}
-          hasSearchQuery={Boolean(activeQuery)}
+          hasSearchQuery={Boolean(extensionView.activeQuery)}
           onQuickPrompt={ui.setInput}
           onStartNewTopic={learningView.requestNewSession}
           lastChat={chatController.lastChat}
@@ -229,39 +225,7 @@ export function WorkspaceView({
         />
       </SlideOver>
 
-      <SlideOver open={state.activeDrawer === "group"} title="群聊" onClose={closeDrawer}>
-        <WechatPanel
-          wechat={snapshot.wechat}
-          webLookup={webLookupController.result}
-          useWebLookup={webLookupController.useInChat}
-          setUseWebLookup={webLookupController.setUseInChat}
-          wechatInput={groupController.input}
-          setWechatInput={groupController.setInput}
-          sessionId={groupThreadId}
-          onOpening={groupController.opening}
-          onReset={groupController.reset}
-          onMarkRead={groupController.markRead}
-          onSendWechat={groupController.send}
-          onStopWechat={groupController.stop}
-          isWechatBusy={groupController.isBusy}
-          error={groupController.error}
-        />
-      </SlideOver>
-
-      <SlideOver open={state.activeDrawer === "tools"} title="工具" onClose={closeDrawer}>
-        <ToolPanel
-          toolCount={snapshot.tools.length}
-          run={toolController.run}
-          error={toolController.error}
-          previewTool={toolController.preview}
-          callTool={toolController.call}
-          isPreviewing={toolController.isPreviewing}
-          isCalling={toolController.isCalling}
-          canCall={toolController.canCall}
-          callBlockedReason={toolController.callBlockedReason}
-          invocationLabel={toolController.invocationLabel}
-        />
-      </SlideOver>
+      <ExtensionDrawers view={extensionView} onClose={closeDrawer} />
 
       <SlideOver open={state.activeDrawer === "memory"} title="学习成果" onClose={closeDrawer}>
         <MemoryPanel
@@ -289,15 +253,6 @@ export function WorkspaceView({
             }
           }}
           onRebuildKnowledge={() => requestUpload("rebuild")}
-        />
-      </SlideOver>
-
-      <SlideOver open={state.activeDrawer === "timeline"} title="开发者诊断" onClose={closeDrawer}>
-        <TimelinePanel
-          runs={snapshot.workflowRuns}
-          selectedRun={workflowController.selectedRun}
-          loadingRunId={workflowController.loadingRunId}
-          onSelectRun={workflowController.selectRun}
         />
       </SlideOver>
 

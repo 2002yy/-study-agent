@@ -1,5 +1,4 @@
 import {
-  Activity,
   ArrowDown,
   BookOpen,
   CheckCircle2,
@@ -7,13 +6,11 @@ import {
   Library,
   Loader2,
   LogOut,
-  MessageSquare,
   MoreHorizontal,
   Send,
   Settings,
   Square,
   Upload,
-  Wrench,
 } from "lucide-react";
 import {
   useEffect,
@@ -34,6 +31,7 @@ import type {
   MemoryStatusResponse,
 } from "../../types";
 import { EvidenceTrail } from "../evidence/EvidenceTrail";
+import { ExtensionLauncher } from "../extensions/ExtensionLauncher";
 import { RAG_UPLOAD_HELP_TEXT } from "../rag/uploadContract";
 import { roleLabel } from "../roles/roleCatalog";
 import type { SemanticSessionRow } from "../sessions/sessionNavigation";
@@ -348,19 +346,7 @@ export function ChatPanel(props: ChatPanelProps) {
                 <span><strong>设置</strong><small>调整学习体验、资料使用与隐私</small></span>
               </button>
 
-              <div className="workspace-menu-section-label" role="presentation">实验功能</div>
-              <button onClick={(event) => openFromMenu("group", event.currentTarget)} role="menuitem" type="button">
-                <MessageSquare size={16} />
-                <span><strong>群聊讨论</strong><small>让多位角色从不同角度讨论</small></span>
-              </button>
-              <button onClick={(event) => openFromMenu("tools", event.currentTarget)} role="menuitem" type="button">
-                <Wrench size={16} />
-                <span><strong>受控工具</strong><small>实验性的本地知识工具入口</small></span>
-              </button>
-              <button onClick={(event) => openFromMenu("timeline", event.currentTarget)} role="menuitem" type="button">
-                <Activity size={16} />
-                <span><strong>开发者诊断</strong><small>查看工作流阶段和失败原因</small></span>
-              </button>
+              <ExtensionLauncher onOpen={openFromMenu} />
             </div>
           </details>
         </div>

@@ -47,13 +47,25 @@ describe("workspace controller composition boundary", () => {
     }
   });
 
-  it("makes ExtensionRuntime the only owner of extension controllers", () => {
+  it("makes ExtensionRuntime the only owner of extension controllers and views", () => {
     expect(runtimeSource).toContain("useExtensionRuntime({");
-    expect(compositionSource).toContain("} = options.extension;");
+    expect(compositionSource).toContain(
+      "const extensionCoordinator = options.extension.coordinator;",
+    );
+    expect(compositionSource).not.toContain("options.extension.view");
     for (const hook of extensionControllerHooks) {
       expect(extensionSource).toContain(`${hook}(`);
       expect(compositionSource).not.toContain(`${hook}(`);
       expect(runtimeSource).not.toContain(`${hook}(`);
+    }
+    for (const viewField of [
+      "groupController",
+      "toolController",
+      "workflowController",
+      "groupThreadId",
+      "activeQuery",
+    ]) {
+      expect(compositionSource).not.toContain(viewField);
     }
   });
 

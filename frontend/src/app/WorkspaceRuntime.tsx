@@ -44,6 +44,11 @@ export default function WorkspaceRuntime() {
     chatSettings: learning.chatSettings,
     ragSettings: evidence.ragSettings,
     ragEnabled: evidence.ragEnabled,
+    webLookup: {
+      result: evidence.webLookupController.result,
+      useInChat: evidence.webLookupController.useInChat,
+      setUseInChat: evidence.webLookupController.setUseInChat,
+    },
   });
   const controllers = useWorkspaceControllers({
     setSnapshot,
@@ -69,6 +74,7 @@ export default function WorkspaceRuntime() {
       fileInputRef={fileInputRef}
       controllers={controllers}
       learningView={learning.view}
+      extensionView={extension.view}
       ui={{
         input,
         setInput,

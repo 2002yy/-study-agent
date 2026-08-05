@@ -7,8 +7,13 @@ import {
 } from "react";
 
 import type { LocalKnowledgeInvocation } from "../api";
+import {
+  selectExtensionDrawer,
+  type ExtensionDrawerId,
+} from "../features/extensions/extensionDrawerContract";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useToolController } from "../features/tools/toolController";
+import type { ResearchLookupResponse } from "../features/web-lookup/researchApi";
 import { useWorkflowController } from "../features/workflows/workflowController";
 import type {
   ApiSnapshot,
@@ -25,6 +30,16 @@ type FeatureLoader = (
   feature: WorkspaceFeature,
   options?: { groupThreadId?: string },
 ) => Promise<Partial<ApiSnapshot>>;
+
+type GroupController = ReturnType<typeof useGroupChatController>;
+type ToolController = ReturnType<typeof useToolController>;
+type WorkflowController = ReturnType<typeof useWorkflowController>;
+
+export type ExtensionEvidenceViewPort = {
+  result: ResearchLookupResponse | null;
+  useInChat: boolean;
+  setUseInChat: (enabled: boolean) => void;
+};
 
 export type ExtensionRecoveryInput = Pick<
   WorkspaceRecovery,
@@ -45,6 +60,36 @@ export type ExtensionCoordinatorPort = {
   clearWorkflow: () => void;
 };
 
+export type ExtensionViewModel = {
+  activeDrawer: ExtensionDrawerId | null;
+  activeQuery: string;
+  group: {
+    wechat: ApiSnapshot["wechat"];
+    webLookup: ResearchLookupResponse | null;
+    useWebLookup: boolean;
+    setUseWebLookup: (enabled: boolean) => void;
+    sessionId?: string;
+    controller: GroupController;
+  };
+  tools: {
+    toolCount: number;
+    controller: ToolController;
+  };
+  timeline: {
+    runs: ApiSnapshot["workflowRuns"];
+    controller: WorkflowController;
+  };
+};
+
+const EXTENSION_DRAWER_CONFIG: Record<
+  ExtensionDrawerId,
+  { feature: WorkspaceFeature; label: string }
+> = {
+  group: { feature: "wechat", label: "群聊" },
+  tools: { feature: "tools", label: "工具" },
+  timeline: { feature: "workflows", label: "开发者诊断" },
+};
+
 export function useExtensionRuntime(options: {
   snapshot: ApiSnapshot;
   setSnapshot: Dispatch<SetStateAction<ApiSnapshot>>;
@@ -56,8 +101,10 @@ export function useExtensionRuntime(options: {
   chatSettings: ChatSettings;
   ragSettings: RagSettings;
   ragEnabled: boolean;
+  webLookup: ExtensionEvidenceViewPort;
 }) {
   const { state, dispatch } = useWorkspace();
+  const activeDrawer = selectExtensionDrawer(state.activeDrawer);
   const setGroupThreadId = useCallback(
     (threadId?: string) =>
       dispatch({ type: "SET_ACTIVE_GROUP_THREAD", threadId }),
@@ -107,28 +154,20 @@ export function useExtensionRuntime(options: {
   ]);
 
   useEffect(() => {
-    const drawer = state.activeDrawer;
-    if (!drawer || !["group", "tools", "timeline"].includes(drawer)) return;
+    if (!activeDrawer) return;
+    const config = EXTENSION_DRAWER_CONFIG[activeDrawer];
     let active = true;
     const load = async () => {
       try {
-        if (drawer === "group") {
-          await options.loadFeature("wechat", { groupThreadId });
-        } else if (drawer === "tools") {
-          await options.loadFeature("tools");
-        } else if (drawer === "timeline") {
-          await options.loadFeature("workflows");
+        if (config.feature === "wechat") {
+          await options.loadFeature(config.feature, { groupThreadId });
+        } else {
+          await options.loadFeature(config.feature);
         }
       } catch (error) {
         if (!active) return;
-        const label =
-          drawer === "group"
-            ? "群聊"
-            : drawer === "tools"
-              ? "工具"
-              : "开发者诊断";
         options.operationError(
-          `${label}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
+          `${config.label}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
         );
       }
     };
@@ -136,7 +175,7 @@ export function useExtensionRuntime(options: {
     return () => {
       active = false;
     };
-  }, [state.activeDrawer, options.loadFeature]);
+  }, [activeDrawer, options.loadFeature]);
 
   const restore = useCallback(
     (recovery: ExtensionRecoveryInput | null) => {
@@ -173,13 +212,29 @@ export function useExtensionRuntime(options: {
       workflowController.clear,
     ],
   );
+  const view: ExtensionViewModel = {
+    activeDrawer,
+    activeQuery,
+    group: {
+      wechat: options.snapshot.wechat,
+      webLookup: options.webLookup.result,
+      useWebLookup: options.webLookup.useInChat,
+      setUseWebLookup: options.webLookup.setUseInChat,
+      sessionId: groupThreadId,
+      controller: groupController,
+    },
+    tools: {
+      toolCount: options.snapshot.tools.length,
+      controller: toolController,
+    },
+    timeline: {
+      runs: options.snapshot.workflowRuns,
+      controller: workflowController,
+    },
+  };
 
   return {
-    activeQuery,
-    groupThreadId,
-    groupController,
-    toolController,
-    workflowController,
+    view,
     recovery,
     coordinator,
   };
