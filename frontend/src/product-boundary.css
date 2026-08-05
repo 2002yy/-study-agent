@@ -142,6 +142,64 @@
   margin-bottom: 9px;
 }
 
+.extension-lab-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.extension-lab-options {
+  display: grid;
+  gap: 10px;
+}
+
+.extension-lab-options > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 13px;
+  text-align: left;
+}
+
+.extension-lab-options > button:hover,
+.extension-lab-options > button:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-strong);
+}
+
+.extension-lab-options > button > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.extension-lab-options > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.extension-lab-options strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.extension-lab-options small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.extension-lab-back {
+  margin-bottom: 12px;
+}
+
 @media (max-width: 760px) {
   .workspace-menu-section-label {
     padding-top: 11px;
@@ -159,5 +217,10 @@
 
   .upload-learning-prompt-actions {
     justify-content: flex-start;
+  }
+
+  .extension-lab-options > button {
+    min-height: 68px;
+    padding: 12px;
   }
 }

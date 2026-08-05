@@ -107,6 +107,9 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   expect(conversationBounds!.x + conversationBounds!.width).toBeLessThanOrEqual(360.5);
 
   await longLink.scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => longLink.evaluate((element) => getComputedStyle(element).overflowWrap))
+    .toMatch(/^(anywhere|break-word)$/);
   const linkMetrics = await longLink.evaluate((element) => {
     const messageBody = element.closest(".message-body") as HTMLElement | null;
     const linkRect = element.getBoundingClientRect();

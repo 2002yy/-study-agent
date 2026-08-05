@@ -46,16 +46,20 @@ describe("ExtensionRuntime owner boundary", () => {
     expect(recoverySource).not.toContain("setIds: {");
   });
 
-  it("owns explicit extension drawer loading while memory remains outside", () => {
+  it("loads only the selected laboratory capability while memory remains outside", () => {
     expect(extensionDrawerContractSource).toContain(
       'export const EXTENSION_DRAWERS = ["group", "tools", "timeline"] as const;',
+    );
+    expect(extensionDrawerContractSource).toContain(
+      'export type ExtensionSurfaceId = "lab" | ExtensionDrawerId;',
     );
     expect(extensionSource).toContain("EXTENSION_DRAWER_CONFIG");
     expect(extensionSource).toContain('group: { feature: "wechat"');
     expect(extensionSource).toContain('tools: { feature: "tools"');
     expect(extensionSource).toContain('timeline: { feature: "workflows"');
-    expect(extensionSource).toContain("selectExtensionDrawer(state.activeDrawer)");
-    expect(extensionSource).toContain("if (!activeDrawer) return;");
+    expect(extensionSource).toContain("selectExtensionSurface(state.activeDrawer)");
+    expect(extensionSource).toContain("if (!activeCapability) return;");
+    expect(extensionSource).toContain("EXTENSION_DRAWER_CONFIG[activeCapability]");
     expect(extensionSource).not.toContain('feature: "memory"');
     expect(compositionSource).not.toContain('options.loadFeature("wechat"');
     expect(compositionSource).not.toContain('options.loadFeature("tools")');
@@ -77,6 +81,8 @@ describe("ExtensionRuntime owner boundary", () => {
   it("exposes a panel-ready view without relaying it through composition", () => {
     expect(extensionSource).toContain("export type ExtensionViewModel");
     expect(extensionSource).toContain("const view: ExtensionViewModel");
+    expect(extensionSource).toContain("activeSurface,");
+    expect(extensionSource).toContain("activeCapability,");
     expect(runtimeSource).toContain("extensionView={extension.view}");
     for (const field of [
       "groupController",

@@ -128,7 +128,7 @@ describe("ChatPanel learning product boundary", () => {
     );
   });
 
-  it("keeps only learning-facing destinations in the primary More section", () => {
+  it("keeps stable learning destinations plus one laboratory entry in More", () => {
     const { container } = renderPanel();
     const html = container.innerHTML;
 
@@ -136,28 +136,28 @@ describe("ChatPanel learning product boundary", () => {
     expect(html).toContain("学习成果");
     expect(html).toContain("设置");
     expect(html).toContain("实验功能");
-    expect(html).toContain("群聊讨论");
+    expect(html).toContain("实验室");
+    expect(html).toContain("群聊、受控工具与开发者诊断");
+    expect(html).not.toContain("群聊讨论");
     expect(html).not.toContain("新闻研究");
-    expect(html).toContain("受控工具");
-    expect(html).toContain("开发者诊断");
     expect(html).not.toContain("检索当前问题");
     expect(html).not.toContain("工作流记录");
     expect(html).not.toContain("学习记忆");
   });
 
-  it("opens an experimental workspace and closes the More menu", () => {
+  it("opens the laboratory and closes the More menu", () => {
     const onOpenDrawer = vi.fn();
     const { container } = renderPanel({ onOpenDrawer });
     const details = container.querySelector("details.workspace-menu") as HTMLDetailsElement;
     const removeAttrSpy = vi.spyOn(details, "removeAttribute");
     const summary = details.querySelector("summary") as HTMLElement;
     const focusSpy = vi.spyOn(summary, "focus");
-    const groupAction = findByRoleAndText(container, "menuitem", "群聊讨论") as HTMLElement;
+    const labAction = findByRoleAndText(container, "menuitem", "实验室") as HTMLElement;
 
-    expect(groupAction).toBeTruthy();
-    fireEvent.click(groupAction);
+    expect(labAction).toBeTruthy();
+    fireEvent.click(labAction);
 
-    expect(onOpenDrawer).toHaveBeenCalledWith("group");
+    expect(onOpenDrawer).toHaveBeenCalledWith("lab");
     expect(removeAttrSpy).toHaveBeenCalledWith("open");
     expect(focusSpy).toHaveBeenCalledTimes(1);
   });

@@ -1,11 +1,12 @@
-import { Activity, MessageSquare, Wrench } from "lucide-react";
+import { FlaskConical } from "lucide-react";
 
-import type { ExtensionDrawerId } from "./extensionDrawerContract";
+import type { DrawerId } from "../../types";
+import { LAB_DRAWER } from "./extensionDrawerContract";
 
 export function ExtensionLauncher({
   onOpen,
 }: {
-  onOpen: (drawer: ExtensionDrawerId, target: HTMLButtonElement) => void;
+  onOpen: (drawer: DrawerId, target: HTMLButtonElement) => void;
 }) {
   return (
     <>
@@ -13,36 +14,14 @@ export function ExtensionLauncher({
         实验功能
       </div>
       <button
-        onClick={(event) => onOpen("group", event.currentTarget)}
+        onClick={(event) => onOpen(LAB_DRAWER, event.currentTarget)}
         role="menuitem"
         type="button"
       >
-        <MessageSquare size={16} />
+        <FlaskConical size={16} />
         <span>
-          <strong>群聊讨论</strong>
-          <small>让多位角色从不同角度讨论</small>
-        </span>
-      </button>
-      <button
-        onClick={(event) => onOpen("tools", event.currentTarget)}
-        role="menuitem"
-        type="button"
-      >
-        <Wrench size={16} />
-        <span>
-          <strong>受控工具</strong>
-          <small>实验性的本地知识工具入口</small>
-        </span>
-      </button>
-      <button
-        onClick={(event) => onOpen("timeline", event.currentTarget)}
-        role="menuitem"
-        type="button"
-      >
-        <Activity size={16} />
-        <span>
-          <strong>开发者诊断</strong>
-          <small>查看工作流阶段和失败原因</small>
+          <strong>实验室</strong>
+          <small>群聊、受控工具与开发者诊断</small>
         </span>
       </button>
     </>

@@ -1,8 +1,19 @@
+import { ArrowLeft } from "lucide-react";
+import { useRef } from "react";
+
 import { SlideOver } from "../components/SlideOver";
+import { ExtensionLabPanel } from "../features/extensions/ExtensionLabPanel";
+import type { ExtensionDrawerId } from "../features/extensions/extensionDrawerContract";
 import { ToolPanel } from "../features/tools/ToolPanel";
 import { WechatPanel } from "../features/wechat-workspace/WechatPanel";
 import { TimelinePanel } from "../features/workflows/TimelinePanel";
 import type { ExtensionViewModel } from "./useExtensionRuntime";
+
+const CAPABILITY_TITLES: Record<ExtensionDrawerId, string> = {
+  group: "群聊",
+  tools: "工具",
+  timeline: "开发者诊断",
+};
 
 export function ExtensionDrawers({
   view,
@@ -11,17 +22,51 @@ export function ExtensionDrawers({
   view: ExtensionViewModel;
   onClose: () => void;
 }) {
+  const lastCapability = useRef<ExtensionDrawerId | null>(null);
   const groupController = view.group.controller;
   const toolController = view.tools.controller;
   const workflowController = view.timeline.controller;
+  const capability = view.activeCapability;
+  const open = view.activeSurface !== null;
+  const title = capability ? CAPABILITY_TITLES[capability] : "实验室";
+
+  const selectCapability = (next: ExtensionDrawerId) => {
+    lastCapability.current = next;
+    view.selectCapability(next);
+  };
+
+  const backToLab = () => {
+    const previous = lastCapability.current;
+    view.backToLab();
+    window.requestAnimationFrame(() => {
+      if (!previous) return;
+      document
+        .querySelector<HTMLButtonElement>(
+          `[data-extension-capability="${previous}"]`,
+        )
+        ?.focus();
+    });
+  };
 
   return (
-    <>
-      <SlideOver
-        open={view.activeDrawer === "group"}
-        title="群聊"
-        onClose={onClose}
-      >
+    <SlideOver open={open} title={title} onClose={onClose}>
+      {view.activeSurface === "lab" && !capability ? (
+        <ExtensionLabPanel onSelect={selectCapability} />
+      ) : null}
+
+      {view.activeSurface === "lab" && capability && !view.isLegacySurface ? (
+        <button
+          aria-label="返回实验室"
+          className="ghost-action compact extension-lab-back"
+          onClick={backToLab}
+          type="button"
+        >
+          <ArrowLeft size={14} />
+          返回实验室
+        </button>
+      ) : null}
+
+      {capability === "group" ? (
         <WechatPanel
           wechat={view.group.wechat}
           webLookup={view.group.webLookup}
@@ -38,13 +83,9 @@ export function ExtensionDrawers({
           isWechatBusy={groupController.isBusy}
           error={groupController.error}
         />
-      </SlideOver>
+      ) : null}
 
-      <SlideOver
-        open={view.activeDrawer === "tools"}
-        title="工具"
-        onClose={onClose}
-      >
+      {capability === "tools" ? (
         <ToolPanel
           toolCount={view.tools.toolCount}
           run={toolController.run}
@@ -57,20 +98,16 @@ export function ExtensionDrawers({
           callBlockedReason={toolController.callBlockedReason}
           invocationLabel={toolController.invocationLabel}
         />
-      </SlideOver>
+      ) : null}
 
-      <SlideOver
-        open={view.activeDrawer === "timeline"}
-        title="开发者诊断"
-        onClose={onClose}
-      >
+      {capability === "timeline" ? (
         <TimelinePanel
           runs={view.timeline.runs}
           selectedRun={workflowController.selectedRun}
           loadingRunId={workflowController.loadingRunId}
           onSelectRun={workflowController.selectRun}
         />
-      </SlideOver>
-    </>
+      ) : null}
+    </SlideOver>
   );
 }

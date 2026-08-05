@@ -2,14 +2,18 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useState,
   type Dispatch,
   type SetStateAction,
 } from "react";
 
 import type { LocalKnowledgeInvocation } from "../api";
 import {
+  resolveExtensionCapability,
   selectExtensionDrawer,
+  selectExtensionSurface,
   type ExtensionDrawerId,
+  type ExtensionSurfaceId,
 } from "../features/extensions/extensionDrawerContract";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
 import { useToolController } from "../features/tools/toolController";
@@ -62,6 +66,11 @@ export type ExtensionCoordinatorPort = {
 
 export type ExtensionViewModel = {
   activeDrawer: ExtensionDrawerId | null;
+  activeSurface: ExtensionSurfaceId | null;
+  activeCapability: ExtensionDrawerId | null;
+  isLegacySurface: boolean;
+  selectCapability: (capability: ExtensionDrawerId) => void;
+  backToLab: () => void;
   activeQuery: string;
   group: {
     wechat: ApiSnapshot["wechat"];
@@ -105,6 +114,13 @@ export function useExtensionRuntime(options: {
 }) {
   const { state, dispatch } = useWorkspace();
   const activeDrawer = selectExtensionDrawer(state.activeDrawer);
+  const activeSurface = selectExtensionSurface(state.activeDrawer);
+  const [selectedCapability, setSelectedCapability] =
+    useState<ExtensionDrawerId | null>(null);
+  const activeCapability = resolveExtensionCapability(
+    activeSurface,
+    selectedCapability,
+  );
   const setGroupThreadId = useCallback(
     (threadId?: string) =>
       dispatch({ type: "SET_ACTIVE_GROUP_THREAD", threadId }),
@@ -114,6 +130,11 @@ export function useExtensionRuntime(options: {
     (runId?: string) => dispatch({ type: "SET_ACTIVE_TOOL_RUN", runId }),
     [dispatch],
   );
+  const selectCapability = useCallback(
+    (capability: ExtensionDrawerId) => setSelectedCapability(capability),
+    [],
+  );
+  const backToLab = useCallback(() => setSelectedCapability(null), []);
 
   const workflowController = useWorkflowController();
   const groupController = useGroupChatController({
@@ -143,6 +164,10 @@ export function useExtensionRuntime(options: {
   });
 
   useEffect(() => {
+    if (activeSurface !== "lab") setSelectedCapability(null);
+  }, [activeSurface]);
+
+  useEffect(() => {
     const serverThreadId = options.snapshot.wechat?.group_thread_id;
     if (serverThreadId && state.activeGroupThreadId !== serverThreadId) {
       setGroupThreadId(serverThreadId);
@@ -154,8 +179,8 @@ export function useExtensionRuntime(options: {
   ]);
 
   useEffect(() => {
-    if (!activeDrawer) return;
-    const config = EXTENSION_DRAWER_CONFIG[activeDrawer];
+    if (!activeCapability) return;
+    const config = EXTENSION_DRAWER_CONFIG[activeCapability];
     let active = true;
     const load = async () => {
       try {
@@ -175,7 +200,7 @@ export function useExtensionRuntime(options: {
     return () => {
       active = false;
     };
-  }, [activeDrawer, options.loadFeature]);
+  }, [activeCapability, options.loadFeature]);
 
   const restore = useCallback(
     (recovery: ExtensionRecoveryInput | null) => {
@@ -213,7 +238,12 @@ export function useExtensionRuntime(options: {
     ],
   );
   const view: ExtensionViewModel = {
-    activeDrawer,
+    activeDrawer: activeCapability,
+    activeSurface,
+    activeCapability,
+    isLegacySurface: activeDrawer !== null,
+    selectCapability,
+    backToLab,
     activeQuery,
     group: {
       wechat: options.snapshot.wechat,
