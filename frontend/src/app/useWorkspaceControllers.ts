@@ -41,13 +41,6 @@ export function useWorkspaceControllers(options: {
     memoryController,
     chatController,
   } = options.learning;
-  const {
-    activeQuery,
-    groupThreadId,
-    workflowController,
-    groupController,
-    toolController,
-  } = options.extension;
   const extensionCoordinator = options.extension.coordinator;
   const roleController = useRoleController(chatSettings.selectedRole);
   const settingsController = useSettingsController({
@@ -110,17 +103,12 @@ export function useWorkspaceControllers(options: {
   }, [state.activeDrawer, options.loadFeature]);
 
   return {
-    activeQuery,
-    groupThreadId,
     roleController,
-    workflowController,
     settingsController,
-    groupController,
     webLookupController,
     memoryController,
     ragController,
     uploadController,
     chatController,
-    toolController,
   };
 }
