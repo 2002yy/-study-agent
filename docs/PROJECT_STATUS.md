@@ -3,9 +3,9 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理均已完成，当前进入 P2-B 平台配置治理。**  
-> 当前切片：**PR #110 已合并 `main`；NewsWorkspace 遗留样式清理与 WeChat 联网结果样式归属迁移完成，功能 merge SHA `6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。**  
-> 下一主线：**P2-B 平台配置与 CORS 单一 owner。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理均已完成；P2-B 平台配置与 CORS 单一 owner 已完成实现并通过代码基线。**  
+> 当前切片：**Draft PR #111；代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`，CI run `31011592445` 完整通过。**  
+> 下一主线：**P2-C 兼容层退出，先证明无生产调用与无恢复数据依赖，再删除 410 tombstone 和旧实验入口 adapter。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -28,6 +28,7 @@
 - 普通用户稳定入口为：学习会话、资料与来源、学习成果、设置。
 - 群聊、受控工具与开发者诊断属于实验能力，只能从单一“实验室”入口进入，默认休眠。
 - 产品面退场后，其 CSS、DOM class 和兼容命名必须同步证明 owner；不能只凭名称猜测“死代码”。
+- 平台配置必须由单一 owner 解析、验证和执行；应用装配层、测试和启动脚本不得各自维护第二套安全规则。
 
 ## 2. 已完成主线
 
@@ -59,6 +60,12 @@
 - PR #108：Extension view model 与扩展面板装载边界，merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`；
 - PR #109：普通模式与单一实验室入口，merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
 
+### 2.5 平台配置与 CORS owner
+
+- Draft PR #111：单一 CORS policy owner、环境分层、输入校验和永久边界；
+- 代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`；
+- CI run `31011592445` 完整通过。
+
 ## 3. 当前运行时架构
 
 ```text
@@ -69,12 +76,17 @@ ExtensionRuntime
 WorkspaceCoordinator
         ↓ view model
 WorkspaceView
+
+Platform configuration
+        ↓ 单一解析 / 校验 owner
+FastAPI middleware assembly
 ```
 
 - **EvidenceRuntime**：RAG、上传、ResearchRun、RagQueryRun、RagWriteRun、Sources、EvidenceRecoveryPort。
 - **LearningSessionRuntime**：ChatController、MemoryController、学习设置、会话、流式恢复、LearningClosure、LearningRecoveryPort、LearningArtifactPort。
 - **ExtensionRuntime**：group、tool、workflow controller，扩展恢复、选择性加载、实验室 surface / capability view。
 - **WorkspaceCoordinator**：只负责真正跨域的取消、清理和重置顺序，不拥有第二份领域状态。
+- **CORS policy owner**：只由 `src/api/cors.py` 解析环境、规范化来源、拒绝危险组合并生成预检与响应头；`src/api/app.py` 只负责装配和调用。
 
 ## 4. P2-A 遗留样式与 owner 清理
 
@@ -138,7 +150,78 @@ CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/too
 
 本批没有修改 API 路由或响应 schema、SQLite schema、durable entity、WorkspacePersistence v4、Learning / Evidence / Extension 业务行为、committed learning truth 或实验室默认休眠合同。
 
-## 5. 必须保护的稳定闭环
+## 5. P2-B 平台配置与 CORS 单一 owner
+
+### 5.1 审计结论
+
+原 `src/api/app.py` 同时存在两套规则：
+
+1. Starlette `CORSMiddleware` 中硬编码 localhost / 127.0.0.1 的 5173 与 4173；
+2. API security middleware 中再次读取 `STUDY_AGENT_CORS_ORIGINS`，手工处理 OPTIONS 和响应头。
+
+这会造成来源定义、credentials、预检与普通响应分别受不同 owner 控制。启动脚本和 `src/config.py` 未发现第二套 CORS 解析，因此本批只收口真实重复 owner，不制造新的通用配置框架。
+
+### 5.2 单一 policy owner
+
+新增：
+
+```text
+src/api/cors.py
+```
+
+统一负责：
+
+- `STUDY_AGENT_ENV` 环境识别；
+- `STUDY_AGENT_CORS_ORIGINS` 来源解析；
+- `STUDY_AGENT_CORS_ALLOW_CREDENTIALS` 布尔校验；
+- origin 规范化和稳定去重；
+- 预检 method / header 校验；
+- 204 / 403 预检响应；
+- 普通响应与 API token 401 的 CORS 头；
+- `Vary: Origin` 合并。
+
+`src/api/app.py` 不再导入或配置 `CORSMiddleware`，也不再维护硬编码来源、第二套解析函数或第二套响应头实现。
+
+### 5.3 环境边界
+
+未显式设置 `STUDY_AGENT_CORS_ORIGINS` 时：
+
+```text
+development -> localhost / 127.0.0.1 的 5173 与 4173
+test        -> http://testserver
+production  -> 无默认来源
+```
+
+补充语义：
+
+- 环境变量缺失：使用当前环境默认来源；
+- 环境变量存在但为空：显式关闭 CORS；
+- 重复来源：规范化后按首次出现顺序去重；
+- 非绝对 http(s) origin、携带用户信息、path、query 或 fragment：启动请求时 fail closed；
+- wildcard `*`：必须独占来源列表，且 `allow_credentials=false`；
+- 未知环境名和非法布尔值：fail closed，不静默退回开发配置。
+
+### 5.4 永久边界
+
+`tests/test_cors_policy.py` 持续检查：
+
+- development / test / production 默认来源严格分离；
+- 空值、重复来源、大小写与尾斜杠规范化；
+- wildcard 与 credentials 冲突；
+- wildcard 与具体来源混用；
+- 非法环境、布尔值和 origin；
+- `app.py` 不得重新出现 `CORSMiddleware`、本地来源字面量或 `Access-Control-Allow-Origin` 实现；
+- 其他 `src/api` 模块不得新增第二个 `STUDY_AGENT_CORS_ORIGINS` owner 或响应头 owner。
+
+### 5.5 未改变边界
+
+- 允许来源的 preflight 仍返回 204；
+- 拒绝来源的 preflight 仍返回 403；
+- API token 的 Bearer / `X-Study-Agent-Token` 合同不变；
+- `/health` 与静态资源公开边界不变；
+- FastAPI 路由、响应 schema、SQLite schema、durable entity、Vite proxy、WorkspacePersistence v4、Learning / Evidence / Extension 行为和 committed learning truth 均未改变。
+
+## 6. 必须保护的稳定闭环
 
 | 闭环 | 当前结论 | 真实证据边界 |
 |---|---|---|
@@ -153,10 +236,13 @@ CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/too
 | 长会话与窄屏 | desktop / mobile / 360×520 通过 | 恢复卡、宽代码、长链接、IME、滚动与刷新恢复 |
 | 实验室休眠 | desktop / mobile / 360×520 通过 | 首页零扩展请求；选择后只加载对应能力 |
 | WeChat lookup 样式 | desktop / mobile / 360×520 通过 | 局部 owner CSS 正常加载，无旧 `.news-*` DOM/CSS |
+| CORS 与 API gate | 真实全栈通过 | 单一 policy owner；合法来源 204/响应头，非法来源 403，token 401 行为不变 |
 
 继续保护：RestoreCard、LearningStrip、SourcesPanel、MemoryRun、ResearchRun、RAG query/write run、WorkspacePersistence v4 和学习结束 committed truth。
 
-## 6. PR #110 验证证据
+## 7. 验证证据
+
+### 7.1 PR #110
 
 - 有效红边界 commit：`4839ba42657e0475c8f0386226a490089f002cdc`；
 - 有效红 CI：run `31005785577`；
@@ -166,44 +252,45 @@ CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/too
 - 最终 head CI：run `31008811658`，结论 `success`；
 - 功能 merge SHA：`6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。
 
-两轮绿色基线均完整通过：
+受控失败与审计修正：
 
-- 全量 pytest；
+- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在转义语法错误，不作为有效红边界证据；
+- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明旧 CSS 存在，同时发现源码扫描过宽；
+- runs `31006158792`、`31006427898`：推动扫描器收窄为逐文件静态 class token；
+- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用三个旧类名，纠正“全部是死 CSS”的初始判断；
+- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：39/41 浏览器旅程通过；两项 bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败；
+- commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
+
+### 7.2 PR #111 代码基线
+
+- 分支：`agent/cors-single-owner`；
+- 代码基线 head：`4a7f47614d466ba18713536469b34bcf9611a075`；
+- 代码基线 CI：run `31011592445`，结论 `success`。
+
+该基线完整通过：
+
+- 全量 pytest，包括新增 CORS policy 与单一 owner 边界；
 - RAG K1 固定 corpus；
 - Ruff；
 - 项目打包；
 - detect-secrets；
 - expanded mypy baseline gate；
-- 74 个前端测试文件、273 项测试；
-- TypeScript / Vite production build；
-- 41 条 desktop、mobile、360×520 Golden Journeys；
+- 全量前端测试与 TypeScript / Vite production build；
+- desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
-说明：raw expanded mypy 仍有既有存量错误；baseline 为 `current=125, baseline=127, resolved=2`，未宣称 raw mypy 全量清零。
+说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
 
-### 受控失败与审计修正
-
-- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在转义语法错误，不作为有效红边界证据。
-- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明旧 CSS 存在，同时发现源码扫描过宽。
-- runs `31006158792`、`31006427898`：推动扫描器收窄为逐文件静态 class token。
-- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用三个旧类名，纠正“全部是死 CSS”的初始判断。
-- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：74/273 与 build 通过，39/41 浏览器旅程通过；两项 bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败。
-- commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
-
-## 7. 后续任务
-
-### P2-B：平台配置与 CORS 单一 owner
-
-1. 盘点 CORS 来源在应用工厂、环境配置、测试 fixture 与启动入口中的全部定义；
-2. 建立单一解析 owner，显式区分开发、测试、生产来源；
-3. 增加重复配置、空值、通配符与 credentials 冲突的永久边界；
-4. 保持现有 FastAPI 路由和真实浏览器闭环不变。
+## 8. 后续任务
 
 ### P2-C：兼容层退出
 
-1. 迁移窗口结束后删除 410 tombstone；
-2. 实验室入口稳定后删除旧 group / tools / timeline 新 UI adapter；
-3. 每次删除前先证明无生产调用与无恢复数据依赖。
+1. 盘点六条 410 tombstone 的调用、测试和文档引用；
+2. 证明生产前端、启动路径、恢复 payload 和 SQLite 数据均不依赖旧 News 路由；
+3. 删除 tombstone 前先建立“旧路径不得恢复”的永久边界；
+4. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
+5. 实验室入口稳定且兼容窗口结束后删除 adapter；
+6. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
 
 ### P2-D：源码学习与验证增强
 
@@ -213,14 +300,14 @@ CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/too
 - 至少一台实体手机验证输入法、滚动、drawer、实验室与恢复流程；
 - Chromium 全量 Golden Journeys 与真实 FastAPI + SQLite 门禁继续作为主回归基线。
 
-## 8. 阶段判断
+## 9. 阶段判断
 
-P2-A 已合并完成：
+P2-B 代码实现与第一轮完整基线已完成：
 
-- 真正无 owner 的 NewsWorkspace 样式已删除；
-- 仍在使用的 lookup 样式已迁移到 WeChat owner；
-- 旧 `.news-*` CSS 与 DOM 命名受到永久边界保护；
-- 浏览器故障注入不再误伤静态资源；
-- 产品行为与持久化边界未改变。
+- CORS 从两套规则收口为一个 policy owner；
+- development / test / production 默认来源显式分离；
+- 空值、重复来源、非法 origin、wildcard 与 credentials 冲突均有 fail-closed 规则；
+- 应用装配层不再拥有来源字面量或响应头实现；
+- 现有 FastAPI、token、前端和真实浏览器闭环未发生回归。
 
-当前没有待合并的功能 PR，主线已转入 P2-B 平台配置与 CORS 单一 owner。
+当前 Draft PR #111 等待状态文档 commit 的最终 CI；通过后可合并，主线转入 P2-C 兼容层退出。
