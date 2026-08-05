@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useWorkspace } from "./WorkspaceProvider";
 import { useWorkspaceBootstrap } from "./WorkspaceBootstrap";
 import { useEvidenceRuntime } from "./useEvidenceRuntime";
+import { useExtensionRuntime } from "./useExtensionRuntime";
 import { useLearningSessionRuntime } from "./useLearningSessionRuntime";
 import { useWorkspaceControllers } from "./useWorkspaceControllers";
 import { useWorkspaceRecovery } from "./useWorkspaceRecovery";
@@ -9,16 +10,10 @@ import { WorkspaceView } from "./WorkspaceView";
 
 export default function WorkspaceRuntime() {
   const { snapshot, setSnapshot, refresh, loadFeature } = useWorkspaceBootstrap();
-  const { state: workspaceRuntime, dispatch: dispatchWorkspace } = useWorkspace();
+  const { state: workspaceRuntime } = useWorkspace();
   const [input, setInput] = useState("");
   const [operationError, setOperationError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const toolRunId = workspaceRuntime.activeToolRunId;
-  const setWechatThreadId = (threadId?: string) =>
-    dispatchWorkspace({ type: "SET_ACTIVE_GROUP_THREAD", threadId });
-  const setToolRunId = (runId?: string) =>
-    dispatchWorkspace({ type: "SET_ACTIVE_TOOL_RUN", runId });
 
   const evidence = useEvidenceRuntime({
     refresh,
@@ -38,38 +33,33 @@ export default function WorkspaceRuntime() {
     evidence: evidence.learning,
     webPolicy,
   });
-  const controllers = useWorkspaceControllers({
+  const extension = useExtensionRuntime({
     snapshot,
     setSnapshot,
     refresh,
     loadFeature,
     input,
     operationError: setOperationError,
-    activeGroupThreadId: workspaceRuntime.activeGroupThreadId,
+    lastRagQuery: learning.chatController.lastChat?.rag?.query,
+    chatSettings: learning.chatSettings,
+    ragSettings: evidence.ragSettings,
+    ragEnabled: evidence.ragEnabled,
+  });
+  const controllers = useWorkspaceControllers({
+    setSnapshot,
+    refresh,
+    loadFeature,
+    operationError: setOperationError,
     evidence,
     learning,
-    runIds: {
-      tool: toolRunId,
-    },
-    setGroupThreadId: setWechatThreadId,
-    setRunId: {
-      tool: setToolRunId,
-    },
+    extension,
   });
-  const { groupThreadId: wechatThreadId } = controllers;
 
   useWorkspaceRecovery({
-    snapshot,
-    ids: {
-      group: wechatThreadId,
-      tool: toolRunId,
-    },
-    setIds: {
-      group: setWechatThreadId,
-      tool: setToolRunId,
-    },
     evidence: evidence.recovery,
     learning: learning.recovery,
+    extension: extension.recovery,
+    snapshot,
   });
 
   return (
