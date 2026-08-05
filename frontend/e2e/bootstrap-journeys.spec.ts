@@ -60,19 +60,30 @@ async function closeDrawer(page: Page, title: string) {
   await expect(dialog).toHaveCount(0);
 }
 
-test("hidden feature outages do not pollute the core bootstrap", async ({ page }) => {
-  const requests = observeApiRequests(page);
-  await installApiFixture(page);
-  for (const path of HIDDEN_PATHS) {
-    const pattern = path === "/wechat" ? "**/wechat*" : `**${path}`;
-    await page.route(pattern, async (route) => {
+async function installHiddenFeatureOutages(page: Page) {
+  const hiddenPaths = new Set(HIDDEN_PATHS);
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (
+      ["fetch", "xhr"].includes(request.resourceType())
+      && hiddenPaths.has(path)
+    ) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
         body: JSON.stringify({ detail: "simulated hidden feature outage" }),
       });
-    });
-  }
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+test("hidden feature outages do not pollute the core bootstrap", async ({ page }) => {
+  const requests = observeApiRequests(page);
+  await installApiFixture(page);
+  await installHiddenFeatureOutages(page);
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "学习工作台" })).toBeVisible();

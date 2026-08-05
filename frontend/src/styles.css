@@ -1426,8 +1426,7 @@ button {
   background: #fbfcff;
 }
 
-.wechat-thread pre,
-.news-result pre {
+.wechat-thread pre {
   margin: 0;
   padding: 12px;
   white-space: pre-wrap;
@@ -1492,10 +1491,6 @@ button {
   resize: vertical;
 }
 
-.news-form {
-  padding-top: 12px;
-  border-top: 1px dashed var(--border);
-}
 
 .wechat-search-form {
   padding-bottom: 12px;
@@ -1554,11 +1549,6 @@ button {
   font-size: 12px;
 }
 
-.news-result {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
 
 .lookup-result {
   border: 1px solid #e5eeee;
@@ -1567,43 +1557,11 @@ button {
   padding: 10px;
 }
 
-.news-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-}
 
-.news-item {
-  display: grid;
-  gap: 3px;
-  padding: 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-}
 
-.news-item strong,
-.news-item a,
-.news-item span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 
-.news-item a {
-  color: var(--accent-strong);
-  font-weight: 800;
-}
 
-.news-item span {
-  color: var(--muted);
-  font-size: 12px;
-}
 
-.news-item small {
-  color: #52646c;
-  font-size: 11px;
-  line-height: 1.4;
-}
 
 .memory-note.warn {
   border-color: #fed7aa;
