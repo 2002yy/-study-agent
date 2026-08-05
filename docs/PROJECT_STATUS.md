@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口已完成，P2-A 遗留产品面与样式 owner 清理已完成代码基线。**  
-> 当前切片：**Draft PR #110 已完成 NewsWorkspace 遗留样式清理与 WeChat 联网结果样式归属迁移；代码基线 `f1b7cacb106ef249ab68ab498ea395864a7636c1` 的 CI run `31008156692` 完整通过。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理均已完成，当前进入 P2-B 平台配置治理。**  
+> 当前切片：**PR #110 已合并 `main`；NewsWorkspace 遗留样式清理与 WeChat 联网结果样式归属迁移完成，功能 merge SHA `6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。**  
 > 下一主线：**P2-B 平台配置与 CORS 单一 owner。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -37,9 +37,9 @@
 - PR #98：主工作区遗留 NewsRun 状态清理，merge SHA `6b357bfe3b63d072f9374f19e149866171145b7a`；
 - PR #99：前端兼容壳与无效设置合同清理，merge SHA `04770915e08528cb639edeba9839223072340f61`；
 - PR #100：NewsWorkspace / NewsController 删除与 NewsRun 兼容边界，merge SHA `42ed5fdf01f25dd56f68215ac034f77bd117bb9d`；
-- Draft PR #110：退场样式与现役 WeChat lookup owner 清理，代码基线已全绿。
+- PR #110：退场样式与现役 WeChat lookup owner 清理，merge SHA `6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。
 
-旧 News 产品面已经不再拥有独立 runtime、drawer 或 durable truth。保留的 `NewsRunResponse` 等 API 兼容类型不等于生产 DOM 或样式 owner，不在 P2-A 中误删。
+旧 News 产品面不再拥有独立 runtime、drawer、DOM class、全局样式或 durable truth。保留的 `NewsRunResponse` 等 API 兼容类型不等于生产 DOM 或样式 owner。
 
 ### 2.2 EvidenceRuntime 收口
 
@@ -47,23 +47,17 @@
 - PR #102：Evidence recovery port 与源码证据 owner，merge SHA `d3da42dec0298138a48902cce860fc15f19eb808`；
 - PR #103：单一 activeQuery 跨域 selector，merge SHA `22d3d0f562ed4a92b324c0f0d2c426332e8a2e47`。
 
-EvidenceRuntime 已统一拥有 RAG、上传、联网研究、恢复和 Sources 数据加载。GitHub 源码学习继续落入通用 EvidenceSnapshot。
-
 ### 2.3 LearningSessionRuntime 收口
 
 - PR #104：LearningSessionRuntime 第一批 owner，merge SHA `b98a777f98e309b41a964c45c1c54c5ca0a54386`；
 - PR #105：LearningSessionRuntime chat/session owner，merge SHA `43f6cfbada931ccbf58712c995dbd087f7e19048`；
 - PR #106：LearningSessionRuntime 会话派生 view model，merge SHA `761ea7634c97b71de7f40eed15ab0b52229631c1`。
 
-LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 和学习会话 view。
-
 ### 2.4 ExtensionRuntime 与普通模式收口
 
 - PR #107：ExtensionRuntime controller / recovery owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
 - PR #108：Extension view model 与扩展面板装载边界，merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`；
 - PR #109：普通模式与单一实验室入口，merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
-
-ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、按需加载、面板 view 和实验室当前能力选择。跨域组合层只消费窄 `ExtensionCoordinatorPort`。
 
 ## 3. 当前运行时架构
 
@@ -86,7 +80,7 @@ WorkspaceView
 
 ### 4.1 审计结论
 
-最初发现全局 `styles.css` 仍包含：
+初始发现全局 `styles.css` 仍包含：
 
 ```text
 .news-form
@@ -95,16 +89,16 @@ WorkspaceView
 .news-item
 ```
 
-逐项核对后得到两类不同结论：
+逐文件核对后得到两类结论：
 
-- `.news-form` 已无生产 DOM owner，属于真正死样式，直接删除；
-- `.news-result / .news-list / .news-item` 仍被现役 `WechatPanel` 的联网研究结果复用，不可直接删除，否则会造成实验室群聊视觉回归。
+- `.news-form` 已无生产 DOM owner，属于真正死样式，已删除；
+- `.news-result / .news-list / .news-item` 当时仍被现役 `WechatPanel` 的联网研究结果使用，不可直接删除。
 
-因此本批不是机械删除全部 `.news-*`，而是“死样式删除 + 活样式 owner 迁移”。
+因此本批执行“死样式删除 + 活样式 owner 迁移”，避免把仍在使用的群聊联网结果变成无样式内容。
 
 ### 4.2 WeChat 样式所有权迁移
 
-`WechatPanel` 的现役 DOM 与样式统一迁移为：
+现役 DOM 与样式统一迁移为：
 
 ```text
 wechat-lookup-result
@@ -112,13 +106,13 @@ wechat-lookup-list
 wechat-lookup-item
 ```
 
-对应视觉声明移入：
+对应视觉声明位于：
 
 ```text
 frontend/src/features/wechat-workspace/wechatLookup.css
 ```
 
-`WechatPanel.tsx` 显式导入该文件。原有间距、边框、背景、链接强调、长文本换行、字号与状态文本样式保持不变；helper 名称也从 `newsItem*` 调整为 `lookupItem*`，避免退场产品语义继续污染现役 owner。
+`WechatPanel.tsx` 显式导入该文件。原有间距、边框、背景、链接强调、长文本换行、字号与状态文本样式保持不变；helper 名称也从 `newsItem*` 调整为 `lookupItem*`。
 
 ### 4.3 永久边界
 
@@ -126,30 +120,23 @@ frontend/src/features/wechat-workspace/wechatLookup.css
 
 - 全局 `styles.css` 不得重新出现 `.news-form / .news-result / .news-list / .news-item`；
 - 生产 TS/TSX 的静态 `className` token 不得重新出现上述旧类名；
-- `WechatPanel` 必须继续显式导入局部 lookup CSS；
+- `WechatPanel` 必须显式导入局部 lookup CSS；
 - `wechat-lookup-result / list / item` 必须同时存在于 owner DOM 和 owner CSS 中。
 
 ### 4.4 浏览器故障注入修正
 
-P2-A 首次完整浏览器运行揭示：旧 bootstrap fixture 使用 `**/wechat*` 模糊 glob 注入 `/wechat` 接口故障，误把新静态资源 `wechatLookup.css` 返回为 503，导致 Vite 根模块无法渲染。
+旧 bootstrap fixture 曾使用 `**/wechat*` 注入 `/wechat` 接口故障，误把 `wechatLookup.css` 返回为 503，导致 Vite 根模块无法渲染。
 
 当前 fixture 只在以下条件同时满足时注入隐藏能力故障：
 
 - resource type 为 `fetch` 或 `xhr`；
 - URL pathname 精确等于一个隐藏后端端点。
 
-CSS、TS、图片和其他静态资源一律 fallback。真实 `/wechat`、`/tools`、`/memory` 等接口仍保持严格故障注入。
+CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/tools`、`/memory` 等接口仍保持严格故障注入。
 
 ### 4.5 未改变边界
 
-本批没有修改：
-
-- API 路由或响应 schema；
-- SQLite schema 或 durable entity；
-- WorkspacePersistence schema v4；
-- Learning、Evidence、Extension 业务行为；
-- committed learning truth；
-- 实验室默认休眠与选择性加载合同。
+本批没有修改 API 路由或响应 schema、SQLite schema、durable entity、WorkspacePersistence v4、Learning / Evidence / Extension 业务行为、committed learning truth 或实验室默认休眠合同。
 
 ## 5. 必须保护的稳定闭环
 
@@ -171,13 +158,15 @@ CSS、TS、图片和其他静态资源一律 fallback。真实 `/wechat`、`/too
 
 ## 6. PR #110 验证证据
 
-### 绿色代码基线
-
+- 有效红边界 commit：`4839ba42657e0475c8f0386226a490089f002cdc`；
+- 有效红 CI：run `31005785577`；
 - 代码基线 commit：`f1b7cacb106ef249ab68ab498ea395864a7636c1`；
-- CI run：`31008156692`；
-- 结论：`success`。
+- 代码基线 CI：run `31008156692`，结论 `success`；
+- 最终 PR head：`9c326330d12fbaab8d5fbc8a283d668b82abc0e2`；
+- 最终 head CI：run `31008811658`，结论 `success`；
+- 功能 merge SHA：`6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。
 
-完整通过：
+两轮绿色基线均完整通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -194,14 +183,12 @@ CSS、TS、图片和其他静态资源一律 fallback。真实 `/wechat`、`/too
 
 ### 受控失败与审计修正
 
-- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在模板字符串转义语法错误，不作为有效红边界证据；旧 73/270 仍通过。
-- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明 `.news-*` CSS 仍存在；同时发现源码扫描过宽，会误把 API 兼容类型当 DOM。
-- run `31006158792` 与 `31006427898`：CSS 删除边界已通过，静态扫描器仍因跨文件或缺少来源信息误报，促使边界改为逐文件静态 class token 审计。
-- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用 `news-result / news-list / news-item`，纠正了“全部是死 CSS”的初始判断。
-- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：74/273 与 build 通过，39/41 浏览器旅程通过；desktop/mobile bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败，真实栈未继续。
+- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在转义语法错误，不作为有效红边界证据。
+- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明旧 CSS 存在，同时发现源码扫描过宽。
+- runs `31006158792`、`31006427898`：推动扫描器收窄为逐文件静态 class token。
+- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用三个旧类名，纠正“全部是死 CSS”的初始判断。
+- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：74/273 与 build 通过，39/41 浏览器旅程通过；两项 bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败。
 - commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
-
-这些失败记录说明审计必须同时验证 CSS、DOM owner、静态资源装载和真实用户旅程，不能只依赖名称或全文搜索。
 
 ## 7. 后续任务
 
@@ -228,7 +215,7 @@ CSS、TS、图片和其他静态资源一律 fallback。真实 `/wechat`、`/too
 
 ## 8. 阶段判断
 
-P2-A 已完成代码基线：
+P2-A 已合并完成：
 
 - 真正无 owner 的 NewsWorkspace 样式已删除；
 - 仍在使用的 lookup 样式已迁移到 WeChat owner；
@@ -236,4 +223,4 @@ P2-A 已完成代码基线：
 - 浏览器故障注入不再误伤静态资源；
 - 产品行为与持久化边界未改变。
 
-PR #110 合并后，当前主线转入 P2-B 平台配置与 CORS 单一 owner。
+当前没有待合并的功能 PR，主线已转入 P2-B 平台配置与 CORS 单一 owner。
