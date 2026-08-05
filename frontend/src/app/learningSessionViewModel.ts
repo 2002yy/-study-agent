@@ -9,8 +9,9 @@ export const UNSUMMARIZED_NEW_SESSION_CONFIRMATION =
 
 export function selectActiveLearningSession(
   sessions: SessionRow[],
-  threadId: string,
+  threadId?: string,
 ): SemanticSessionRow | null {
+  if (!threadId) return null;
   return (
     (sessions.find(
       (session) => session.session_id === threadId,
@@ -21,8 +22,9 @@ export function selectActiveLearningSession(
 export function selectLearningSessionSummary(
   activeSession: SemanticSessionRow | null,
   localSummary: SessionSummary | null,
-  threadId: string,
+  threadId?: string,
 ): SessionSummary | null {
+  if (!threadId) return null;
   const serverSummary = activeSession?.summary ?? null;
   const matchingLocalSummary =
     localSummary?.thread_id === threadId ? localSummary : null;
