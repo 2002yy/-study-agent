@@ -5,8 +5,9 @@ import { searchWechat } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import type { WechatSearchResponse, WechatStateResponse } from "../../types";
 import { displayValue } from "../../utils/format";
-import type { ResearchLookupResponse } from "../web-lookup/researchApi";
 import { speakerToRole } from "../roles/roleCatalog";
+import type { ResearchLookupResponse } from "../web-lookup/researchApi";
+import "./wechatLookup.css";
 
 export function parseWechatMessages(content: string): Array<{ speaker: string; roleId: string; text: string }> {
   const blocks: Array<{ speaker: string; roleId: string; text: string }> = [];
@@ -21,13 +22,13 @@ export function parseWechatMessages(content: string): Array<{ speaker: string; r
     blocks.push({
       speaker,
       roleId: speakerToRole[speaker] ?? "",
-      text
+      text,
     });
   }
   return blocks;
 }
 
-function newsItemUrl(item: Record<string, unknown>): string {
+function lookupItemUrl(item: Record<string, unknown>): string {
   const value = item.article_url || item.canonical_url || item.resolved_link || item.link || item.url;
   return typeof value === "string" ? value : "";
 }
@@ -48,18 +49,18 @@ function isLikelyArticlePageUrl(value: string): boolean {
   }
 }
 
-function newsItemStatus(item: Record<string, unknown>): string {
+function lookupItemStatus(item: Record<string, unknown>): string {
   const status = typeof item.article_status === "string" ? item.article_status : "研究来源";
   const included = item.article_excerpt || item.article_text ? "正文已读取" : "来源已筛选";
   return `${status} · ${included}`;
 }
 
-function NewsItemCard({ item, index }: { item: Record<string, unknown>; index: number }) {
-  const url = newsItemUrl(item);
+function LookupItemCard({ item, index }: { item: Record<string, unknown>; index: number }) {
+  const url = lookupItemUrl(item);
   const href = isLikelyArticlePageUrl(url) ? url : "";
   const title = displayValue(item.title) || `来源 ${index + 1}`;
   return (
-    <div className="news-item" key={`${title}-${index}`}>
+    <div className="wechat-lookup-item" key={`${title}-${index}`}>
       {href ? (
         <a href={href} rel="noreferrer" target="_blank">
           {title}
@@ -70,7 +71,7 @@ function NewsItemCard({ item, index }: { item: Record<string, unknown>; index: n
       <span>
         {displayValue(item.source)} · {displayValue(item.published_at)}
       </span>
-      <small>{newsItemStatus(item)}</small>
+      <small>{lookupItemStatus(item)}</small>
     </div>
   );
 }
@@ -93,7 +94,7 @@ const stageLabels: Record<string, string> = {
   synthesizing: "正在整理证据",
   completed: "研究完成",
   failed: "研究失败",
-  cancelled: "研究已停止"
+  cancelled: "研究已停止",
 };
 
 function researchStateText(value: ResearchLookupResponse): string {
@@ -292,7 +293,14 @@ export function WechatPanel({
             发送群聊
           </button>
           {isWechatBusy ? (
-            <button className="ghost-action compact danger" onClick={(event) => { event.preventDefault(); onStopWechat?.(); }} type="button">
+            <button
+              className="ghost-action compact danger"
+              onClick={(event) => {
+                event.preventDefault();
+                onStopWechat?.();
+              }}
+              type="button"
+            >
               停止
             </button>
           ) : null}
@@ -300,7 +308,7 @@ export function WechatPanel({
       </form>
 
       {webLookup ? (
-        <div className="news-result lookup-result">
+        <div className="wechat-lookup-result lookup-result">
           <div className="memory-preview-meta">
             <strong>{webLookup.status === "partial" ? "研究得到部分可用结果" : stageLabels[webLookup.stage] ?? webLookup.stage}</strong>
             <span>{researchStateText(webLookup)}</span>
@@ -316,9 +324,9 @@ export function WechatPanel({
           </label>
           <details open>
             <summary>采用来源 {webLookup.selected_sources.length} 个</summary>
-            <div className="news-list">
+            <div className="wechat-lookup-list">
               {latestLookupItems.map((item, index) => (
-                <NewsItemCard item={item} index={index} key={`${displayValue(item.title)}-${index}`} />
+                <LookupItemCard item={item} index={index} key={`${displayValue(item.title)}-${index}`} />
               ))}
             </div>
           </details>
