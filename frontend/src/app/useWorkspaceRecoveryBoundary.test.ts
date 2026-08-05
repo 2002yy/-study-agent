@@ -18,6 +18,10 @@ const learningSource = readFileSync(
   fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
   "utf8",
 );
+const extensionSource = readFileSync(
+  fileURLToPath(new URL("./useExtensionRuntime.ts", import.meta.url)),
+  "utf8",
+);
 const viewSource = readFileSync(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
   "utf8",
@@ -115,6 +119,21 @@ describe("workspace recovery and view boundaries", () => {
     expect(learningSource).toContain("const recovery = useMemo<LearningRecoveryPort>");
     expect(learningSource).toContain("restore,");
     expect(learningSource).toContain("hydrateRuntimeSettings,");
+  });
+
+  it("consumes one extension recovery port for group and tool ids", () => {
+    expect(recoveryCall).toContain("extension: extension.recovery");
+    expect(recoveryCall).not.toContain("setWechatThreadId");
+    expect(recoveryCall).not.toContain("setToolRunId");
+    expect(recoverySource).toContain("extension: ExtensionRecoveryPort");
+    expect(recoverySource).toContain("extension.restore(parsed)");
+    expect(recoverySource).toContain("extension.restore(null)");
+    expect(recoverySource).toContain("...extension.state");
+    expect(recoverySource).not.toContain("setIds");
+    expect(extensionSource).toContain("export type ExtensionRecoveryPort");
+    expect(extensionSource).toContain("wechatThreadId: groupThreadId");
+    expect(extensionSource).toContain("toolRunId: state.activeToolRunId");
+    expect(extensionSource).toContain("const recovery = useMemo<ExtensionRecoveryPort>");
   });
 
   it("owns feature view binding outside Runtime", () => {
