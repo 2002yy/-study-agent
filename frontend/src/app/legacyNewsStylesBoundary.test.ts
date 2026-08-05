@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 const appDir = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = join(appDir, "..");
 const stylesPath = join(sourceRoot, "styles.css");
+const wechatPanelPath = join(sourceRoot, "features", "wechat-workspace", "WechatPanel.tsx");
+const wechatLookupStylesPath = join(sourceRoot, "features", "wechat-workspace", "wechatLookup.css");
 const legacyNewsClasses = ["news-form", "news-result", "news-list", "news-item"] as const;
+const ownedWechatClasses = ["wechat-lookup-result", "wechat-lookup-list", "wechat-lookup-item"] as const;
 
 type SourceFile = { path: string; source: string };
 
@@ -50,5 +53,17 @@ describe("retired NewsWorkspace style boundary", () => {
         .map((className) => `${path}:${className}`);
     });
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps active lookup presentation owned beside WechatPanel", () => {
+    expect(existsSync(wechatPanelPath)).toBe(true);
+    expect(existsSync(wechatLookupStylesPath)).toBe(true);
+    const panel = readFileSync(wechatPanelPath, "utf8");
+    const styles = readFileSync(wechatLookupStylesPath, "utf8");
+    expect(panel).toContain('import "./wechatLookup.css"');
+    for (const className of ownedWechatClasses) {
+      expect(panel).toContain(className);
+      expect(styles).toContain(`.${className}`);
+    }
   });
 });
