@@ -121,13 +121,14 @@ export function useExtensionRuntime(options: {
         }
       } catch (error) {
         if (!active) return;
-        const labels = {
-          group: "群聊",
-          tools: "工具",
-          timeline: "开发者诊断",
-        } as const;
+        const label =
+          drawer === "group"
+            ? "群聊"
+            : drawer === "tools"
+              ? "工具"
+              : "开发者诊断";
         options.operationError(
-          `${labels[drawer]}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
+          `${label}加载失败：${error instanceof Error ? error.message : "读取失败"}`,
         );
       }
     };
