@@ -3,8 +3,8 @@
 > **唯一进度入口**  
 > 更新：2026-08-05  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**Learning / Evidence / Extension 三个运行时领域已收口，普通学习模式与实验能力已完成产品入口隔离。**  
-> 当前切片：**Draft PR #109 已完成 P1-R6 单一“实验室”入口；代码基线 `53ddc3d25be6d68b5a80088ff421d7e569b064fb` 的 CI run `31002902303` 完整通过，最终 head 另包含窄屏长链接样式恢复的确定性等待修正 `c6244c41576fa2366074ff70c6670db7c48a1005`。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口已完成，转入独立、低耦合的 P2 清理与增强批次。**  
+> 当前切片：**PR #109 已合并 `main`，P1-R6 单一“实验室”入口完成；功能 merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。**  
 > 下一主线：**P2-A 遗留产品面与无 owner 样式清理。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -55,13 +55,13 @@ EvidenceRuntime 已统一拥有 RAG、上传、联网研究、恢复和 Sources 
 
 LearningSessionRuntime 已统一拥有学习设置、ChatController、MemoryController、会话恢复、closure 和学习会话 view。WorkspaceView 不再现场推导 active session、summary、新会话确认或中断恢复动作。
 
-### 2.4 ExtensionRuntime 收口
+### 2.4 ExtensionRuntime 与普通模式收口
 
 - PR #107：ExtensionRuntime controller / recovery owner，merge SHA `bb89b062747f3bb32cffa85f32d76e25dd19dcd3`；
 - PR #108：Extension view model 与扩展面板装载边界，merge SHA `914e548144657cedf88eb0d497dcca0ac6252c2f`；
-- Draft PR #109：普通模式与单一实验室入口，代码基线 CI 完整通过。
+- PR #109：普通模式与单一实验室入口，merge SHA `af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
 
-ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、按需加载、面板 view 和实验室当前能力选择。跨域组合层只消费窄 `ExtensionCoordinatorPort`。
+ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、按需加载、面板 view 和实验室当前能力选择。跨域组合层只消费窄 `ExtensionCoordinatorPort`。P1 运行时 owner 与普通模式收口已完成，当前没有待合并的功能 PR。
 
 ## 3. P1-R6 单一实验室入口
 
@@ -101,7 +101,7 @@ ExtensionRuntime 已拥有 group、tool、workflow controller，恢复端口、�
 ### 3.4 短期兼容
 
 - 新 UI 只发出集中式 `LAB_DRAWER`；
-- 旧 `group / tools / timeline` drawer ID 仍可被读取，作为恢复链接与旧测试的短期兼容 surface；
+- 旧 `group / tools / timeline` drawer ID 仍可被读取，作为恢复链接与旧调用的短期兼容 surface；
 - 兼容 surface 直接映射到原能力，不经过实验室首页；
 - 本批不修改 WorkspacePersistence schema v4、API、SQLite schema 或 durable entity。
 
@@ -152,7 +152,14 @@ WorkspaceView
 
 ## 6. PR #109 验证证据
 
-代码基线 commit `53ddc3d25be6d68b5a80088ff421d7e569b064fb` 的 CI run `31002902303` 完整通过：
+- 首个永久红边界 commit：`dad38e425fe161ee83ab53e94b6d1d47ce438c7d`；
+- 代码基线 commit：`53ddc3d25be6d68b5a80088ff421d7e569b064fb`；
+- 代码基线 CI：run `31002902303`，结论 `success`；
+- 最终 PR head：`68f6352bb1a0b0de7f9b7caddc773810cb8ba8d9`；
+- 最终 head CI：run `31004145615`，结论 `success`；
+- 功能 merge SHA：`af45cc1cb162b1ad409d1b2cfec2ab29c1f5cb9b`。
+
+两轮绿色基线均通过：
 
 - 全量 pytest；
 - RAG K1 固定 corpus；
@@ -171,10 +178,10 @@ WorkspaceView
 
 - CI `31001393724`：永久红边界按预期失败；四项新断言证明旧 UI 仍直出三个实验入口，尚无实验室 panel、首页休眠或兼容 surface 合同。
 - CI `31001749588`：实现与 TypeScript 基本成立；仅三项旧静态测试仍要求 `activeDrawer` 直接装载，并继续寻找旧菜单入口。
-- CI `31002211520`：73 个前端文件、270 项测试与 build 已通过；浏览器失败来自两处旧入口旅程、专项测试误把实验室副标题识别为直接菜单项，以及一次未复现的窄屏长链接波动。
+- CI `31002211520`：73 个前端文件、270 项测试与 build 已通过；浏览器失败来自两处旧入口旅程、专项测试误把实验室副标题识别为直接菜单项，以及一次窄屏长链接样式读取波动。
 - commit `53ddc3d25be6d68b5a80088ff421d7e569b064fb` 更新真实浏览器合同并保持原窄屏断言不变，随后 41 条旅程与真实栈全部通过。
 - CI `31003422141`：文档 head 的 73/270、build 与 40/41 浏览器旅程通过；唯一失败是窄屏长链接在 DOM / 样式恢复切换后立即读取 `getComputedStyle().overflowWrap` 偶发得到空字符串，几何边界仍正确，真实栈因浏览器 Gate 未继续。
-- commit `c6244c41576fa2366074ff70c6670db7c48a1005` 在读取指标前等待同一严格样式合同达到 `anywhere` 或 `break-word`，并保留后续几何与枚举双重断言，没有放宽长链接换行要求。
+- commit `c6244c41576fa2366074ff70c6670db7c48a1005` 在读取指标前等待同一严格样式合同达到 `anywhere` 或 `break-word`，保留后续几何与枚举双重断言；最终 run `31004145615` 完整通过。
 
 这些修正没有放宽默认休眠、选择性加载、恢复、持久化、移动端或 committed learning truth 边界。
 
@@ -208,7 +215,7 @@ WorkspaceView
 
 ## 8. 阶段判断
 
-运行时 owner 与普通模式收口阶段已经完成主体工作：
+P1 运行时 owner 与普通模式收口已经完成：
 
 - 领域 controller 不再散落；
 - 跨域组合只经过窄端口；
@@ -216,4 +223,4 @@ WorkspaceView
 - 普通学习入口稳定；
 - 实验能力集中且默认休眠。
 
-PR #109 合并后，本轮 P1 架构与产品入口收口即可结束，后续转为独立、可验证、低耦合的 P2 清理与增强批次。
+后续不再进行大规模运行时搬迁，转为独立、可验证、低耦合的 P2 清理与增强批次。
