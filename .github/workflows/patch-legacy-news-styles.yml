@@ -1,0 +1,61 @@
+name: Patch legacy NewsWorkspace styles
+
+on:
+  push:
+    branches:
+      - agent/remove-legacy-news-styles
+    paths:
+      - .github/workflows/patch-legacy-news-styles.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/remove-legacy-news-styles
+          fetch-depth: 0
+      - name: Remove retired selectors and self-clean
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("frontend/src/styles.css")
+          text = path.read_text(encoding="utf-8")
+
+          shared = ".wechat-thread pre,\n.news-result pre {"
+          if text.count(shared) != 1:
+              raise SystemExit(f"expected one shared News selector, found {text.count(shared)}")
+          text = text.replace(shared, ".wechat-thread pre {")
+
+          patterns = [
+              r"\n\.news-form \{.*?\n\}\n",
+              r"\n\.news-result \{.*?\n\}\n",
+              r"\n\.news-list \{.*?\n\}\n",
+              r"\n\.news-item \{.*?\n\}\n",
+              r"\n\.news-item strong,\n\.news-item a,\n\.news-item span \{.*?\n\}\n",
+              r"\n\.news-item a \{.*?\n\}\n",
+              r"\n\.news-item span \{.*?\n\}\n",
+              r"\n\.news-item small \{.*?\n\}\n",
+          ]
+          for pattern in patterns:
+              text, count = re.subn(pattern, "\n", text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"expected one match for {pattern!r}, found {count}")
+
+          if ".news-" in text:
+              raise SystemExit("retired .news-* selector remains")
+          path.write_text(text, encoding="utf-8")
+          PY
+          rm .github/workflows/patch-legacy-news-styles.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/styles.css .github/workflows/patch-legacy-news-styles.yml
+          git commit -m "style: remove retired NewsWorkspace selectors"
+          git push origin HEAD:agent/remove-legacy-news-styles
