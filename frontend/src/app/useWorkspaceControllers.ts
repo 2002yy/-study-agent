@@ -10,19 +10,16 @@ import type { LearningSessionRuntime } from "./useLearningSessionRuntime";
 import { operationRegistry } from "./operationRegistry";
 import { WorkspaceCoordinator } from "./WorkspaceCoordinator";
 import { useWorkspace } from "./WorkspaceProvider";
-import type { WorkspaceFeature } from "./workspaceDataLoader";
 
 type ValueSetter<T> = Dispatch<SetStateAction<T>>;
-
-type FeatureLoader = (
-  feature: WorkspaceFeature,
-  options?: { groupThreadId?: string },
+type MemoryFeatureLoader = (
+  feature: "memory",
 ) => Promise<Partial<ApiSnapshot>>;
 
 export function useWorkspaceControllers(options: {
   setSnapshot: React.Dispatch<React.SetStateAction<ApiSnapshot>>;
   refresh: () => Promise<void>;
-  loadFeature: FeatureLoader;
+  loadFeature: MemoryFeatureLoader;
   operationError: ValueSetter<string>;
   evidence: EvidenceRuntime;
   learning: LearningSessionRuntime;
