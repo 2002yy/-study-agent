@@ -11,6 +11,9 @@ const runtimeSource = sourceOf("./WorkspaceRuntime.tsx");
 const compositionSource = sourceOf("./useWorkspaceControllers.ts");
 const recoverySource = sourceOf("./useWorkspaceRecovery.ts");
 const extensionSource = sourceOf("./useExtensionRuntime.ts");
+const extensionDrawerContractSource = sourceOf(
+  "../features/extensions/extensionDrawerContract.ts",
+);
 const learningSource = sourceOf("./useLearningSessionRuntime.ts");
 const evidenceSource = sourceOf("./useEvidenceRuntime.ts");
 
@@ -43,11 +46,17 @@ describe("ExtensionRuntime owner boundary", () => {
     expect(recoverySource).not.toContain("setIds: {");
   });
 
-  it("owns extension drawer loading while memory remains outside ExtensionRuntime", () => {
-    expect(extensionSource).toContain('options.loadFeature("wechat"');
-    expect(extensionSource).toContain('options.loadFeature("tools")');
-    expect(extensionSource).toContain('options.loadFeature("workflows")');
-    expect(extensionSource).not.toContain('options.loadFeature("memory")');
+  it("owns explicit extension drawer loading while memory remains outside", () => {
+    expect(extensionDrawerContractSource).toContain(
+      'export const EXTENSION_DRAWERS = ["group", "tools", "timeline"] as const;',
+    );
+    expect(extensionSource).toContain("EXTENSION_DRAWER_CONFIG");
+    expect(extensionSource).toContain('group: { feature: "wechat"');
+    expect(extensionSource).toContain('tools: { feature: "tools"');
+    expect(extensionSource).toContain('timeline: { feature: "workflows"');
+    expect(extensionSource).toContain("selectExtensionDrawer(state.activeDrawer)");
+    expect(extensionSource).toContain("if (!activeDrawer) return;");
+    expect(extensionSource).not.toContain('feature: "memory"');
     expect(compositionSource).not.toContain('options.loadFeature("wechat"');
     expect(compositionSource).not.toContain('options.loadFeature("tools")');
     expect(compositionSource).not.toContain('options.loadFeature("workflows")');
@@ -63,6 +72,20 @@ describe("ExtensionRuntime owner boundary", () => {
     expect(compositionSource).toContain("options.extension.coordinator");
     expect(compositionSource).toContain("new WorkspaceCoordinator(");
     expect(extensionSource).not.toContain("new WorkspaceCoordinator(");
+  });
+
+  it("exposes a panel-ready view without relaying it through composition", () => {
+    expect(extensionSource).toContain("export type ExtensionViewModel");
+    expect(extensionSource).toContain("const view: ExtensionViewModel");
+    expect(runtimeSource).toContain("extensionView={extension.view}");
+    for (const field of [
+      "groupController",
+      "toolController",
+      "workflowController",
+      "groupThreadId",
+    ]) {
+      expect(compositionSource).not.toContain(field);
+    }
   });
 
   it("does not absorb Learning or Evidence owners", () => {
