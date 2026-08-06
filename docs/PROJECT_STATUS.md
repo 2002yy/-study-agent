@@ -1,11 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-05  
+> 更新：2026-08-06  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置与 CORS 单一 owner 均已完成并合并。**  
-> 当前切片：**PR #111 已 squash 合并 `main`；最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23` 的 CI run `31012164767` 完整通过，功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。**  
-> 下一主线：**P2-C 兼容层退出，先证明无生产调用与无恢复数据依赖，再删除 410 tombstone 和旧实验入口 adapter。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
+> 当前切片：**Draft PR #112 删除六条旧 News 410 tombstone；代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过。**  
+> 下一主线：**P2-C 第二切片审计并退出无 owner 的旧 News Pydantic 类型与 `src.api` 兼容导出；随后再处理旧 `group / tools / timeline` adapter。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -66,6 +66,15 @@
 - 代码基线 head `4a7f47614d466ba18713536469b34bcf9611a075`，CI run `31011592445` 完整通过；
 - 最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23`，CI run `31012164767` 完整通过；
 - 功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。
+
+
+### 2.6 兼容层退出（进行中）
+
+- Draft PR #112：六条旧 News 410 tombstone 退出，旧路径转为真正未注册的 404；
+- 有效红边界 commit `84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`，CI run `31113239279`；
+- 代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过；
+- 现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义保持不变；
+- 旧 News Pydantic 类型与 `src.api` 导出暂时保留，等待下一独立切片证明 owner 后退出。
 
 ## 3. 当前运行时架构
 
@@ -238,6 +247,7 @@ production  -> 无默认来源
 | 实验室休眠 | desktop / mobile / 360×520 通过 | 首页零扩展请求；选择后只加载对应能力 |
 | WeChat lookup 样式 | desktop / mobile / 360×520 通过 | 局部 owner CSS 正常加载，无旧 `.news-*` DOM/CSS |
 | CORS 与 API gate | 真实全栈通过 | 单一 policy owner；合法来源 204/响应头，非法来源 403，token 401 行为不变 |
+| 旧 News 路由退出 | 真实全栈通过 | 六条旧路径未注册并返回 404；现役 `/news/runs*` 与恢复闭环不变 |
 
 继续保护：RestoreCard、LearningStrip、SourcesPanel、MemoryRun、ResearchRun、RAG query/write run、WorkspacePersistence v4 和学习结束 committed truth。
 
@@ -285,16 +295,36 @@ production  -> 无默认来源
 
 说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
 
+
+### 7.3 PR #112 代码基线
+
+- 分支：`agent/remove-news-tombstones`；
+- 有效红边界 commit：`84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`；
+- 有效红 CI：run `31113239279`，902 项通过、2 项按预期失败，证明旧路径仍注册；
+- 首轮实现 head：`c908494620278bec292d5ea00b6a45234b44e8b1`；
+- 首轮实现 CI：run `31113980495`，902 项通过、1 项失败，暴露兼容库存测试仍要求 tombstone 存在；
+- 代码基线 head：`5dae5af86500f878a8fee173625a47e146fa8303`；
+- 代码基线 CI：run `31114230217`，结论 `success`。
+
+代码基线完整通过：
+
+- 903 项 pytest；
+- RAG K1 固定 corpus；
+- Ruff、项目打包、detect-secrets；
+- expanded mypy baseline gate；
+- 全量前端测试与 TypeScript / Vite production build；
+- desktop、mobile、360×520 Golden Journeys；
+- 真实 FastAPI + SQLite 浏览器门禁。
+
 ## 8. 后续任务
 
 ### P2-C：兼容层退出
 
-1. 盘点六条 410 tombstone 的调用、测试和文档引用；
-2. 证明生产前端、启动路径、恢复 payload 和 SQLite 数据均不依赖旧 News 路由；
-3. 删除 tombstone 前先建立“旧路径不得恢复”的永久边界；
-4. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
-5. 实验室入口稳定且兼容窗口结束后删除 adapter；
-6. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
+1. PR #112 合并后，盘点 `NewsSearch* / NewsStage* / NewsEnrich* / NewsDigest* / NewsDiscuss*` 旧模型的真实导入与外部兼容边界；
+2. 证明生产路由、前端、恢复 payload、SQLite 数据和测试均不依赖旧模型后，再退出 `src.api.models.news` 与 `src.api` 兼容导出；
+3. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
+4. 实验室入口稳定且兼容窗口结束后删除 adapter；
+5. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
 
 ### P2-D：源码学习与验证增强
 
@@ -306,12 +336,12 @@ production  -> 无默认来源
 
 ## 9. 阶段判断
 
-P2-B 已合并完成：
+P2-C 第一切片已完成代码与回归基线：
 
-- CORS 从两套规则收口为一个 policy owner；
-- development / test / production 默认来源显式分离；
-- 空值、重复来源、非法 origin、wildcard 与 credentials 冲突均有 fail-closed 规则；
-- 应用装配层不再拥有来源字面量或响应头实现；
-- 现有 FastAPI、token、前端和真实浏览器闭环未发生回归。
+- 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；
+- 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；
+- 七条现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义未改变；
+- 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；
+- 全量后端、前端与真实浏览器闭环未发生回归。
 
-当前没有待合并的功能 PR，主线已转入 P2-C 兼容层退出。
+当前待合并功能 PR 为 #112；通过状态文档最终 CI 后即可合并，随后进入旧 News 模型与导出退出。

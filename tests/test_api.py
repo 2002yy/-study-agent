@@ -295,36 +295,6 @@ def test_wechat_message_stream_endpoint_emits_tokens_and_commits_group(runtime_t
     assert [message.status for message in messages] == ["committed", "committed"]
 
 
-def test_legacy_news_round_routes_are_gone_without_running_legacy_flow(
-    monkeypatch, runtime_test_context
-):
-    from src import api
-
-    def fail_legacy(*args, **kwargs):
-        raise AssertionError("legacy flow must not run")
-
-    monkeypatch.setattr(
-        api,
-        "run_news_round",
-        fail_legacy,
-    )
-    client = TestClient(app)
-    payload = {"query": "OpenAI latest"}
-    group_file = runtime_test_context.group_service.importer.group_file
-
-    assert client.post("/news/round", json=payload).status_code == 410
-    assert client.post("/wechat/news-round", json=payload).status_code == 410
-    assert client.post("/news/search", json=payload).status_code == 410
-    assert client.post(
-        "/news/enrich", json={"news_items": [{"title": "A"}]}
-    ).status_code == 410
-    assert client.post(
-        "/news/digest", json={"news_items": [{"title": "A"}]}
-    ).status_code == 410
-    assert client.post("/news/discuss", json={"digest": "old"}).status_code == 410
-    assert not group_file.exists()
-
-
 def test_news_discussion_outputs_remain_isolated_by_group_thread(runtime_test_context):
     from src import api
     from src.application.news_service import NewsDependencies

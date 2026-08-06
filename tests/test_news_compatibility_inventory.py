@@ -58,7 +58,7 @@ def test_news_run_client_has_no_product_frontend_owner() -> None:
     assert offenders == []
 
 
-def test_news_routes_separate_durable_runs_from_410_tombstones() -> None:
+def test_news_routes_keep_only_durable_run_contracts() -> None:
     route_source = (ROOT / "src" / "api" / "routes" / "news_routes.py").read_text(
         encoding="utf-8"
     )
@@ -73,7 +73,7 @@ def test_news_routes_separate_durable_runs_from_410_tombstones() -> None:
     ):
         assert route in route_source
 
-    for tombstone_route in (
+    for retired_route in (
         '@router.post("/news/round"',
         '@router.post("/wechat/news-round"',
         '@router.post("/news/search"',
@@ -81,7 +81,7 @@ def test_news_routes_separate_durable_runs_from_410_tombstones() -> None:
         '@router.post("/news/digest"',
         '@router.post("/news/discuss"',
     ):
-        assert tombstone_route in route_source
+        assert retired_route not in route_source
 
-    assert route_source.count("status_code=410") == 5
+    assert "status_code=410" not in route_source
     assert "run_news_round(" not in route_source
