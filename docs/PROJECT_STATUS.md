@@ -4,7 +4,7 @@
 > 更新：2026-08-06  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**Draft PR #112 删除六条旧 News 410 tombstone；代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过。**  
+> 当前切片：**PR #112 已 squash 合并 `main`；最终 head `6976fde10d2b201e0ba0019bcbab96939cb272c6` 的 CI run `31116107948` 完整通过，功能 merge SHA `9482be8b5d73ba6a407a208c00af92ccc478ff96`。**  
 > 下一主线：**P2-C 第二切片审计并退出无 owner 的旧 News Pydantic 类型与 `src.api` 兼容导出；随后再处理旧 `group / tools / timeline` adapter。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -67,12 +67,13 @@
 - 最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23`，CI run `31012164767` 完整通过；
 - 功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。
 
-
 ### 2.6 兼容层退出（进行中）
 
-- Draft PR #112：六条旧 News 410 tombstone 退出，旧路径转为真正未注册的 404；
+- PR #112：六条旧 News 410 tombstone 退出，旧路径转为真正未注册的 404；
 - 有效红边界 commit `84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`，CI run `31113239279`；
 - 代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过；
+- 最终 head `6976fde10d2b201e0ba0019bcbab96939cb272c6`，CI run `31116107948` 完整通过；
+- 功能 merge SHA `9482be8b5d73ba6a407a208c00af92ccc478ff96`；
 - 现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义保持不变；
 - 旧 News Pydantic 类型与 `src.api` 导出暂时保留，等待下一独立切片证明 owner 后退出。
 
@@ -295,8 +296,7 @@ production  -> 无默认来源
 
 说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
 
-
-### 7.3 PR #112 代码基线
+### 7.3 PR #112
 
 - 分支：`agent/remove-news-tombstones`；
 - 有效红边界 commit：`84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`；
@@ -304,9 +304,12 @@ production  -> 无默认来源
 - 首轮实现 head：`c908494620278bec292d5ea00b6a45234b44e8b1`；
 - 首轮实现 CI：run `31113980495`，902 项通过、1 项失败，暴露兼容库存测试仍要求 tombstone 存在；
 - 代码基线 head：`5dae5af86500f878a8fee173625a47e146fa8303`；
-- 代码基线 CI：run `31114230217`，结论 `success`。
+- 代码基线 CI：run `31114230217`，结论 `success`；
+- 最终 PR head：`6976fde10d2b201e0ba0019bcbab96939cb272c6`；
+- 最终 head CI：run `31116107948`，结论 `success`；
+- 功能 merge SHA：`9482be8b5d73ba6a407a208c00af92ccc478ff96`。
 
-代码基线完整通过：
+代码基线与最终 head 均完整通过：
 
 - 903 项 pytest；
 - RAG K1 固定 corpus；
@@ -320,7 +323,7 @@ production  -> 无默认来源
 
 ### P2-C：兼容层退出
 
-1. PR #112 合并后，盘点 `NewsSearch* / NewsStage* / NewsEnrich* / NewsDigest* / NewsDiscuss*` 旧模型的真实导入与外部兼容边界；
+1. 盘点 `NewsSearch* / NewsStage* / NewsEnrich* / NewsDigest* / NewsDiscuss*` 旧模型的真实导入与外部兼容边界；
 2. 证明生产路由、前端、恢复 payload、SQLite 数据和测试均不依赖旧模型后，再退出 `src.api.models.news` 与 `src.api` 兼容导出；
 3. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
 4. 实验室入口稳定且兼容窗口结束后删除 adapter；
@@ -336,7 +339,7 @@ production  -> 无默认来源
 
 ## 9. 阶段判断
 
-P2-C 第一切片已完成代码与回归基线：
+P2-C 第一切片已合并完成：
 
 - 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；
 - 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；
@@ -344,4 +347,4 @@ P2-C 第一切片已完成代码与回归基线：
 - 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；
 - 全量后端、前端与真实浏览器闭环未发生回归。
 
-当前待合并功能 PR 为 #112；通过状态文档最终 CI 后即可合并，随后进入旧 News 模型与导出退出。
+当前没有待合并的功能 PR，主线进入旧 News 模型与 `src.api` 兼容导出退出。
