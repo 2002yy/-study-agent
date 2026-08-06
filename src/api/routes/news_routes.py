@@ -8,12 +8,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.models.news import (
-    NewsDigestRequest,
-    NewsDigestResponse,
-    NewsDiscussRequest,
-    NewsDiscussResponse,
-    NewsEnrichRequest,
-    NewsEnrichResponse,
     NewsRunCreateRequest,
     NewsRunDigestRequest,
     NewsRunDiscussRequest,
@@ -21,10 +15,6 @@ from src.api.models.news import (
     NewsRunListResponse,
     NewsRunResponse,
     NewsRunSearchRequest,
-    NewsSearchRequest,
-    NewsSearchResponse,
-    NewsStageSearchRequest,
-    NewsStageSearchResponse,
 )
 from src.application.helpers import request_performance_mode, validate_choice
 from src.application.news_service import NewsService
@@ -143,38 +133,3 @@ def discuss_news_run_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"News discuss failed: {exc}") from exc
-
-
-@router.post("/news/round", response_model=NewsSearchResponse)
-def run_news_round_endpoint(request: NewsSearchRequest) -> NewsSearchResponse:
-    del request
-    raise HTTPException(status_code=410, detail="Use POST /news/runs")
-
-
-@router.post("/wechat/news-round", response_model=NewsSearchResponse)
-def wechat_news_round_endpoint(request: NewsSearchRequest) -> NewsSearchResponse:
-    return run_news_round_endpoint(request)
-
-
-@router.post("/news/search", response_model=NewsStageSearchResponse)
-def search_news_stage_endpoint(request: NewsStageSearchRequest) -> NewsStageSearchResponse:
-    del request
-    raise HTTPException(status_code=410, detail="Use POST /news/runs")
-
-
-@router.post("/news/enrich", response_model=NewsEnrichResponse)
-def enrich_news_stage_endpoint(request: NewsEnrichRequest) -> NewsEnrichResponse:
-    del request
-    raise HTTPException(status_code=410, detail="Use POST /news/runs/{id}/enrich")
-
-
-@router.post("/news/digest", response_model=NewsDigestResponse)
-def digest_news_stage_endpoint(request: NewsDigestRequest) -> NewsDigestResponse:
-    del request
-    raise HTTPException(status_code=410, detail="Use POST /news/runs/{id}/digest")
-
-
-@router.post("/news/discuss", response_model=NewsDiscussResponse)
-def discuss_news_stage_endpoint(request: NewsDiscussRequest) -> NewsDiscussResponse:
-    del request
-    raise HTTPException(status_code=410, detail="Use POST /news/runs/{id}/discuss")
