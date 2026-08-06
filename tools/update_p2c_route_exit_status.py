@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+STATUS_PATH = Path("docs/PROJECT_STATUS.md")
+WORKFLOW_PATH = Path(".github/workflows/agent-finalize-p2c-status.yml")
+SCRIPT_PATH = Path(__file__)
+
+
+def replace_once(source: str, old: str, new: str, label: str) -> str:
+    if source.count(old) != 1:
+        raise SystemExit(f"{label} marker mismatch: expected once, found {source.count(old)}")
+    return source.replace(old, new, 1)
+
+
+def main() -> None:
+    source = STATUS_PATH.read_text(encoding="utf-8")
+
+    top_replacements = (
+        ("> 更新：2026-08-05  ", "> 更新：2026-08-06  ", "date"),
+        (
+            "> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置与 CORS 单一 owner 均已完成并合并。**  ",
+            "> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  ",
+            "mainline",
+        ),
+        (
+            "> 当前切片：**PR #111 已 squash 合并 `main`；最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23` 的 CI run `31012164767` 完整通过，功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。**  ",
+            "> 当前切片：**Draft PR #112 删除六条旧 News 410 tombstone；代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过。**  ",
+            "slice",
+        ),
+        (
+            "> 下一主线：**P2-C 兼容层退出，先证明无生产调用与无恢复数据依赖，再删除 410 tombstone 和旧实验入口 adapter。**  ",
+            "> 下一主线：**P2-C 第二切片审计并退出无 owner 的旧 News Pydantic 类型与 `src.api` 兼容导出；随后再处理旧 `group / tools / timeline` adapter。**  ",
+            "next",
+        ),
+    )
+    for old, new, label in top_replacements:
+        source = replace_once(source, old, new, label)
+
+    mainline_anchor = "- 功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。\n"
+    mainline_block = """
+
+### 2.6 兼容层退出（进行中）
+
+- Draft PR #112：六条旧 News 410 tombstone 退出，旧路径转为真正未注册的 404；
+- 有效红边界 commit `84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`，CI run `31113239279`；
+- 代码基线 head `5dae5af86500f878a8fee173625a47e146fa8303`，CI run `31114230217` 完整通过；
+- 现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义保持不变；
+- 旧 News Pydantic 类型与 `src.api` 导出暂时保留，等待下一独立切片证明 owner 后退出。
+"""
+    source = replace_once(
+        source,
+        mainline_anchor,
+        mainline_anchor + mainline_block,
+        "completed-mainline",
+    )
+
+    loop_anchor = "| CORS 与 API gate | 真实全栈通过 | 单一 policy owner；合法来源 204/响应头，非法来源 403，token 401 行为不变 |"
+    loop_row = "| 旧 News 路由退出 | 真实全栈通过 | 六条旧路径未注册并返回 404；现役 `/news/runs*` 与恢复闭环不变 |"
+    source = replace_once(source, loop_anchor, loop_anchor + "\n" + loop_row, "stable-loop")
+
+    verification_anchor = "\n## 8. 后续任务\n"
+    verification_block = """
+
+### 7.3 PR #112 代码基线
+
+- 分支：`agent/remove-news-tombstones`；
+- 有效红边界 commit：`84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`；
+- 有效红 CI：run `31113239279`，902 项通过、2 项按预期失败，证明旧路径仍注册；
+- 首轮实现 head：`c908494620278bec292d5ea00b6a45234b44e8b1`；
+- 首轮实现 CI：run `31113980495`，902 项通过、1 项失败，暴露兼容库存测试仍要求 tombstone 存在；
+- 代码基线 head：`5dae5af86500f878a8fee173625a47e146fa8303`；
+- 代码基线 CI：run `31114230217`，结论 `success`。
+
+代码基线完整通过：
+
+- 903 项 pytest；
+- RAG K1 固定 corpus；
+- Ruff、项目打包、detect-secrets；
+- expanded mypy baseline gate；
+- 全量前端测试与 TypeScript / Vite production build；
+- desktop、mobile、360×520 Golden Journeys；
+- 真实 FastAPI + SQLite 浏览器门禁。
+"""
+    source = replace_once(
+        source,
+        verification_anchor,
+        verification_block + verification_anchor,
+        "verification",
+    )
+
+    p2c_start = source.index("### P2-C：兼容层退出\n")
+    p2d_start = source.index("### P2-D：源码学习与验证增强\n", p2c_start)
+    p2c_block = """### P2-C：兼容层退出
+
+1. PR #112 合并后，盘点 `NewsSearch* / NewsStage* / NewsEnrich* / NewsDigest* / NewsDiscuss*` 旧模型的真实导入与外部兼容边界；
+2. 证明生产路由、前端、恢复 payload、SQLite 数据和测试均不依赖旧模型后，再退出 `src.api.models.news` 与 `src.api` 兼容导出；
+3. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
+4. 实验室入口稳定且兼容窗口结束后删除 adapter；
+5. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
+
+"""
+    source = source[:p2c_start] + p2c_block + source[p2d_start:]
+
+    stage_heading = "## 9. 阶段判断\n\n"
+    stage_start = source.index(stage_heading)
+    stage_block = """## 9. 阶段判断
+
+P2-C 第一切片已完成代码与回归基线：
+
+- 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；
+- 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；
+- 七条现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义未改变；
+- 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；
+- 全量后端、前端与真实浏览器闭环未发生回归。
+
+当前待合并功能 PR 为 #112；通过状态文档最终 CI 后即可合并，随后进入旧 News 模型与导出退出。
+"""
+    source = source[:stage_start] + stage_block
+
+    STATUS_PATH.write_text(source, encoding="utf-8")
+    WORKFLOW_PATH.unlink(missing_ok=True)
+    SCRIPT_PATH.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    main()
