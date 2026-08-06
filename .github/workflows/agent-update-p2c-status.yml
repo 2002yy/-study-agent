@@ -61,11 +61,10 @@ jobs:
               raise SystemExit("P2-C task replacement did not match exactly once")
           source = source.replace(task_old, task_new)
 
-          stage_old = """P2-B 已合并完成：\n\n- CORS 从两套规则收口为一个 policy owner；\n- development / test / production 默认来源显式分离；\n- 空值、重复来源、非法 origin、wildcard 与 credentials 冲突均有 fail-closed 规则；\n- 应用装配层不再拥有来源字面量或响应头实现；\n- 现有 FastAPI、token、前端和真实浏览器闭环未发生回归。\n\n当前没有待合并的功能 PR，主线已转入 P2-C 兼容层退出。\n"""
-          stage_new = """P2-C 第一切片已完成代码与回归基线：\n\n- 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；\n- 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；\n- 七条现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义未改变；\n- 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；\n- 全量后端、前端与真实浏览器闭环未发生回归。\n\n当前待合并功能 PR 为 #112；通过状态文档最终 CI 后即可合并，随后进入旧 News 模型与导出退出。\n"""
-          if source.count(stage_old) != 1:
-              raise SystemExit("stage replacement did not match exactly once")
-          source = source.replace(stage_old, stage_new)
+          stage_heading = "## 9. 阶段判断\n\n"
+          if source.count(stage_heading) != 1:
+              raise SystemExit("stage heading did not match exactly once")
+          source = source.split(stage_heading, 1)[0] + stage_heading + """P2-C 第一切片已完成代码与回归基线：\n\n- 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；\n- 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；\n- 七条现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义未改变；\n- 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；\n- 全量后端、前端与真实浏览器闭环未发生回归。\n\n当前待合并功能 PR 为 #112；通过状态文档最终 CI 后即可合并，随后进入旧 News 模型与导出退出。\n"""
 
           path.write_text(source, encoding="utf-8")
           Path(".github/workflows/agent-update-p2c-status.yml").unlink()
