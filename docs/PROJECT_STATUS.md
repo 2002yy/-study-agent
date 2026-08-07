@@ -3,9 +3,9 @@
 > **唯一进度入口**  
 > 更新：2026-08-07  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
-> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**  
-> 下一主线：**P2-D 源码学习与验证增强：GitHub symbol mapping + CI association、Firefox / WebKit 抽样，以及实体手机输入法、滚动、drawer、实验室与恢复验证。**  
+> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理、P2-C 兼容层退出均已完成；当前进入 P2-D 源码学习与验证增强。**  
+> 当前切片：**PR #114 已 squash 合并 `main`；最终 PR head `8073da2adb033945d00d13e9db061ab9186b3d25`，同文件树 CI run `31182503935` 完整通过，功能 merge SHA `283c173e99f7a68985a536682155ce8948d54a70`。P2-C 正式收口。**  
+> 下一主线：**P2-D 第一切片优先推进 GitHub symbol mapping + CI association，形成可复核的源码学习 `EvidenceSnapshot`；随后补 Firefox / WebKit 抽样与实体手机验证。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -67,7 +67,7 @@
 - 最终 head `1b10820574c73fec864ab44f0e81c7c86ef02c23`，CI run `31012164767` 完整通过；
 - 功能 merge SHA `6f743db0750e5cacf6370b2fee3cdd091b946f78`。
 
-### 2.6 兼容层退出（进行中）
+### 2.6 兼容层退出（已完成）
 
 - PR #112：六条旧 News 410 tombstone 退出，旧路径转为真正未注册的 404；
 - 有效红边界 commit `84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`，CI run `31113239279`；
@@ -90,6 +90,7 @@
 - Extension drawer 代码基线 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；
 - 状态同步验证暴露 360×520 长 URL Golden Journey 对 `overflowWrap` computed-style 的脆弱依赖；同类失败在 CI `31180448052`、`31180866352` 与 `31181558554` 复现。没有放宽为空串，而是改为真实行为合同：长 URL 必须形成多个 line box、消息体不得横向 overflow、链接边界不得越出消息体；CSS owner 不变；
 - 最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过，41/41 Golden Journeys 与真实 FastAPI + SQLite 门禁均绿色；
+- 最终 PR head `8073da2adb033945d00d13e9db061ab9186b3d25`；同文件树状态同步 CI run `31182503935` 完整通过；功能 merge SHA `283c173e99f7a68985a536682155ce8948d54a70`；
 - `DrawerId` 现只包含普通 drawer 与 `lab`；`group / tools / timeline` 只属于 `ExtensionCapabilityId`。`useGroupChatController / useToolController / useWorkflowController`、ExtensionRuntime 恢复端口和按需加载继续保留。
 
 ## 3. 当前运行时架构
