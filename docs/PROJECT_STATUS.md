@@ -1,11 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-06  
+> 更新：2026-08-07  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**PR #112 已 squash 合并 `main`；最终 head `6976fde10d2b201e0ba0019bcbab96939cb272c6` 的 CI run `31116107948` 完整通过，功能 merge SHA `9482be8b5d73ba6a407a208c00af92ccc478ff96`。**  
-> 下一主线：**P2-C 第二切片审计并退出无 owner 的旧 News Pydantic 类型与 `src.api` 兼容导出；随后再处理旧 `group / tools / timeline` adapter。**  
+> 当前切片：**Draft PR #113 已退出 10 个无生产 owner 的旧 News 阶段 Pydantic 模型、两层兼容导出和无路由 owner 的 `news_result_payload`；最终代码 head `0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`，CI run `31177047560` 完整通过。**  
+> 下一主线：**P2-C 第三切片盘点并退出无 owner 的旧 `group / tools / timeline` 新 UI adapter；只在实验室现役恢复与调用链证明无依赖后删除。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -75,7 +75,11 @@
 - 最终 head `6976fde10d2b201e0ba0019bcbab96939cb272c6`，CI run `31116107948` 完整通过；
 - 功能 merge SHA `9482be8b5d73ba6a407a208c00af92ccc478ff96`；
 - 现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义保持不变；
-- 旧 News Pydantic 类型与 `src.api` 导出暂时保留，等待下一独立切片证明 owner 后退出。
+- PR #113：旧 News 阶段模型与兼容导出退出；
+- 有效红边界 commit `b400b2db38393882c2db52aba38ee513ed9366d6`，CI run `31176698695`：905 项通过、1 项按预期失败；
+- 红边界额外发现 `src/application/helpers.py::news_result_payload` 仍引用 `NewsSearchResponse`，确认其已无路由 owner 后同步退出；
+- 最终代码 head `0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`，CI run `31177047560` 完整通过；
+- `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 现役合同、durable `/news/runs*`、SQLite NewsRun 与恢复语义保持不变。
 
 ## 3. 当前运行时架构
 
@@ -319,14 +323,36 @@ production  -> 无默认来源
 - desktop、mobile、360×520 Golden Journeys；
 - 真实 FastAPI + SQLite 浏览器门禁。
 
+
+### 7.4 PR #113 代码基线
+
+- 分支：`agent/remove-legacy-news-models`；
+- 有效红边界 commit：`b400b2db38393882c2db52aba38ee513ed9366d6`；
+- 有效红 CI：run `31176698695`，905 项通过、1 项按预期失败；
+- 红边界 offender 仅位于 `src/api/__init__.py`、`src/api/models/__init__.py`、`src/api/models/news.py` 与 `src/application/helpers.py`；
+- 最终代码 head：`0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`；
+- 最终代码 CI：run `31177047560`，结论 `success`。
+
+最终代码基线完整通过：
+
+- 全量 pytest，包括旧模型不得回流与现役 News 合同保护边界；
+- RAG K1 固定 corpus；
+- Ruff、项目打包、detect-secrets；
+- expanded mypy baseline gate；
+- 全量前端测试与 TypeScript / Vite production build；
+- desktop、mobile、360×520 Golden Journeys；
+- 真实 FastAPI + SQLite 浏览器门禁。
+
+删除范围严格限定为 10 个旧阶段 Pydantic 模型、两层兼容 re-export 和无路由 owner 的 `news_result_payload`；没有删除或改写现役 durable NewsRun、NewsLookup、ResearchRun、WebLookupRun 合同。
+
 ## 8. 后续任务
 
 ### P2-C：兼容层退出
 
-1. 盘点 `NewsSearch* / NewsStage* / NewsEnrich* / NewsDigest* / NewsDiscuss*` 旧模型的真实导入与外部兼容边界；
-2. 证明生产路由、前端、恢复 payload、SQLite 数据和测试均不依赖旧模型后，再退出 `src.api.models.news` 与 `src.api` 兼容导出；
-3. 盘点旧 `group / tools / timeline` 新 UI adapter 的恢复与调用来源；
-4. 实验室入口稳定且兼容窗口结束后删除 adapter；
+1. PR #112 已退出六条旧 News 410 tombstone，并由永久边界阻止旧路径回流；
+2. PR #113 已退出 10 个旧 News 阶段模型、两层兼容导出和 `news_result_payload`，现役 durable / lookup / research 合同保持不变；
+3. 下一切片盘点旧 `group / tools / timeline` 新 UI adapter 的恢复、持久化和调用来源；
+4. 只有在实验室入口、ExtensionRuntime 恢复和选择性加载均证明无依赖后，才删除无 owner adapter；
 5. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
 
 ### P2-D：源码学习与验证增强
@@ -339,12 +365,12 @@ production  -> 无默认来源
 
 ## 9. 阶段判断
 
-P2-C 第一切片已合并完成：
+P2-C 第二切片已完成代码与回归基线：
 
-- 六条旧 News 410 tombstone 已从 FastAPI route table 删除，旧路径现在返回 404；
-- 生产前端未调用旧路径，`news_routes.py` 受到旧路径不得回流的永久边界保护；
-- 七条现役 `/news/runs*` durable workflow、SQLite NewsRun 与恢复语义未改变；
-- 旧模型与兼容导出没有混入本切片，继续等待独立 owner 审计；
-- 全量后端、前端与真实浏览器闭环未发生回归。
+- 10 个旧 News 阶段 Pydantic 模型已从 owner 模块删除；
+- `src/api/models/__init__.py` 与 `src/api/__init__.py` 不再提供这些兼容导出；
+- 红边界发现的 `news_result_payload` / `_news_result_payload` 无路由 owner 残留已同步删除；
+- `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 继续受到永久测试保护；
+- durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归。
 
-当前没有待合并的功能 PR，主线进入旧 News 模型与 `src.api` 兼容导出退出。
+当前待合并功能 PR 为 #113；状态文档最终 CI 通过后即可合并，随后进入 `group / tools / timeline` adapter owner 审计。
