@@ -16,7 +16,7 @@ const drawersSource = sourceOf("./ExtensionDrawers.tsx");
 
 describe("single laboratory product boundary", () => {
   it("keeps one laboratory entry in the ordinary learning menu", () => {
-    expect(contractSource).toContain('export const LAB_DRAWER = "lab" as DrawerId');
+    expect(contractSource).toContain('export const LAB_DRAWER: DrawerId = "lab"');
     expect(chatPanelSource).toContain("<ExtensionLauncher");
     expect(launcherSource).toContain("onOpen(LAB_DRAWER");
     expect(launcherSource).toContain("实验室");
@@ -42,11 +42,11 @@ describe("single laboratory product boundary", () => {
     expect(drawersSource).toContain('view.activeSurface === "lab"');
   });
 
-  it("retains old drawer ids only as compatibility surfaces", () => {
-    expect(runtimeSource).toContain("selectExtensionDrawer(state.activeDrawer)");
-    expect(drawersSource).toContain("view.isLegacySurface");
-    expect(launcherSource).not.toContain('"group"');
-    expect(launcherSource).not.toContain('"tools"');
-    expect(launcherSource).not.toContain('"timeline"');
+  it("does not retain legacy capability drawer surfaces", () => {
+    expect(runtimeSource).not.toContain("selectExtensionDrawer");
+    expect(drawersSource).not.toContain("isLegacySurface");
+    expect(launcherSource).not.toContain('onOpen("group"');
+    expect(launcherSource).not.toContain('onOpen("tools"');
+    expect(launcherSource).not.toContain('onOpen("timeline"');
   });
 });
