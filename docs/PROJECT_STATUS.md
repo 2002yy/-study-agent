@@ -4,7 +4,7 @@
 > 更新：2026-08-07  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**  
+> 当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**  
 > 下一主线：**P2-D 源码学习与验证增强：GitHub symbol mapping + CI association、Firefox / WebKit 抽样，以及实体手机输入法、滚动、drawer、实验室与恢复验证。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -87,7 +87,9 @@
 - 有效红边界 commit `4a3e6138f7dbafb9a834ad3a8fdb232bae9ab785`，CI run `31179197610`：274 项通过、2 项按预期失败，且“现役 controller 必须保留”边界通过；
 - 实现后 run `31179428611` 发现旧 `useExtensionRuntimeBoundary.test.ts` 仍断言 `EXTENSION_DRAWERS`；同步改为 capability 合同；
 - head `a8f2533d945d182ee545cac2ac41625b2b5547e4` / run `31179663893` 中 276 个 Vitest 已全部通过，但 TypeScript build 进一步抓到 reducer 测试仍把 `"group"` 当作 `DrawerId`；改为真实 `lab` surface，不使用 cast 绕过类型；
-- 最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；
+- Extension drawer 代码基线 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；
+- 状态同步验证暴露 360×520 长 URL Golden Journey 对 `overflowWrap` computed-style 的脆弱依赖；同类失败在 CI `31180448052`、`31180866352` 与 `31181558554` 复现。没有放宽为空串，而是改为真实行为合同：长 URL 必须形成多个 line box、消息体不得横向 overflow、链接边界不得越出消息体；CSS owner 不变；
+- 最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过，41/41 Golden Journeys 与真实 FastAPI + SQLite 门禁均绿色；
 - `DrawerId` 现只包含普通 drawer 与 `lab`；`group / tools / timeline` 只属于 `ExtensionCapabilityId`。`useGroupChatController / useToolController / useWorkflowController`、ExtensionRuntime 恢复端口和按需加载继续保留。
 
 ## 3. 当前运行时架构
@@ -386,6 +388,6 @@ P2-C 三个切片已完成代码与回归基线，兼容层退出阶段收口：
 - durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归；
 - 旧 Extension capability drawer surface 已退出，`lab` 成为唯一实验 drawer；
 - group / tool / workflow controller、恢复端口和按需加载继续由 ExtensionRuntime 拥有；
-- 最终代码基线 `c65189c9c38e9b09abd11803d875a10e22b47a58` / CI `31179908482` 完整通过。
+- 最终代码基线 `ffed392c8fccdf8aa93a4f2d57164a89199be726` / CI `31181998973` 完整通过；窄屏长 URL 门禁已改为直接验证换行与无横向溢出行为。
 
 PR #114 状态同步 CI 通过后即可合并；合并后 P2-C 结束，进入 P2-D 源码学习与验证增强。
