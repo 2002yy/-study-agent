@@ -34,6 +34,10 @@
 - 不承担当前进度维护；
 - 实现变化时可修订规范，但不得把 spec 当状态看板。
 
+当前产品设计上位约束：
+
+- [`../superpowers/specs/2026-08-07-product-design-direction-design.md`](../superpowers/specs/2026-08-07-product-design-direction-design.md)：Study Agent 学习产品定位、Learning Task、动态路线、掌握证据、角色/教学策略分离、群聊与主动性边界。
+
 ## 5. 实施计划与历史记录
 
 目录：`superpowers/plans/`
