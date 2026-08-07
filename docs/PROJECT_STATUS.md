@@ -4,8 +4,8 @@
 > 更新：2026-08-07  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**PR #113 已 squash 合并 `main`；最终 head `bc3c06f043eae5f195516741c88a45205e21864b` 的 CI run `31177513884` 完整通过，功能 merge SHA `39e5efe91a75099b6cf5646aa9060d2945b5604c`。**  
-> 下一主线：**P2-C 第三切片盘点并退出无 owner 的旧 `group / tools / timeline` 新 UI adapter；只在实验室现役恢复与调用链证明无依赖后删除。**  
+> 当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**  
+> 下一主线：**P2-D 源码学习与验证增强：GitHub symbol mapping + CI association、Firefox / WebKit 抽样，以及实体手机输入法、滚动、drawer、实验室与恢复验证。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -82,6 +82,13 @@
 - 最终 PR head `bc3c06f043eae5f195516741c88a45205e21864b`，CI run `31177513884` 完整通过；
 - 功能 merge SHA `39e5efe91a75099b6cf5646aa9060d2945b5604c`；
 - `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 现役合同、durable `/news/runs*`、SQLite NewsRun 与恢复语义保持不变。
+- PR #114：旧 Extension drawer surface 兼容适配退出；
+- 审计确认 `group / tools / timeline` 仍是现役实验能力 ID 与 controller owner，不能删除；真正无 owner 的是旧 drawer surface 恢复适配。`WorkspacePersistence` 不持久化 `activeDrawer`，新 UI 只打开 `lab`；
+- 有效红边界 commit `4a3e6138f7dbafb9a834ad3a8fdb232bae9ab785`，CI run `31179197610`：274 项通过、2 项按预期失败，且“现役 controller 必须保留”边界通过；
+- 实现后 run `31179428611` 发现旧 `useExtensionRuntimeBoundary.test.ts` 仍断言 `EXTENSION_DRAWERS`；同步改为 capability 合同；
+- head `a8f2533d945d182ee545cac2ac41625b2b5547e4` / run `31179663893` 中 276 个 Vitest 已全部通过，但 TypeScript build 进一步抓到 reducer 测试仍把 `"group"` 当作 `DrawerId`；改为真实 `lab` surface，不使用 cast 绕过类型；
+- 最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；
+- `DrawerId` 现只包含普通 drawer 与 `lab`；`group / tools / timeline` 只属于 `ExtensionCapabilityId`。`useGroupChatController / useToolController / useWorkflowController`、ExtensionRuntime 恢复端口和按需加载继续保留。
 
 ## 3. 当前运行时架构
 
@@ -356,9 +363,9 @@ production  -> 无默认来源
 
 1. PR #112 已退出六条旧 News 410 tombstone，并由永久边界阻止旧路径回流；
 2. PR #113 已退出 10 个旧 News 阶段模型、两层兼容导出和 `news_result_payload`，现役 durable / lookup / research 合同保持不变；
-3. 下一切片盘点旧 `group / tools / timeline` 新 UI adapter 的恢复、持久化和调用来源；
-4. 只有在实验室入口、ExtensionRuntime 恢复和选择性加载均证明无依赖后，才删除无 owner adapter；
-5. 每个删除切片继续保持 API、持久化、普通模式和真实浏览器闭环不变。
+3. PR #114 已证明旧 `group / tools / timeline` drawer surface 无持久化或新 UI owner，并退出该兼容适配；
+4. `group / tools / timeline` 继续作为实验能力 ID，由 ExtensionRuntime 的 group / tool / workflow controller 拥有，实验室入口仍默认休眠并按需加载；
+5. P2-C 三个删除切片均保持 API、WorkspacePersistence、普通模式、Chromium Golden Journeys 与真实 FastAPI + SQLite 闭环不变，兼容层退出阶段完成。
 
 ### P2-D：源码学习与验证增强
 
@@ -370,12 +377,15 @@ production  -> 无默认来源
 
 ## 9. 阶段判断
 
-P2-C 第二切片已完成代码与回归基线：
+P2-C 三个切片已完成代码与回归基线，兼容层退出阶段收口：
 
 - 10 个旧 News 阶段 Pydantic 模型已从 owner 模块删除；
 - `src/api/models/__init__.py` 与 `src/api/__init__.py` 不再提供这些兼容导出；
 - 红边界发现的 `news_result_payload` / `_news_result_payload` 无路由 owner 残留已同步删除；
 - `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 继续受到永久测试保护；
-- durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归。
+- durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归；
+- 旧 Extension capability drawer surface 已退出，`lab` 成为唯一实验 drawer；
+- group / tool / workflow controller、恢复端口和按需加载继续由 ExtensionRuntime 拥有；
+- 最终代码基线 `c65189c9c38e9b09abd11803d875a10e22b47a58` / CI `31179908482` 完整通过。
 
-PR #113 已合并 `main`；P2-C 第二切片完成，当前进入第三切片：`group / tools / timeline` adapter owner、恢复、持久化与选择性加载边界审计。
+PR #114 状态同步 CI 通过后即可合并；合并后 P2-C 结束，进入 P2-D 源码学习与验证增强。
