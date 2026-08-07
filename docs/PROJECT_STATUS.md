@@ -4,7 +4,7 @@
 > 更新：2026-08-07  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  
-> 当前切片：**Draft PR #113 已退出 10 个无生产 owner 的旧 News 阶段 Pydantic 模型、两层兼容导出和无路由 owner 的 `news_result_payload`；最终代码 head `0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`，CI run `31177047560` 完整通过。**  
+> 当前切片：**PR #113 已 squash 合并 `main`；最终 head `bc3c06f043eae5f195516741c88a45205e21864b` 的 CI run `31177513884` 完整通过，功能 merge SHA `39e5efe91a75099b6cf5646aa9060d2945b5604c`。**  
 > 下一主线：**P2-C 第三切片盘点并退出无 owner 的旧 `group / tools / timeline` 新 UI adapter；只在实验室现役恢复与调用链证明无依赖后删除。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
@@ -79,6 +79,8 @@
 - 有效红边界 commit `b400b2db38393882c2db52aba38ee513ed9366d6`，CI run `31176698695`：905 项通过、1 项按预期失败；
 - 红边界额外发现 `src/application/helpers.py::news_result_payload` 仍引用 `NewsSearchResponse`，确认其已无路由 owner 后同步退出；
 - 最终代码 head `0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`，CI run `31177047560` 完整通过；
+- 最终 PR head `bc3c06f043eae5f195516741c88a45205e21864b`，CI run `31177513884` 完整通过；
+- 功能 merge SHA `39e5efe91a75099b6cf5646aa9060d2945b5604c`；
 - `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 现役合同、durable `/news/runs*`、SQLite NewsRun 与恢复语义保持不变。
 
 ## 3. 当前运行时架构
@@ -331,7 +333,10 @@ production  -> 无默认来源
 - 有效红 CI：run `31176698695`，905 项通过、1 项按预期失败；
 - 红边界 offender 仅位于 `src/api/__init__.py`、`src/api/models/__init__.py`、`src/api/models/news.py` 与 `src/application/helpers.py`；
 - 最终代码 head：`0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`；
-- 最终代码 CI：run `31177047560`，结论 `success`。
+- 最终代码 CI：run `31177047560`，结论 `success`；
+- 最终 PR head：`bc3c06f043eae5f195516741c88a45205e21864b`；
+- 最终 PR CI：run `31177513884`，结论 `success`；
+- 功能 merge SHA：`39e5efe91a75099b6cf5646aa9060d2945b5604c`。
 
 最终代码基线完整通过：
 
@@ -373,4 +378,4 @@ P2-C 第二切片已完成代码与回归基线：
 - `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 继续受到永久测试保护；
 - durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归。
 
-当前待合并功能 PR 为 #113；状态文档最终 CI 通过后即可合并，随后进入 `group / tools / timeline` adapter owner 审计。
+PR #113 已合并 `main`；P2-C 第二切片完成，当前进入第三切片：`group / tools / timeline` adapter owner、恢复、持久化与选择性加载边界审计。
