@@ -109,7 +109,6 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   await longLink.scrollIntoViewIfNeeded();
   const linkMetrics = await longLink.evaluate((element) => {
     const messageBody = element.closest(".message-body") as HTMLElement | null;
-    const markdownBody = element.closest(".markdown-message") as HTMLElement | null;
     const linkRect = element.getBoundingClientRect();
     const bodyRect = messageBody?.getBoundingClientRect();
     return {
@@ -119,12 +118,10 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
       bodyRight: bodyRect?.right ?? 0,
       bodyScrollWidth: messageBody?.scrollWidth ?? 0,
       bodyClientWidth: messageBody?.clientWidth ?? 0,
-      markdownOverflowWrap: markdownBody
-        ? getComputedStyle(markdownBody).overflowWrap
-        : "",
+      linkLineCount: element.getClientRects().length,
     };
   });
-  expect(linkMetrics.markdownOverflowWrap).toBe("anywhere");
+  expect(linkMetrics.linkLineCount).toBeGreaterThan(1);
   expect(linkMetrics.bodyScrollWidth).toBeLessThanOrEqual(linkMetrics.bodyClientWidth + 1);
   expect(linkMetrics.linkLeft).toBeGreaterThanOrEqual(linkMetrics.bodyLeft - 1);
   expect(linkMetrics.linkRight).toBeLessThanOrEqual(linkMetrics.bodyRight + 1);
