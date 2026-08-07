@@ -107,11 +107,9 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   expect(conversationBounds!.x + conversationBounds!.width).toBeLessThanOrEqual(360.5);
 
   await longLink.scrollIntoViewIfNeeded();
-  await expect
-    .poll(() => longLink.evaluate((element) => getComputedStyle(element).overflowWrap))
-    .toMatch(/^(anywhere|break-word)$/);
   const linkMetrics = await longLink.evaluate((element) => {
     const messageBody = element.closest(".message-body") as HTMLElement | null;
+    const markdownBody = element.closest(".markdown-message") as HTMLElement | null;
     const linkRect = element.getBoundingClientRect();
     const bodyRect = messageBody?.getBoundingClientRect();
     return {
@@ -119,12 +117,17 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
       linkRight: linkRect.right,
       bodyLeft: bodyRect?.left ?? 0,
       bodyRight: bodyRect?.right ?? 0,
-      overflowWrap: getComputedStyle(element).overflowWrap,
+      bodyScrollWidth: messageBody?.scrollWidth ?? 0,
+      bodyClientWidth: messageBody?.clientWidth ?? 0,
+      markdownOverflowWrap: markdownBody
+        ? getComputedStyle(markdownBody).overflowWrap
+        : "",
     };
   });
+  expect(linkMetrics.markdownOverflowWrap).toBe("anywhere");
+  expect(linkMetrics.bodyScrollWidth).toBeLessThanOrEqual(linkMetrics.bodyClientWidth + 1);
   expect(linkMetrics.linkLeft).toBeGreaterThanOrEqual(linkMetrics.bodyLeft - 1);
   expect(linkMetrics.linkRight).toBeLessThanOrEqual(linkMetrics.bodyRight + 1);
-  expect(["anywhere", "break-word"]).toContain(linkMetrics.overflowWrap);
   successArtifacts.push(
     await captureComplexSuccessStep(page, testInfo, JOURNEY, "long-text-and-url"),
   );
