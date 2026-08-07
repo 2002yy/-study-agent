@@ -1,0 +1,46 @@
+name: Finalize P2-C extension validation status
+on:
+  push:
+    branches:
+      - agent/remove-legacy-extension-drawers
+    paths:
+      - .github/workflows/finalize-p2c-extension-status.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/remove-legacy-extension-drawers
+          fetch-depth: 0
+      - name: Update unique project status
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("docs/PROJECT_STATUS.md")
+          text = p.read_text(encoding="utf-8")
+          text = text.replace(
+              '当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**',
+              '当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**',
+              1,
+          )
+          anchor = '- 最终代码 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；\n- `DrawerId` 现只包含普通 drawer 与 `lab`；'
+          replacement = '- Extension drawer 代码基线 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；\n- 状态同步验证暴露 360×520 长 URL Golden Journey 对 `overflowWrap` computed-style 的脆弱依赖；同类失败在 CI `31180448052`、`31180866352` 与 `31181558554` 复现。没有放宽为空串，而是改为真实行为合同：长 URL 必须形成多个 line box、消息体不得横向 overflow、链接边界不得越出消息体；CSS owner 不变；\n- 最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过，41/41 Golden Journeys 与真实 FastAPI + SQLite 门禁均绿色；\n- `DrawerId` 现只包含普通 drawer 与 `lab`；'
+          if anchor not in text:
+              raise SystemExit("status anchor missing")
+          text = text.replace(anchor, replacement, 1)
+          tail = '- 最终代码基线 `c65189c9c38e9b09abd11803d875a10e22b47a58` / CI `31179908482` 完整通过。'
+          if tail in text:
+              text = text.replace(tail, '- 最终代码基线 `ffed392c8fccdf8aa93a4f2d57164a89199be726` / CI `31181998973` 完整通过；窄屏长 URL 门禁已改为直接验证换行与无横向溢出行为。', 1)
+          p.write_text(text, encoding="utf-8")
+          PY
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/finalize-p2c-extension-status.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "finalize P2-C extension validation status"
+          git push origin HEAD:agent/remove-legacy-extension-drawers
