@@ -545,27 +545,6 @@ def wechat_state_payload() -> Any:
     )
 
 
-# ── News helpers ───────────────────────────────────────────────────────
-
-def news_result_payload(result: Any, session_id: str) -> Any:
-    from src.api.models.news import NewsSearchResponse
-
-    return NewsSearchResponse(
-        query_text=result.query_text,
-        news_items=result.news_items,
-        digest=result.digest,
-        discussion=result.discussion,
-        group_content=result.group_content,
-        source_block=result.source_block,
-        article_coverage=result.article_coverage,
-        elapsed_ms=result.elapsed_ms,
-        warnings=result.warnings,
-        audit_markdown_path=result.audit_markdown_path,
-        audit_json_path=result.audit_json_path,
-        session_id=session_id,
-    )
-
-
 # ── Chat context helpers ───────────────────────────────────────────────
 
 def previous_assistant_role(chat_history: list[Any]) -> str | None:

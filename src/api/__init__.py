@@ -22,12 +22,7 @@ from .models.common import (HealthResponse, RoleListResponse, RoleResponse,
 from .models.memory import (MemoryCommitResponse, MemoryPreviewItem,
                              MemoryPreviewRequest, MemoryPreviewResponse,
                              MemoryStatusResponse, MemoryUpdate)
-from .models.news import (NewsDigestRequest, NewsDigestResponse,
-                           NewsDiscussRequest, NewsDiscussResponse,
-                           NewsEnrichRequest, NewsEnrichResponse,
-                           NewsLookupRequest, NewsLookupResponse,
-                           NewsSearchRequest, NewsSearchResponse,
-                           NewsStageSearchRequest, NewsStageSearchResponse)
+from .models.news import (NewsLookupRequest, NewsLookupResponse)
 from .models.rag import (LocalKnowledgeRequest, LocalKnowledgeResponse,
                           RagIndexRequest, RagIndexResponse,
                           RagQueryRequest, RagQueryResponse,
@@ -57,7 +52,6 @@ from src.application.helpers import (
     memory_update_action,
     memory_update_preview_text,
     messages_from_session_entries,
-    news_result_payload,
     parse_archived_session_messages,
     parse_current_session_messages,
     parse_session_turn_snapshots,
@@ -101,7 +95,6 @@ _wechat_state_payload = wechat_state_payload
 _runtime_settings_payload = runtime_settings_payload
 _runtime_settings_options = runtime_settings_options
 _role_payload = role_payload
-_news_result_payload = __import__("src.application.helpers").application.helpers.news_result_payload
 _prepare_chat_context = prepare_chat_context
 _request_performance_mode = request_performance_mode
 _request_model_profile = request_model_profile
