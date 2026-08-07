@@ -187,7 +187,7 @@ describe("workspaceReducer", () => {
 
   it("opening a drawer replaces the previous one", () => {
     const next = workspaceReducer(
-      createWorkspaceRuntimeState({ activeDrawer: "group" }),
+      createWorkspaceRuntimeState({ activeDrawer: "lab" }),
       { type: "OPEN_DRAWER", drawer: "memory" },
     );
     expect(next.activeDrawer).toBe("memory");

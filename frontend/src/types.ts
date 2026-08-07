@@ -94,13 +94,11 @@ export type TurnEvidence = {
 };
 
 export type DrawerId =
-  | "group"
-  | "tools"
   | "sessions"
   | "memory"
   | "settings"
   | "sources"
-  | "timeline";
+  | "lab";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";

@@ -1,9 +1,9 @@
 import { Activity, MessageSquare, Wrench } from "lucide-react";
 
-import type { ExtensionDrawerId } from "./extensionDrawerContract";
+import type { ExtensionCapabilityId } from "./extensionDrawerContract";
 
 const CAPABILITIES: Array<{
-  id: ExtensionDrawerId;
+  id: ExtensionCapabilityId;
   label: string;
   description: string;
   icon: typeof MessageSquare;
@@ -31,7 +31,7 @@ const CAPABILITIES: Array<{
 export function ExtensionLabPanel({
   onSelect,
 }: {
-  onSelect: (capability: ExtensionDrawerId) => void;
+  onSelect: (capability: ExtensionCapabilityId) => void;
 }) {
   return (
     <section aria-labelledby="extension-lab-title" className="extension-lab-panel">

@@ -3,13 +3,13 @@ import { useRef } from "react";
 
 import { SlideOver } from "../components/SlideOver";
 import { ExtensionLabPanel } from "../features/extensions/ExtensionLabPanel";
-import type { ExtensionDrawerId } from "../features/extensions/extensionDrawerContract";
+import type { ExtensionCapabilityId } from "../features/extensions/extensionDrawerContract";
 import { ToolPanel } from "../features/tools/ToolPanel";
 import { WechatPanel } from "../features/wechat-workspace/WechatPanel";
 import { TimelinePanel } from "../features/workflows/TimelinePanel";
 import type { ExtensionViewModel } from "./useExtensionRuntime";
 
-const CAPABILITY_TITLES: Record<ExtensionDrawerId, string> = {
+const CAPABILITY_TITLES: Record<ExtensionCapabilityId, string> = {
   group: "群聊",
   tools: "工具",
   timeline: "开发者诊断",
@@ -22,7 +22,7 @@ export function ExtensionDrawers({
   view: ExtensionViewModel;
   onClose: () => void;
 }) {
-  const lastCapability = useRef<ExtensionDrawerId | null>(null);
+  const lastCapability = useRef<ExtensionCapabilityId | null>(null);
   const groupController = view.group.controller;
   const toolController = view.tools.controller;
   const workflowController = view.timeline.controller;
@@ -30,7 +30,7 @@ export function ExtensionDrawers({
   const open = view.activeSurface !== null;
   const title = capability ? CAPABILITY_TITLES[capability] : "实验室";
 
-  const selectCapability = (next: ExtensionDrawerId) => {
+  const selectCapability = (next: ExtensionCapabilityId) => {
     lastCapability.current = next;
     view.selectCapability(next);
   };
@@ -54,7 +54,7 @@ export function ExtensionDrawers({
         <ExtensionLabPanel onSelect={selectCapability} />
       ) : null}
 
-      {view.activeSurface === "lab" && capability && !view.isLegacySurface ? (
+      {view.activeSurface === "lab" && capability ? (
         <button
           aria-label="返回实验室"
           className="ghost-action compact extension-lab-back"

@@ -10,9 +10,8 @@ import {
 import type { LocalKnowledgeInvocation } from "../api";
 import {
   resolveExtensionCapability,
-  selectExtensionDrawer,
   selectExtensionSurface,
-  type ExtensionDrawerId,
+  type ExtensionCapabilityId,
   type ExtensionSurfaceId,
 } from "../features/extensions/extensionDrawerContract";
 import { useGroupChatController } from "../features/group-chat/groupChatController";
@@ -65,11 +64,9 @@ export type ExtensionCoordinatorPort = {
 };
 
 export type ExtensionViewModel = {
-  activeDrawer: ExtensionDrawerId | null;
   activeSurface: ExtensionSurfaceId | null;
-  activeCapability: ExtensionDrawerId | null;
-  isLegacySurface: boolean;
-  selectCapability: (capability: ExtensionDrawerId) => void;
+  activeCapability: ExtensionCapabilityId | null;
+  selectCapability: (capability: ExtensionCapabilityId) => void;
   backToLab: () => void;
   activeQuery: string;
   group: {
@@ -91,7 +88,7 @@ export type ExtensionViewModel = {
 };
 
 const EXTENSION_DRAWER_CONFIG: Record<
-  ExtensionDrawerId,
+  ExtensionCapabilityId,
   { feature: WorkspaceFeature; label: string }
 > = {
   group: { feature: "wechat", label: "群聊" },
@@ -113,10 +110,9 @@ export function useExtensionRuntime(options: {
   webLookup: ExtensionEvidenceViewPort;
 }) {
   const { state, dispatch } = useWorkspace();
-  const activeDrawer = selectExtensionDrawer(state.activeDrawer);
   const activeSurface = selectExtensionSurface(state.activeDrawer);
   const [selectedCapability, setSelectedCapability] =
-    useState<ExtensionDrawerId | null>(null);
+    useState<ExtensionCapabilityId | null>(null);
   const activeCapability = resolveExtensionCapability(
     activeSurface,
     selectedCapability,
@@ -131,7 +127,7 @@ export function useExtensionRuntime(options: {
     [dispatch],
   );
   const selectCapability = useCallback(
-    (capability: ExtensionDrawerId) => setSelectedCapability(capability),
+    (capability: ExtensionCapabilityId) => setSelectedCapability(capability),
     [],
   );
   const backToLab = useCallback(() => setSelectedCapability(null), []);
@@ -238,10 +234,8 @@ export function useExtensionRuntime(options: {
     ],
   );
   const view: ExtensionViewModel = {
-    activeDrawer: activeCapability,
     activeSurface,
     activeCapability,
-    isLegacySurface: activeDrawer !== null,
     selectCapability,
     backToLab,
     activeQuery,
