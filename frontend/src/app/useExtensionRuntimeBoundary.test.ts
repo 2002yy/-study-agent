@@ -48,10 +48,13 @@ describe("ExtensionRuntime owner boundary", () => {
 
   it("loads only the selected laboratory capability while memory remains outside", () => {
     expect(extensionDrawerContractSource).toContain(
-      'export const EXTENSION_DRAWERS = ["group", "tools", "timeline"] as const;',
+      'export const EXTENSION_CAPABILITIES = ["group", "tools", "timeline"] as const;',
     );
     expect(extensionDrawerContractSource).toContain(
-      'export type ExtensionSurfaceId = "lab" | ExtensionDrawerId;',
+      'export type ExtensionSurfaceId = "lab";',
+    );
+    expect(extensionDrawerContractSource).toContain(
+      "export type ExtensionCapabilityId = (typeof EXTENSION_CAPABILITIES)[number];",
     );
     expect(extensionSource).toContain("EXTENSION_DRAWER_CONFIG");
     expect(extensionSource).toContain('group: { feature: "wechat"');
