@@ -1,0 +1,46 @@
+name: Finalize P2-C merge status
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finalize-p2c-merge-status.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Update unique project status
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("docs/PROJECT_STATUS.md")
+          text = p.read_text(encoding="utf-8")
+          replacements = {
+            '> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理均已完成；当前推进 P2-C 兼容层退出。**  ': '> 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理、P2-C 兼容层退出均已完成；当前进入 P2-D 源码学习与验证增强。**  ',
+            '> 当前切片：**Draft PR #114 已退出旧 `group / tools / timeline` drawer surface 兼容适配；最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过。P2-C 兼容层退出已完成代码与回归基线。**  ': '> 当前切片：**PR #114 已 squash 合并 `main`；最终 PR head `8073da2adb033945d00d13e9db061ab9186b3d25`，同文件树 CI run `31182503935` 完整通过，功能 merge SHA `283c173e99f7a68985a536682155ce8948d54a70`。P2-C 正式收口。**  ',
+            '> 下一主线：**P2-D 源码学习与验证增强：GitHub symbol mapping + CI association、Firefox / WebKit 抽样，以及实体手机输入法、滚动、drawer、实验室与恢复验证。**  ': '> 下一主线：**P2-D 第一切片优先推进 GitHub symbol mapping + CI association，形成可复核的源码学习 `EvidenceSnapshot`；随后补 Firefox / WebKit 抽样与实体手机验证。**  ',
+            '### 2.6 兼容层退出（进行中）': '### 2.6 兼容层退出（已完成）',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"missing status anchor: {old[:80]}")
+              text = text.replace(old, new, 1)
+          anchor = '- 最终代码 head `ffed392c8fccdf8aa93a4f2d57164a89199be726`，CI run `31181998973` 完整通过，41/41 Golden Journeys 与真实 FastAPI + SQLite 门禁均绿色；\n'
+          addition = anchor + '- 最终 PR head `8073da2adb033945d00d13e9db061ab9186b3d25`；同文件树状态同步 CI run `31182503935` 完整通过；功能 merge SHA `283c173e99f7a68985a536682155ce8948d54a70`；\n'
+          if anchor not in text:
+              raise SystemExit("missing PR #114 evidence anchor")
+          text = text.replace(anchor, addition, 1)
+          p.write_text(text, encoding="utf-8")
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/finalize-p2c-merge-status.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "finalize P2-C merge status"
+          git push origin HEAD:main
