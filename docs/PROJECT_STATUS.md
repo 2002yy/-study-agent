@@ -1,11 +1,11 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-07  
+> 更新：2026-08-08  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**  
 > 当前主线：**P1 运行时 owner 与普通模式收口、P2-A 遗留样式 owner 清理、P2-B 平台配置治理、P2-C 兼容层退出均已完成；当前进入 P2-D 源码学习与验证增强。**  
-> 当前切片：**PR #114 已 squash 合并 `main`；最终 PR head `8073da2adb033945d00d13e9db061ab9186b3d25`，同文件树 CI run `31182503935` 完整通过，功能 merge SHA `283c173e99f7a68985a536682155ce8948d54a70`。P2-C 正式收口。**  
-> 下一主线：**P2-D 第一切片优先推进 GitHub symbol mapping + CI association，形成可复核的源码学习 `EvidenceSnapshot`；随后补 Firefox / WebKit 抽样与实体手机验证。**  
+> 当前切片：**P2-D-1 已进入 Draft PR #115：GitHub source search 增加确定性 lexical match → innermost symbol mapping，并把 commit-pinned GitHub Checks 关联到同一 EvidenceSnapshot；CI payload 必须与 snapshot SHA 精确一致。PR 当前 head `b1ae5623d716275b5f998e104b3b1bc5b218f1dd`，两次 GitHub Actions run `31192055532` / `31192056375` 均失败，因此本切片尚未收口、不得合并。**  
+> 下一主线：**先修复 PR #115 CI，并在同一 head/同文件树上完成绿色验证；之后再进入 Firefox / WebKit 抽样与至少一台实体手机验证。**  
 > 冻结边界：**Provider replay 扩展、生产 claim UI、群聊能力扩张、新闻产品化和可执行 agent 均不是当前开发主线。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -169,226 +169,109 @@ frontend/src/features/wechat-workspace/wechatLookup.css
 当前 fixture 只在以下条件同时满足时注入隐藏能力故障：
 
 - resource type 为 `fetch` 或 `xhr`；
-- URL pathname 精确等于一个隐藏后端端点。
+- URL pathname 精确命中现役 API 路径；
+- 不再以静态资源文件名包含 `wechat` 作为故障依据。
 
-CSS、TS、图片和其他静态资源一律 fallback；真实 `/wechat`、`/tools`、`/memory` 等接口仍保持严格故障注入。
+这样仍能验证隐藏实验能力失败时普通模式不受影响，同时不再污染 CSS / JS 模块加载。
 
-### 4.5 未改变边界
+## 5. P2-B 平台配置治理
 
-本批没有修改 API 路由或响应 schema、SQLite schema、durable entity、WorkspacePersistence v4、Learning / Evidence / Extension 业务行为、committed learning truth 或实验室默认休眠合同。
+### 5.1 单一 CORS policy owner
 
-## 5. P2-B 平台配置与 CORS 单一 owner
+当前平台配置规则由 `src/api/cors.py` 单一拥有：
 
-### 5.1 审计结论
+- 解析环境；
+- 规范化 origins；
+- 验证非法或危险组合；
+- 生成 FastAPI CORS middleware 配置；
+- 测试直接针对 policy owner，而不是复制一份规则。
 
-原 `src/api/app.py` 同时存在两套规则：
+`src/api/app.py` 只负责装配，不重新解释环境变量。
 
-1. Starlette `CORSMiddleware` 中硬编码 localhost / 127.0.0.1 的 5173 与 4173；
-2. API security middleware 中再次读取 `STUDY_AGENT_CORS_ORIGINS`，手工处理 OPTIONS 和响应头。
+### 5.2 永久边界
 
-这会造成来源定义、credentials、预检与普通响应分别受不同 owner 控制。启动脚本和 `src/config.py` 未发现第二套 CORS 解析，因此本批只收口真实重复 owner，不制造新的通用配置框架。
+- 生产环境不得回退到宽松 wildcard origin；
+- `allow_credentials=True` 与 wildcard origin 不得组合；
+- localhost / loopback 只允许在明确的本地开发环境中出现；
+- 错误配置必须启动即失败，不允许静默降级；
+- `.env.example`、启动脚本和测试不得成为第二套 CORS 真值 owner。
 
-### 5.2 单一 policy owner
+## 6. P2-C 兼容层退出
 
-新增：
+### 6.1 已完成退出
 
-```text
-src/api/cors.py
-```
-
-统一负责：
-
-- `STUDY_AGENT_ENV` 环境识别；
-- `STUDY_AGENT_CORS_ORIGINS` 来源解析；
-- `STUDY_AGENT_CORS_ALLOW_CREDENTIALS` 布尔校验；
-- origin 规范化和稳定去重；
-- 预检 method / header 校验；
-- 204 / 403 预检响应；
-- 普通响应与 API token 401 的 CORS 头；
-- `Vary: Origin` 合并。
-
-`src/api/app.py` 不再导入或配置 `CORSMiddleware`，也不再维护硬编码来源、第二套解析函数或第二套响应头实现。
-
-### 5.3 环境边界
-
-未显式设置 `STUDY_AGENT_CORS_ORIGINS` 时：
-
-```text
-development -> localhost / 127.0.0.1 的 5173 与 4173
-test        -> http://testserver
-production  -> 无默认来源
-```
-
-补充语义：
-
-- 环境变量缺失：使用当前环境默认来源；
-- 环境变量存在但为空：显式关闭 CORS；
-- 重复来源：规范化后按首次出现顺序去重；
-- 非绝对 http(s) origin、携带用户信息、path、query 或 fragment：启动请求时 fail closed；
-- wildcard `*`：必须独占来源列表，且 `allow_credentials=false`；
-- 未知环境名和非法布尔值：fail closed，不静默退回开发配置。
-
-### 5.4 永久边界
-
-`tests/test_cors_policy.py` 持续检查：
-
-- development / test / production 默认来源严格分离；
-- 空值、重复来源、大小写与尾斜杠规范化；
-- wildcard 与 credentials 冲突；
-- wildcard 与具体来源混用；
-- 非法环境、布尔值和 origin；
-- `app.py` 不得重新出现 `CORSMiddleware`、本地来源字面量或 `Access-Control-Allow-Origin` 实现；
-- 其他 `src/api` 模块不得新增第二个 `STUDY_AGENT_CORS_ORIGINS` owner 或响应头 owner。
-
-### 5.5 未改变边界
-
-- 允许来源的 preflight 仍返回 204；
-- 拒绝来源的 preflight 仍返回 403；
-- API token 的 Bearer / `X-Study-Agent-Token` 合同不变；
-- `/health` 与静态资源公开边界不变；
-- FastAPI 路由、响应 schema、SQLite schema、durable entity、Vite proxy、WorkspacePersistence v4、Learning / Evidence / Extension 行为和 committed learning truth 均未改变。
-
-## 6. 必须保护的稳定闭环
-
-| 闭环 | 当前结论 | 真实证据边界 |
-|---|---|---|
-| 首次开始 | 真实全栈通过 | React -> FastAPI -> SQLite；无需先配置 |
-| 返回学习 | 可恢复并继续 | 目标、上下文、设置、run ID、消息与下一步恢复 |
-| 上传资料学习 | 真实全栈通过 | 文件合同、索引、EvidenceSnapshot、刷新恢复 |
-| 联网研究 | 取消与恢复通过 | durable ResearchRun、同 run 重试与恢复 |
-| 源码学习 | 展示与恢复可用 | 通用 EvidenceSnapshot / EvidenceTrail |
-| 理解验证 | 真实全栈通过 | 正确推理才进入 committed truth |
-| 学习结束 | 真实全栈通过 | closure preview、确认写入、summary、归档并新建 |
-| 中断续写 | 真实全栈通过 | partial 保存、同 turn 续写、只提交一次 |
-| 长会话与窄屏 | desktop / mobile / 360×520 通过 | 恢复卡、宽代码、长链接、IME、滚动与刷新恢复 |
-| 实验室休眠 | desktop / mobile / 360×520 通过 | 首页零扩展请求；选择后只加载对应能力 |
-| WeChat lookup 样式 | desktop / mobile / 360×520 通过 | 局部 owner CSS 正常加载，无旧 `.news-*` DOM/CSS |
-| CORS 与 API gate | 真实全栈通过 | 单一 policy owner；合法来源 204/响应头，非法来源 403，token 401 行为不变 |
-| 旧 News 路由退出 | 真实全栈通过 | 六条旧路径未注册并返回 404；现役 `/news/runs*` 与恢复闭环不变 |
-
-继续保护：RestoreCard、LearningStrip、SourcesPanel、MemoryRun、ResearchRun、RAG query/write run、WorkspacePersistence v4 和学习结束 committed truth。
-
-## 7. 验证证据
-
-### 7.1 PR #110
-
-- 有效红边界 commit：`4839ba42657e0475c8f0386226a490089f002cdc`；
-- 有效红 CI：run `31005785577`；
-- 代码基线 commit：`f1b7cacb106ef249ab68ab498ea395864a7636c1`；
-- 代码基线 CI：run `31008156692`，结论 `success`；
-- 最终 PR head：`9c326330d12fbaab8d5fbc8a283d668b82abc0e2`；
-- 最终 head CI：run `31008811658`，结论 `success`；
-- 功能 merge SHA：`6772b29e5a6457eecbc334e6bead7dfa1aa4e229`。
-
-受控失败与审计修正：
-
-- commit `072c871fe5afa4eebd614ed228824dec4b8924fd` / run `31005285033`：首版测试自身存在转义语法错误，不作为有效红边界证据；
-- commit `4839ba42657e0475c8f0386226a490089f002cdc` / run `31005785577`：有效红边界证明旧 CSS 存在，同时发现源码扫描过宽；
-- runs `31006158792`、`31006427898`：推动扫描器收窄为逐文件静态 class token；
-- commit `c29aff1d896dfb09f0d671a4ddfe90be77d09a5e` / run `31006769176`：文件级证据证明 `WechatPanel` 仍真实使用三个旧类名，纠正“全部是死 CSS”的初始判断；
-- commit `79b02d3c8ab716db4badb46ff64a09e776546bcf` / run `31007505420`：39/41 浏览器旅程通过；两项 bootstrap 因 `**/wechat*` 误拦截 `wechatLookup.css` 失败；
-- commit `f1b7cacb106ef249ab68ab498ea395864a7636c1`：故障注入改为 fetch/xhr + 精确 pathname，随后 run `31008156692` 全绿。
-
-### 7.2 PR #111
-
-- 分支：`agent/cors-single-owner`；
-- 代码基线 head：`4a7f47614d466ba18713536469b34bcf9611a075`；
-- 代码基线 CI：run `31011592445`，结论 `success`；
-- 最终 PR head：`1b10820574c73fec864ab44f0e81c7c86ef02c23`；
-- 最终 head CI：run `31012164767`，结论 `success`；
-- 功能 merge SHA：`6f743db0750e5cacf6370b2fee3cdd091b946f78`。
-
-两轮基线均完整通过：
-
-- 全量 pytest，包括新增 CORS policy 与单一 owner 边界；
-- RAG K1 固定 corpus；
-- Ruff；
-- 项目打包；
-- detect-secrets；
-- expanded mypy baseline gate；
-- 全量前端测试与 TypeScript / Vite production build；
-- desktop、mobile、360×520 Golden Journeys；
-- 真实 FastAPI + SQLite 浏览器门禁。
-
-说明：raw expanded mypy 仍有既有存量错误；通过的是仓库既定 baseline gate，未宣称 raw mypy 全量清零。
-
-### 7.3 PR #112
-
-- 分支：`agent/remove-news-tombstones`；
-- 有效红边界 commit：`84248b1cff7f45f8a1c34ed09f9c0540cf66f60f`；
-- 有效红 CI：run `31113239279`，902 项通过、2 项按预期失败，证明旧路径仍注册；
-- 首轮实现 head：`c908494620278bec292d5ea00b6a45234b44e8b1`；
-- 首轮实现 CI：run `31113980495`，902 项通过、1 项失败，暴露兼容库存测试仍要求 tombstone 存在；
-- 代码基线 head：`5dae5af86500f878a8fee173625a47e146fa8303`；
-- 代码基线 CI：run `31114230217`，结论 `success`；
-- 最终 PR head：`6976fde10d2b201e0ba0019bcbab96939cb272c6`；
-- 最终 head CI：run `31116107948`，结论 `success`；
-- 功能 merge SHA：`9482be8b5d73ba6a407a208c00af92ccc478ff96`。
-
-代码基线与最终 head 均完整通过：
-
-- 903 项 pytest；
-- RAG K1 固定 corpus；
-- Ruff、项目打包、detect-secrets；
-- expanded mypy baseline gate；
-- 全量前端测试与 TypeScript / Vite production build；
-- desktop、mobile、360×520 Golden Journeys；
-- 真实 FastAPI + SQLite 浏览器门禁。
-
-
-### 7.4 PR #113 代码基线
-
-- 分支：`agent/remove-legacy-news-models`；
-- 有效红边界 commit：`b400b2db38393882c2db52aba38ee513ed9366d6`；
-- 有效红 CI：run `31176698695`，905 项通过、1 项按预期失败；
-- 红边界 offender 仅位于 `src/api/__init__.py`、`src/api/models/__init__.py`、`src/api/models/news.py` 与 `src/application/helpers.py`；
-- 最终代码 head：`0d634dbcd0bd66bdab919efc9ba7cbbde69110cd`；
-- 最终代码 CI：run `31177047560`，结论 `success`；
-- 最终 PR head：`bc3c06f043eae5f195516741c88a45205e21864b`；
-- 最终 PR CI：run `31177513884`，结论 `success`；
-- 功能 merge SHA：`39e5efe91a75099b6cf5646aa9060d2945b5604c`。
-
-最终代码基线完整通过：
-
-- 全量 pytest，包括旧模型不得回流与现役 News 合同保护边界；
-- RAG K1 固定 corpus；
-- Ruff、项目打包、detect-secrets；
-- expanded mypy baseline gate；
-- 全量前端测试与 TypeScript / Vite production build；
-- desktop、mobile、360×520 Golden Journeys；
-- 真实 FastAPI + SQLite 浏览器门禁。
-
-删除范围严格限定为 10 个旧阶段 Pydantic 模型、两层兼容 re-export 和无路由 owner 的 `news_result_payload`；没有删除或改写现役 durable NewsRun、NewsLookup、ResearchRun、WebLookupRun 合同。
-
-## 8. 后续任务
-
-### P2-C：兼容层退出
-
-1. PR #112 已退出六条旧 News 410 tombstone，并由永久边界阻止旧路径回流；
+1. PR #112 已移除六条旧 News tombstone route；旧调用现在得到真正 404，而不是兼容 410；
 2. PR #113 已退出 10 个旧 News 阶段模型、两层兼容导出和 `news_result_payload`，现役 durable / lookup / research 合同保持不变；
 3. PR #114 已证明旧 `group / tools / timeline` drawer surface 无持久化或新 UI owner，并退出该兼容适配；
 4. `group / tools / timeline` 继续作为实验能力 ID，由 ExtensionRuntime 的 group / tool / workflow controller 拥有，实验室入口仍默认休眠并按需加载；
 5. P2-C 三个删除切片均保持 API、WorkspacePersistence、普通模式、Chromium Golden Journeys 与真实 FastAPI + SQLite 闭环不变，兼容层退出阶段完成。
 
-### P2-D：源码学习与验证增强
+## 7. P2-D：源码学习与验证增强
 
-- 增强 GitHub symbol mapping 与 CI association，但继续写入通用 EvidenceSnapshot；
+### 7.1 P2-D-1：GitHub symbol mapping + CI association（进行中）
+
+Draft PR #115 已实现第一版：
+
+- 对 GitHub source search 的宽 chunk 先做确定性 lexical match，优先把 identifier token 收窄到真实命中行；
+- 将命中行映射到当前 snapshot 内**最内层**包含该位置的 parser-backed source symbol，不依赖 LLM 猜测；
+- 无包含 symbol 时保留 path + line 的保守 fallback，不伪造 symbol；
+- 复用现有 `RepositoryStructureIndex`、`evidence_for_range` 与 `pin_evidence_refs`，不新增第二套源码 parser；
+- 将现有 `PaginatedGitHubChecksService` 的 commit-pinned checks 投影进源码搜索结果，不新增第二个 CI provider；
+- CI payload 的 commit SHA 必须与 EvidenceSnapshot SHA 精确一致，避免“代码来自 A commit、CI 却来自 B commit”的伪关联；
+- CI success / failure / pending / unavailable 与源码 evidence validity 分离：CI 失败不应让已经固定的源码证据本身失效；
+- normal live snapshot path 自动带 CI；自定义 snapshotter 不应静默触发 live provider 调用，测试和特殊调用方需显式注入或请求 CI。
+
+已增加的验证覆盖：
+
+- identifier-token query → exact match line；
+- 无 lexical hit → conservative chunk fallback；
+- nested symbol → innermost containing symbol；
+- 无 symbol → `None` fallback；
+- exact-SHA CI enforcement；
+- success / failure / pending 状态标准化；
+- provider failure / no checks → unavailable；
+- end-to-end source search symbol pinning；
+- snapshot SHA 精确传给 CI service；
+- CI failure 不覆盖 source evidence validity。
+
+当前阻塞：
+
+- PR #115 仍为 Draft；
+- 当前 head：`b1ae5623d716275b5f998e104b3b1bc5b218f1dd`；
+- GitHub Actions run `31192055532`、`31192056375` 均完成但结论为 failure；
+- 因此上述实现目前只能视为 **attempted / partial**，不能写成 committed learning truth，也不能进入下一切片前宣称 P2-D-1 完成。
+
+### 7.2 P2-D 后续切片
+
+PR #115 绿色并合并后，按顺序推进：
+
+1. Firefox 抽样；
+2. WebKit 抽样；
+3. 至少一台实体手机验证：输入法、滚动、drawer、实验室、恢复流程；
+4. 验证结果继续回写现有 EvidenceSnapshot / 当前状态文档，不新建并列真值。
+
+## 8. 当前缺口与执行顺序
+
+### P0：先恢复 P2-D-1 绿色边界
+
+1. 定位 PR #115 当前 GitHub Actions failure 的真实失败步骤；
+2. 修复时不得放宽 exact-SHA、symbol owner 或 evidence-validity 边界来换绿；
+3. 在同一实现文件树上完成完整 CI；
+4. 只有 PR #115 合并后，才能把 P2-D-1 从 attempted / partial 改写为 committed。
+
+### P1：跨浏览器与实体设备验证
+
 - Firefox 抽样；
 - WebKit 抽样；
-- 至少一台实体手机验证输入法、滚动、drawer、实验室与恢复流程；
-- Chromium 全量 Golden Journeys 与真实 FastAPI + SQLite 门禁继续作为主回归基线。
+- 实体手机窄屏、输入法、滚动、drawer、实验室与恢复；
+- 对浏览器差异优先验证真实行为，不依赖脆弱 computed-style 字符串。
 
-## 9. 阶段判断
+### P2：冻结项继续冻结
 
-P2-C 三个切片已完成代码与回归基线，兼容层退出阶段收口：
+- Provider replay 扩展；
+- 生产 claim UI；
+- 群聊能力扩张；
+- 新闻产品化；
+- 可执行 agent。
 
-- 10 个旧 News 阶段 Pydantic 模型已从 owner 模块删除；
-- `src/api/models/__init__.py` 与 `src/api/__init__.py` 不再提供这些兼容导出；
-- 红边界发现的 `news_result_payload` / `_news_result_payload` 无路由 owner 残留已同步删除；
-- `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 继续受到永久测试保护；
-- durable `/news/runs*`、SQLite NewsRun、恢复语义、前端和真实浏览器闭环均未回归；
-- 旧 Extension capability drawer surface 已退出，`lab` 成为唯一实验 drawer；
-- group / tool / workflow controller、恢复端口和按需加载继续由 ExtensionRuntime 拥有；
-- 最终代码基线 `ffed392c8fccdf8aa93a4f2d57164a89199be726` / CI `31181998973` 完整通过；窄屏长 URL 门禁已改为直接验证换行与无横向溢出行为。
-
-PR #114 状态同步 CI 通过后即可合并；合并后 P2-C 结束，进入 P2-D 源码学习与验证增强。
+这些能力只有在当前源码学习证据链和多端验证闭环稳定后才重新评估。
