@@ -1,62 +1,7 @@
-# 未来方向
+# FUTURE — 非承诺想法入口
 
-> 本文件记录当前版本之后的优先增强方向。  
-> 当前开发阶段：`v0.8.0` 已落地，下一阶段主目标定位为 `v0.8.1`。
+> Future ideas 不是 roadmap，也不拥有优先级。当前阶段与执行顺序只看 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
+>
+> 历史 FUTURE 正文：[`docs/archive/root/FUTURE.md`](docs/archive/root/FUTURE.md)
 
----
-
-## v0.7.9 重点
-
-### 1. UI 交互打磨
-
-优先考虑：
-
-1. 搜索按钮 cooldown
-2. 更明确的 running 状态反馈
-3. 上次搜索结果复用
-4. 网络失败 fallback 话题
-
-### 2. 引用与来源体验
-
-优先考虑：
-
-1. 在 UI 中折叠展示来源
-2. 链接支持点击打开
-3. 支持查看本轮来源详情
-4. 支持手动清理搜索缓存
-
-### 3. 测试覆盖扩展
-
-优先考虑：
-
-1. UI 模块基础测试覆盖（sidebar/chat_panel/status_bar 等）
-2. LLM 调用集成测试（含 mock）
-3. 内存写入/备份/导出测试补充
-4. session_logger 无界增长写入上限
-
----
-
-## 中期方向
-
-### 1. 会话状态管理
-
-如果 Streamlit session_state 持续膨胀：
-
-1. 会话数量上限 + TTL 淘汰
-2. 历史会话懒加载
-
-### 2. 运行态存储升级
-
-如果 Windows 文件锁仍偶发，可考虑：
-
-1. JSON 运行态
-2. sqlite 状态存储
-3. 更细粒度的写入节流
-
-### 3. 更强的搜索能力
-
-如果后续不仅是资讯检索，可考虑：
-
-1. 更稳定的新闻 API
-2. 更通用的网页搜索 API
-3. PDF / 论文 / 技术页面专门处理链路
+未来想法可以作为候选输入进入 GrillMe/规划，但只有被正式固定并写入稳定 semantic docs / `PROJECT_STATUS.md` 后，才成为有效设计或执行项。

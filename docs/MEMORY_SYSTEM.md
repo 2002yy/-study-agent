@@ -1,67 +1,49 @@
 # Memory System
 
-## Overview
+> 记忆系统帮助保持用户背景与学习连续性，但**不拥有第二套学习真值**。当前进度看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。
 
-File-based long-term memory using Markdown files, managed through a truth hierarchy. No vector store or external database — designed for zero-infrastructure local operation.
+## 1. 记忆与学习真值不是同一件事
 
-## Truth Hierarchy
+```text
+Memory
+- 用户偏好
+- 稳定背景事实
+- 会话摘要
+- 角色关系/互动上下文
 
-```
-config/runtime_state.yaml  (authoritative)
-       │
-       ▼
-memory/internal_state.md   (human-readable view, synced)
-memory/interaction_settings.md
-chat/wechat_state.md
-```
-
-`mode_manager.py` syncs views from YAML on read. Any write goes through `_write_runtime_state()` which updates YAML, then propagates to view files.
-
-## File Layout
-
-```
-memory/
-├── index.md                Learner identity, preferences
-├── current_focus.md        Active learning focus
-├── summary.md              Session summaries
-├── learner_profile.md      Learning style, strengths
-├── progress.md             Versioned progress
-├── project_context.md      Project description
-├── task_board.md           Task tracking
-├── archive_summary.md      Archived history
-├── agent.md                Agent notes
-├── system_detail.md        Technical context
-├── internal_state.md       Runtime state view (synced)
-├── interaction_settings.md Interaction state view (synced)
-└── pending_updates/
-    ├── wechat_memory_candidates.md    LLM-extracted candidates
-    └── wechat_memory_candidates.json  Structured candidate data
+Learning Truth
+- LearningGoal
+- LearningClaim / Revision
+- SourceEvidence
+- UnderstandingEvidence
+- Hypothesis / NextStep
 ```
 
-## Memory Operations
+记忆内容可以帮助解释和恢复，但不能通过“摘要里写了用户懂了”把 Claim 自动变为 confirmed。
 
-### Reading
+## 2. 单一 owner
 
-`memory.py:_read_text_file_cached(path, signature) → str`
+- durable runtime / learning truth：应用服务 + SQLite/正式领域持久化；
+- memory files/records：记忆 owner；
+- Persona：只消费记忆，不独立维护 mastery truth；
+- Markdown export：人类可读，不作为并发写入 owner。
 
-- LRU-cached (64 entries), invalidated on file signature change
-- Context-mode selection via `CONTEXT_FILE_GROUPS` (see CONTEXT_TIERS.md)
-- `extract_core_section()` keeps the first core lines for lightweight reads
+## 3. 写入原则
 
-### Writing
+- planned / attempted / partial / failed 不覆盖 committed truth；
+- 模型提出的 memory candidate 在 commit 前只是候选；
+- 批量写入必须可明确区分成功、部分成功、失败；
+- 用户可审计长期记忆的来源与用途；
+- 角色短期“这轮解释似乎有效”只属于 ephemeral pedagogy context。
 
-All writes go through `memory_writer.py` → `safe_writer.py`:
+## 4. 与 Understanding 的边界
 
-1. **Preview**: Generate update suggestions → user reviews
-2. **Confirm**: User selects which updates to apply
-3. **Write**: `safe_write_text()` with atomic temp-file + retry + backup
-4. **Flush**: Updated context available on next memory bundle refresh
+`confirmed` 需要用户产生的 UnderstandingEvidence。Memory 可以记录“用户自评已理解”，但这只代表 self-reported，不等价于 verified mastery。
 
-### Group Chat Memory Extraction
+## 5. 与 Resume 的边界
 
-`wechat_memory.py` extracts memory candidates from group chat discussions:
+学习恢复优先使用 `LearningResumePoint`（Goal / confirmed / unresolved / NextStep / source context）。Conversation summary 是辅助材料，不能取代语义恢复点。
 
-- Triggered by configurable `memory_capture_mode` (manual/auto)
-- LLM extracts structured candidates from chat history
-- Results stored as Markdown + JSON in `memory/pending_updates/`
-- Candidates reviewed before committing to main memory files
+## 6. 与多角色的边界
+
+Nahida / March 7th / Keqing / Firefly 等 Persona 共享同一学习真值。角色可以有不同措辞、案例和短期互动观察，但不能形成各自版本的 Claim、mastery 或 Evidence validity。

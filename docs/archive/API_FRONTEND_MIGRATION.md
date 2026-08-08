@@ -1,0 +1,122 @@
+# API Frontend Migration
+
+> Current status is maintained in
+> [ARCHITECTURE_STATUS.md](ARCHITECTURE_STATUS.md). This document describes API
+> contracts and historical migration details.
+
+This document records the completed migration from the former Streamlit
+baseline to the React frontend. The old `src/ui` layer has been removed; React
+uses these APIs instead of local fake state.
+
+## Principles
+
+- Backend owns business state, file writes, model calls, memory safety, and audit logs.
+- React owns presentation, interaction, optimistic loading, and explicit confirmations.
+- File-writing APIs must expose preview/commit or clear side-effect names.
+- Long-running model flows should stream or expose staged APIs instead of one opaque button.
+
+## Current API Surface
+
+| Area | Endpoint | Status | Side effect | Frontend use |
+| --- | --- | --- | --- | --- |
+| Health | `GET /health` | Existing | Read-only | API status |
+| Runtime | `GET /runtime/settings` | P0 implemented | Read-only | Hydrate role, mode, model, performance, memory settings |
+| Runtime | `PATCH /runtime/settings` | P0 implemented | Writes `config/frontend_settings.yaml` and runtime mode state | Persist sidebar settings |
+| Roles | `GET /roles` | P0 implemented | Read-only | Role selector metadata |
+| Roles | `GET /roles/{role_id}` | P0 implemented | Read-only | Role prompt preview |
+| Memory | `GET /memory` | P0 implemented | Read-only | Memory mode, safe mode, focus/progress/summary previews |
+| RAG | `GET /rag/status` | Existing | Read-only | Knowledge base status |
+| RAG | `POST /rag-runs/upload` | Sealed | Persists append run and index version | `uploadController` |
+| RAG | `POST /rag-runs/rebuild` | Sealed | Persists rebuild run and index version | `uploadController` |
+| RAG | `GET /rag-runs/{id}` | Sealed | Read-only | Refresh recovery |
+| KnowledgeBase | `GET /knowledge-base/documents` | Sealed | Read-only | Document list and index version |
+| KnowledgeBase | `DELETE /knowledge-base/documents/{id}` | Sealed | Deletes document and advances index version | Document lifecycle |
+| RAG | `POST /rag/upload` | Temporary compatibility | Delegates to durable RagRun workflow | Legacy clients |
+| RAG | `POST /rag/index` | Existing | Writes index | Rebuild index from paths |
+| RAG | `POST /rag-runs/query` | Sealed | Persists query request/result | `ragController` |
+| RAG | `POST /rag/query` | Temporary compatibility | Delegates to durable RagRun workflow | Legacy clients |
+| Chat | `POST /chat` | Existing | Writes session logs | Non-streaming single chat fallback |
+| Chat | `POST /chat/stream` | Sealed | Writes committed turns through ChatService | Streaming single chat |
+| Memory | `POST /memory-runs` | Sealed | Freezes updates, hash and preview | `memoryController` |
+| Memory | `POST /memory-runs/{id}/commit` | Sealed | Commits frozen server payload only | Hash-locked commit |
+| Memory | `GET /memory-runs/{id}` | Sealed | Read-only | Refresh recovery |
+| Memory | `POST /memory/preview` | Temporary compatibility | Creates a MemoryRun and returns legacy shape | Legacy clients |
+| Memory | `POST /memory/commit` | Temporary compatibility | Creates and immediately commits a MemoryRun | Legacy clients |
+| Sessions | `GET /sessions` | Existing | Read-only | Session list |
+| Sessions | `POST /sessions/{session_id}/flush` | Existing | Flushes current session log | Manual flush |
+| Tools | `GET /tools` | Existing | Read-only | Tool registry |
+| Tools | `POST /tool-runs` | Sealed | Persists validated tool name, frozen args, hash, and preview | Create server-owned ToolRun |
+| Tools | `POST /tool-runs/{run_id}/call` | Sealed | Executes only persisted args and records the result | Confirmed tool execution by ID |
+| Tools | `GET /tool-runs/{run_id}` | Sealed | Read-only | Restore preview, running, failure, or result state |
+| Tools | `GET /tool-runs` | Sealed | Read-only | Recent ToolRun recovery |
+| Tools | Legacy preview/call routes | Retired (`410`) | None | Legacy clients must migrate to ToolRun IDs |
+| Workflows | `GET /workflows/runs` | Existing | Read-only | Workflow timeline |
+| Workflows | `GET /workflows/runs/{run_id}` | Existing | Read-only | Workflow detail |
+| Assets | `GET /assets/*` | Existing | Read-only | Role avatars and UI media |
+| WeChat | `GET /wechat` | Implemented compatibility route | Read-only | Current group state |
+| WeChat | `POST /wechat/reset` | Implemented compatibility route | Archives/clears group files | New group |
+| WeChat | `POST /wechat/mark-read` | Implemented compatibility route | Clears unread file | Mark read |
+| WeChat | `POST /wechat/opening` | Implemented compatibility route | Writes group opening | Generate group opening |
+| WeChat | `POST /wechat/message` | Implemented compatibility route | Writes user/group messages | Non-streaming group reply |
+| WeChat | `POST /wechat/search` | Implemented compatibility route | Read-only | Search group transcript |
+| Web lookup | `POST /web-lookup-runs` | Sealed | Creates and persists a WebLookupRun | Search web/news for single chat context |
+| Web lookup | `GET /web-lookup-runs/{id}` | Sealed | Read-only | Refresh recovery |
+| Web lookup | `GET /web-lookup-runs` | Sealed | Read-only | Recent lookup recovery |
+| Web lookup | `POST /news/lookup` | Temporary compatibility | Delegates to WebLookupService and persists a run | Legacy clients |
+| News | `POST /news/runs` | Sealed | Creates and immediately returns a server-owned `NewsRun` ID | Start a recoverable news workflow |
+| News | `POST /news/runs/{run_id}/search` | Sealed | Network fetch; persists results on the existing Run | Stage 1 search |
+| News | `POST /news/runs/{run_id}/enrich` | Sealed | Reads article text when runtime allows | Stage 2 article enrichment |
+| News | `POST /news/runs/{run_id}/digest` | Sealed | Model call; persists digest and sources | Stage 3 digest |
+| News | `POST /news/runs/{run_id}/discuss` | Sealed | Model call and atomic Group bundle write | Stage 4 group discussion |
+| News | `GET /news/runs/{run_id}` | Sealed | Read-only | Restore authoritative stage after refresh or failure |
+| News | `GET /news/runs` | Sealed | Read-only | Recent NewsRun recovery |
+| News | `/news/round`, `/news/search`, `/news/enrich`, `/news/digest`, `/news/discuss` | Retired (`410`) | None | Legacy clients must migrate to NewsRun IDs |
+
+## Gaps To Close
+
+| Priority | Endpoint | Purpose | Notes |
+| --- | --- | --- | --- |
+| P0 | `POST /after-session/preview` | Generate after-session candidates | Should not write memory; can call LLM |
+| P0 | `POST /after-session/commit` | Commit selected after-session updates | Must respect `safe_mode` and `memory_mode` |
+| P1 | `GET /stats` | Usage/study stats | Read-only |
+| P1 | `POST /stats/reset` | Reset stats | Destructive write, needs confirmation |
+| P1 | `GET /health/full` | Deep health check | Read-only, can inspect provider/config |
+
+Session detail/archive and KnowledgeBase document lifecycle are implemented;
+their stale entries were removed from this gap table.
+
+## Retired Streamlit Entrypoints
+
+| Removed file/function | Replacement |
+| --- | --- |
+| `src/ui/sidebar.py` runtime controls | `/runtime/settings`, `/roles`, `/memory` |
+| `src/ui/chat_panel.py` single chat | `/chat/stream` |
+| `src/ui/after_session_panel.py` after-session flow | `/after-session/preview`, `/after-session/commit` |
+| `src/ui/wechat_panel.py` group lifecycle and messages | server-owned GroupThread routes and `groupChatController` |
+| `src/ui/wechat_news_panel.py` staged news round | `/news/runs`, then `/news/runs/{run_id}/*` |
+| `src/ui/rag_panel.py` knowledge base controls | `/rag-runs/*` and `/knowledge-base/documents` |
+
+## Confirmation Rules
+
+- Read-only: no confirmation needed.
+- Writes session/chat logs: allowed from normal chat actions.
+- Writes memory files: require preview/commit or an explicit user confirmation in UI.
+- Deletes/resets/archive actions: require explicit button intent and clear labels.
+- Network article reads: respect `safe_mode` and runtime profile; surface skipped reasons.
+
+## NewsRun Final Seal
+
+- Creation and search are separate requests, so the client owns the real Run ID before any network work starts.
+- Search failures keep the same Run at `created/failed`; retry reacquires the stage lease instead of creating an orphan Run.
+- Later stages accept only the Run ID. The server owns items, digest, source block, discussion, warnings, and stage transitions.
+- The React controller restores `GET /news/runs/{run_id}` after a known-Run stage failure and immediately stores automatic enrich results before digest.
+- Discuss reserves `group_thread_id` on the NewsRun before generation and the atomic Group bundle write. A retry therefore cannot drift to a different GroupThread after a process interruption.
+
+## ToolRun Final Seal
+
+- `POST /tool-runs` validates and previews once, then persists the canonical tool name, arguments, and deterministic argument hash before returning the ToolRun ID.
+- `POST /tool-runs/{run_id}/call` has no argument payload. The service reloads the frozen server arguments and verifies their hash before execution.
+- SQLite compare-and-set ownership allows only one call owner. Stale running operations recover to a visible failed state without inventing a result.
+- Unknown or disabled tools are persisted as blocked ToolRuns; execution failures retain their reason and elapsed time for refresh recovery.
+- Workflow JSONL remains a best-effort audit mirror. Audit write failure cannot overturn a successfully committed ToolRun result.
+- React persists the active ToolRun ID and restores it through `GET /tool-runs/{run_id}`. Tool orchestration and parameter invalidation live in `toolController`, not `App.tsx`.

@@ -1,48 +1,41 @@
-# Performance
+# Performance & Cache Contracts
 
-## Caching
+> 性能优化不能改变 truth semantics。
 
-| Cache | Location | TTL | Invalidation |
-|---|---|---|---|
-| Memory file reads | `memory.py:_read_text_file_cached` | LRU-64 | File signature change |
-| Runtime modes | `mode_manager.py:load_runtime_modes` | 30s `@st.cache_data` | Time + write |
-| Article text | `article_fetcher.py:_ARTICLE_CACHE` | 1800s | Time + LRU-32 |
-| RSS results | `rss_fetcher.py:_CACHE` | 600s per query | Time |
-| LLM client | `llm_client.py:_client_signature` | Session | Config change |
+## 1. P2-D Source cache
 
-## Fragment Rerun Strategy
+```text
+repository + exact commit
+→ SourceSnapshot
+→ RepositoryStructureIndex
+→ deterministic symbol mapping
+```
 
-`app.py` splits the UI into `@st.fragment` boundaries:
+同一 exact commit 的 snapshot / structure index 应强缓存并复用；普通 query 不重复重建同一源码事实。
 
-- Sidebar settings changes → `st.rerun()` (full page) to refresh all panels
-- Status bar → isolated fragment, updates independently
-- Chat panel → isolated fragment, user messages only rerun here
-- After-session panel → isolated fragment
+## 2. CI Observation cache
 
-This prevents unnecessary re-renders of the entire page on every interaction.
+CI 是时间变化的 ValidationObservation：
 
-## Performance Budget
+- 与 SourceSnapshot cache 分离；
+- 使用短 TTL（第一版可采用约 10 分钟级默认值，具体值属于配置而非领域真值）；
+- 支持显式 refresh/retry；
+- 普通源码搜索不应因 CI refresh 阻塞；
+- CI provider failure 返回 unavailable，不使 SourceEvidence 失败；
+- 当前 P2-D-1 不持久化完整 CI history。
 
-The main user-facing LLM paths have `max_tokens` bounds via `src/performance_budget.py`. Three tiers:
+## 3. Request context budget
 
-- **fast**: Low token consumption, shorter conversations (700 chat, 16 history lines)
-- **standard**: Balanced (1100 chat, 28 history lines)  
-- **deep**: Full context (1600 chat, 40 history lines)
+优先保留：Current Goal → committed truth → prerequisite evidence → directly relevant evidence。先裁弱候选、重复 chunks、旧对话、Persona 装饰。
 
-Covered paths include single chat, WeChat opening/reply/news discussion, and news digest generation. Some auxiliary calls still rely on `llm_client.py` task defaults or environment/global defaults rather than `performance_budget.py` directly, so this is not yet a strict "every LLM call" guarantee.
+## 4. Evidence bound
 
-## Batch Flush
+每个 Claim 1 Primary + 0–4 Supporting 本身也是性能边界；如果一个 Claim 需要十几份证据，优先拆 Claim 而不是扩大 context。
 
-`src/session_logger.py` buffers session entries and flushes in batches:
+## 5. UI 性能
 
-| Mode | Flush interval (entries) |
-|---|---|
-| fast | 4 |
-| standard | 2 |
-| deep | 2 |
+Evidence 三级渐进披露，普通学习界面不预渲染全部 SHA/CI/revision details。移动端优先保持输入、滚动、drawer、恢复路径稳定。
 
-Each flush uses `safe_write_text` for atomicity. Stale session warning at 2 hours.
+## 6. Measurement
 
-## Diff Algorithm
-
-Memory update diffing uses set-based operations (O(n)) rather than line-by-line comparison (O(n×m)), computed from `file_signature()` hashes.
+性能优化必须同时观察：首 token/首结果延迟、provider 调用数、cache hit、上下文体积、失败降级，以及是否破坏 exact-source / owner / recovery invariant。

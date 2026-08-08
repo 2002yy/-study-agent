@@ -1,79 +1,49 @@
 # Model Routing
 
-## Multi-Provider LLM Client
+> 模型路由只决定“由哪个 provider/model 执行什么任务”，不拥有学习真值。
 
-`src/llm_client.py` provides a unified interface across 5 LLM providers:
+## 1. 路由职责
 
-| Provider | Env Prefix | Default Base URL |
-|---|---|---|
-| DeepSeek | `DEEPSEEK_*` | `https://api.deepseek.com/v1` |
-| OpenAI | `OPENAI_*` | — |
-| OpenRouter | `OPENROUTER_*` | `https://openrouter.ai/api/v1` |
-| SiliconFlow | `SILICONFLOW_*` | `https://api.siliconflow.cn/v1` |
-| Local | `LOCAL_*` | `http://127.0.0.1:8000/v1` |
+允许路由影响：
 
-Selection via `LLM_PROVIDER_PROFILE` env var. Client instances are cached by config signature and automatically rebuilt when settings change.
+- 成本/延迟；
+- 上下文容量；
+- 是否支持 vision/tool/schema；
+- 教学表达质量；
+- 某类任务的执行模型。
 
-## Model Profiles
+禁止路由影响：
 
-Two model tiers:
+- Claim 是否为真；
+- Evidence 是否有效；
+- 用户是否 confirmed；
+- source freshness；
+- durable Goal / NextStep history。
 
-- **flash**: Fast, low-cost model for daily chat and group replies
-- **pro**: Higher-quality model for summaries, routing, and complex reasoning
+## 2. Truth boundary
 
-Resolution logic (`src/wechat_generator.py:_resolve_model_profile`):
-
+```text
+Model/Provider
+   ↓ proposes / explains / extracts
+Application truth owner
+   ↓ validates / commits
+Learning domain state
 ```
-selected_model = pro     →  pro
-selected_model = flash   →  flash
-performance_mode = deep  →  pro
-performance_mode = fast  →  flash
-default                  →  flash
-```
 
-## LLM Router
+更换模型不得导致“同一已提交 Claim 因 Persona/模型不同而变成另一套真值”。
 
-`src/llm_router.py` performs LLM-based routing when `route_mode == "hybrid"` and `performance_mode != "fast"`. It calls the LLM with a JSON prompt to determine the best role, mode, and model for a user query.
+## 3. 多角色
 
-Valid outputs:
+Persona 可以选择不同模型或教学策略，但所有角色读取同一 LearningClaim / Evidence / Understanding state。Persona 不能自行放宽 pass 标准。
 
-- **role**: march7 (casual), keqing (project), nahida (concept), firefly (wrap-up)
-- **mode**: 普通, 苏格拉底, 费曼, 项目
-- **model**: flash, pro
-- **confidence**: high, medium, low
+## 4. Provider failure
 
-`论文` and `概念地图` are task intents now, not learning modes. Paper-like requests route to `项目` with Keqing; concept-structure requests route to Nahida with an active learning mode chosen from the list above.
+模型/provider 失败只说明本次执行失败或 unavailable，不得自动使已有 SourceEvidence/Claim invalid。Retry/fallback 产生的结果仍需经过同一领域提交规则。
 
-“为什么、本质、机制、原理” express desired content depth and route to a
-normal, deep explanation. Automatic routing selects `苏格拉底` only for an
-explicit learning-behavior intent such as “别直接告诉我，引导我思考”. A manual
-Socratic selection always activates the protocol.
+## 5. External evidence provider
 
-## Stateful pedagogy routing
+GitHub / RAG / Web 与 LLM provider 是不同概念：前者提供 evidence，后者负责生成/分析。任何 LLM 都不能凭自己的 confidence 替代 evidence provenance。
 
-`ChatService` turns the visible mode into a protocol-specific
-`PedagogyTurnPlan`. For Socratic rediscovery, each turn selects one cognitive
-move and an evidence disclosure level. External facts (dates, measured values,
-API/version names, paper results) are supplied explicitly by the library;
-derivable answers can be withheld while examples, counterexamples, or bounded
-hints are disclosed.
+## 6. 配置治理
 
-The current phase is stored in `chat_threads.learning_state`; the plan,
-before/after state, and evidence policy are stored in
-`chat_turns.pedagogy_snapshot`. Session restoration therefore resumes the same
-discovery phase instead of relying on trimmed chat history.
-
-## Performance Budget
-
-Main chat, WeChat, and news LLM paths are bounded by `src/performance_budget.py`:
-
-| Call Point | Fast | Standard | Deep |
-|---|---|---|---|
-| Single chat | 700 | 1100 | 1600 |
-| Group reply | 520 | 760 | 1050 |
-| Opening | 420 | 620 | 850 |
-| News digest | 650 | 950 | 1300 |
-| News discussion | 520 | 760 | 1000 |
-| History lines | 16 | 28 | 40 |
-
-Auxiliary calls such as memory-candidate extraction may still rely on `llm_client.py` task defaults or environment/global defaults. Treat full coverage of every LLM call as a remaining hardening item, not a completed invariant.
+模型/provider 配置必须由单一配置 owner 解析和验证；UI、脚本与 runtime 不维护互相漂移的第二套默认规则。
