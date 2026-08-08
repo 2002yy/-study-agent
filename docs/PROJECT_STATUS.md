@@ -84,7 +84,7 @@
 - `NewsRun* / NewsLookup* / ResearchRun* / WebLookupRun*` 现役合同、durable `/news/runs*`、SQLite NewsRun 与恢复语义保持不变。
 - PR #114：旧 Extension drawer surface 兼容适配退出；
 - 审计确认 `group / tools / timeline` 仍是现役实验能力 ID 与 controller owner，不能删除；真正无 owner 的是旧 drawer surface 恢复适配。`WorkspacePersistence` 不持久化 `activeDrawer`，新 UI 只打开 `lab`；
-- 有效红边界 commit `4a3e6138f7dbafb9a834ad3a8fdb232bae9ab785`，CI run `31179197610`：274 项通过、2 项按预期失败，且“现役 controller 必须保留”边界通过；
+- 有效红边界 commit `4a3e6138f7dfafb9a834ad3a8fdb232bae9ab785`，CI run `31179197610`：274 项通过、2 项按预期失败，且“现役 controller 必须保留”边界通过；
 - 实现后 run `31179428611` 发现旧 `useExtensionRuntimeBoundary.test.ts` 仍断言 `EXTENSION_DRAWERS`；同步改为 capability 合同；
 - head `a8f2533d945d182ee545cac2ac41625b2b5547e4` / run `31179663893` 中 276 个 Vitest 已全部通过，但 TypeScript build 进一步抓到 reducer 测试仍把 `"group"` 当作 `DrawerId`；改为真实 `lab` surface，不使用 cast 绕过类型；
 - Extension drawer 代码基线 head `c65189c9c38e9b09abd11803d875a10e22b47a58`，CI run `31179908482` 完整通过；
