@@ -93,11 +93,14 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   const successArtifacts: string[] = [];
   const conversation = page.getByRole("region", { name: "学习对话" });
   const composer = page.getByLabel("输入学习问题");
-  const longLink = page.locator('.markdown-message a[href^="https://example.com/knowledge/"]');
-  const codeBlock = page.locator(".markdown-message pre").first();
+  const longLink = conversation.locator(
+    '.markdown-message a[href^="https://example.com/knowledge/"]',
+  );
+  const codeBlock = conversation.locator(".markdown-message pre").first();
 
   await expect(page.getByRole("heading", { name: "学习工作台" })).toBeVisible();
   await expect(longLink).toHaveText(LONG_URL);
+  await expect(longLink).toBeVisible();
   await expect(codeBlock).toBeVisible();
   expect(await noHorizontalOverflow(page)).toBe(true);
 
@@ -109,18 +112,25 @@ test("360x520 keeps complex content, IME input and real scroll recovery usable",
   await longLink.scrollIntoViewIfNeeded();
   const linkMetrics = await longLink.evaluate((element) => {
     const messageBody = element.closest(".message-body") as HTMLElement | null;
-    const linkRect = element.getBoundingClientRect();
     const bodyRect = messageBody?.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const textRects = Array.from(range.getClientRects()).filter(
+      (rect) => rect.width > 0 && rect.height > 0,
+    );
+    const lineTops = new Set(textRects.map((rect) => Math.round(rect.top)));
     return {
-      linkLeft: linkRect.left,
-      linkRight: linkRect.right,
+      linkLeft: textRects.length > 0 ? Math.min(...textRects.map((rect) => rect.left)) : 0,
+      linkRight: textRects.length > 0 ? Math.max(...textRects.map((rect) => rect.right)) : 0,
       bodyLeft: bodyRect?.left ?? 0,
       bodyRight: bodyRect?.right ?? 0,
       bodyScrollWidth: messageBody?.scrollWidth ?? 0,
       bodyClientWidth: messageBody?.clientWidth ?? 0,
-      linkLineCount: element.getClientRects().length,
+      linkRectCount: textRects.length,
+      linkLineCount: lineTops.size,
     };
   });
+  expect(linkMetrics.linkRectCount).toBeGreaterThan(0);
   expect(linkMetrics.linkLineCount).toBeGreaterThan(1);
   expect(linkMetrics.bodyScrollWidth).toBeLessThanOrEqual(linkMetrics.bodyClientWidth + 1);
   expect(linkMetrics.linkLeft).toBeGreaterThanOrEqual(linkMetrics.bodyLeft - 1);
