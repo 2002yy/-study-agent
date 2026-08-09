@@ -263,6 +263,13 @@ def get_learning_semantic_closure_service():
 
 
 @lru_cache(maxsize=1)
+def get_learning_resume_service():
+    from src.application.learning_resume import LearningResumeService
+
+    return LearningResumeService(get_learning_truth_repository())
+
+
+@lru_cache(maxsize=1)
 def get_web_lookup_service():
     from src.application.web_lookup_service import WebLookupService
 
@@ -290,6 +297,7 @@ def reset_runtime_repository_cache() -> None:
     get_provider_cache_repository.cache_clear()
     get_github_snapshot_service.cache_clear()
     get_github_snapshot_repository.cache_clear()
+    get_learning_resume_service.cache_clear()
     get_learning_semantic_closure_service.cache_clear()
     get_learning_outcome_commit_service.cache_clear()
     get_learning_truth_repository.cache_clear()
