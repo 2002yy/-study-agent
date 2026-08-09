@@ -45,10 +45,10 @@ learner_profile 候选必须 learner_pending=true，不得诊断心理、健康�
 
 对于源码学习，可以额外输出最多一个 durable_learning_candidate，但必须同时满足：
 1. summary_kind 必须是 learning_summary；
-2. final_pedagogy_evaluation.learner_input 中存在一个具体、可核验的源码事实陈述，而不是“懂了/会了”之类自述；
+2. final_pedagogy_evaluation.final_decision 必须是 accept，且 learner_input 中存在一个具体、可核验的源码事实陈述，而不是“懂了/会了”之类自述；
 3. github_learning_sources 中存在与该陈述直接相关的 commit-pinned source；
 4. source_ref 必须原样选择 github_learning_sources 里的 source_ref；不要自己填写 repo/query/commit；
-5. claim_text 只能提炼用户这次被评估的事实陈述，不能把助手新解释、confirmed_points 或模型推测冒充用户理解；
+5. 若 semantic_result.claims 非空，claim_text 必须原样复制其中一条 claim；否则只有 deterministic_result.is_claim=true 时才允许原样复制 learner_input。不要改写、提炼或补充；
 6. claim_kind 只能是 mechanism|boundary|invariant|decision_relevant_fact；证据是否足够由后端重新 convergence 决定，你不能宣称 confirmed/mastered。
 不满足任一条件时 durable_learning_candidate 必须为 null。
 
@@ -68,7 +68,7 @@ learner_profile 候选必须 learner_pending=true，不得诊断心理、健康�
   ],
   "durable_learning_candidate": {
     "source_ref": "github_learning_sources 中的 source_ref",
-    "claim_text": "用户本轮明确表达、等待源码证据收敛的事实命题",
+    "claim_text": "原样复制的已接受 learner claim",
     "claim_kind": "mechanism|boundary|invariant|decision_relevant_fact",
     "scope": "project|general",
     "next_step": "若本轮不能闭合，下一步最小学习动作，可为空"
@@ -267,14 +267,21 @@ def _normalize_durable_learning_candidate(
     evaluation = structured_input.get("final_pedagogy_evaluation")
     if not isinstance(evaluation, dict):
         return None
+    if str(evaluation.get("final_decision") or "") != "accept":
+        return None
+
     learner_input = _bounded_text(evaluation.get("learner_input"), _DURABLE_CLAIM_CHAR_LIMIT)
     deterministic = evaluation.get("deterministic_result")
     semantic = evaluation.get("semantic_result")
     is_claim = bool(isinstance(deterministic, dict) and deterministic.get("is_claim") is True)
-    semantic_claims = (
-        semantic.get("claims")
-        if isinstance(semantic, dict) and isinstance(semantic.get("claims"), (list, tuple))
-        else ()
+    semantic_claims = tuple(
+        _bounded_text(item, _DURABLE_CLAIM_CHAR_LIMIT)
+        for item in (
+            semantic.get("claims")
+            if isinstance(semantic, dict) and isinstance(semantic.get("claims"), (list, tuple))
+            else ()
+        )
+        if _bounded_text(item, _DURABLE_CLAIM_CHAR_LIMIT)
     )
     if not learner_input or not (is_claim or semantic_claims):
         return None
@@ -288,7 +295,21 @@ def _normalize_durable_learning_candidate(
     if source_ref not in source_map:
         return None
 
-    claim_text = _bounded_text(value.get("claim_text"), _DURABLE_CLAIM_CHAR_LIMIT)
+    proposed_claim_text = _bounded_text(value.get("claim_text"), _DURABLE_CLAIM_CHAR_LIMIT)
+    if semantic_claims:
+        claim_text = next(
+            (
+                item
+                for item in semantic_claims
+                if _normalized_text(item) == _normalized_text(proposed_claim_text)
+            ),
+            "",
+        )
+    elif is_claim and _normalized_text(proposed_claim_text) == _normalized_text(learner_input):
+        claim_text = learner_input
+    else:
+        claim_text = ""
+
     claim_kind = str(value.get("claim_kind") or "").strip()
     scope = str(value.get("scope") or "project").strip()
     if not claim_text or claim_kind not in _DURABLE_CLAIM_KINDS or scope not in _DURABLE_SCOPES:
@@ -446,3 +467,7 @@ def _bounded_text(value: object, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _normalized_text(value: object) -> str:
+    return " ".join(str(value or "").split()).casefold()
