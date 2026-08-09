@@ -151,17 +151,18 @@ class LearningClosureTruthService:
                 validation_status=result,
             )
 
-        goal_status = self._goal_status_after_validation(goal.id, evaluation)
         next_step_text = ""
-        if goal_status != "completed" and not self._active_primary_next_step(goal.id):
-            next_step_text = candidate.get("next_step") or _default_next_step(evaluation)
+        if not self._active_primary_next_step(goal.id):
+            next_step_text = candidate.get("next_step") or _default_next_step()
         closure = self.semantic_closure.close(
             goal_id=goal.id,
             target_revision_ids=(revision.id,),
             method=method,
             prompt=prompt,
             evaluation_run=evaluation,
-            goal_status=goal_status,
+            # Confirming one Claim is not the same action as completing the whole Goal.
+            # Goal completion remains an explicit semantic/user action.
+            goal_status="active",
             next_step_text=next_step_text,
         )
         return LearningClosureTruthResult(
@@ -328,18 +329,6 @@ class LearningClosureTruthService:
                 return evidence, result.result
         return None
 
-    def _goal_status_after_validation(
-        self,
-        goal_id: str,
-        evaluation: PedagogyEvalRun,
-    ) -> str:
-        unresolved = [
-            item
-            for item in self.repository.list_hypotheses_for_goal(goal_id)
-            if item.resolved_by_claim_id is None
-        ]
-        return "active" if unresolved else "completed"
-
     def _active_primary_next_step(self, goal_id: str) -> NextStep | None:
         return next(
             (
@@ -439,7 +428,7 @@ def _validation_context(
     return None
 
 
-def _default_next_step(evaluation: PedagogyEvalRun) -> str:
+def _default_next_step() -> str:
     return "围绕当前源码命题再做一次应用或迁移验证。"
 
 
