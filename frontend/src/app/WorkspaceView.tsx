@@ -214,7 +214,7 @@ export function WorkspaceView({
           ragSettings={ui.ragSettings}
           setRagSettings={ui.setRagSettings}
           onSaveSettings={settingsController.save}
-          isSavingSettings={settingsController.isSavingSettings}
+          isSavingSettings={settingsController.isSaving}
           onLoadRole={roleController.load}
           roleDetail={roleController.detail}
           keepCurrentRole={ui.keepCurrentRole}
