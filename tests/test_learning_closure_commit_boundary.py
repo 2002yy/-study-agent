@@ -69,12 +69,21 @@ def _durable_only_result() -> dict:
     }
 
 
+def _combined_result() -> dict:
+    result = _memory_candidate_result()
+    result["durable_learning_candidate"] = _durable_only_result()[
+        "durable_learning_candidate"
+    ]
+    return result
+
+
 def _build_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     truth_committer: RecordingTruthCommitter,
     *,
     generated_result: dict | None = None,
+    memory_mode: str = "confirm",
 ):
     database = RuntimeDatabase(tmp_path / "runtime.db")
     runtime = RuntimeRepository(database)
@@ -109,7 +118,7 @@ def _build_service(
     )
     memory = MemoryService(MemoryRepository(database))
     modes = SimpleNamespace(
-        memory_mode="confirm",
+        memory_mode=memory_mode,
         safe_mode=False,
         profile=SimpleNamespace(memory_write_reason=""),
     )
@@ -198,6 +207,31 @@ def test_durable_only_candidate_reaches_preview_without_fabricated_memory_run(
     assert completed.status == "completed"
     assert completed.memory_run_id is None
     assert repeated.status == "completed"
+    assert truth.calls == [preview.id]
+
+
+def test_auto_memory_mode_cannot_auto_commit_pending_durable_truth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    truth = RecordingTruthCommitter()
+    _allow_memory_write(monkeypatch, tmp_path)
+    service, _runtime, memory = _build_service(
+        tmp_path,
+        monkeypatch,
+        truth,
+        generated_result=_combined_result(),
+        memory_mode="auto",
+    )
+
+    preview = service.create_and_execute("thread-1")
+
+    assert preview.status == "preview_ready"
+    assert preview.memory_run_id is not None
+    assert memory.get(preview.memory_run_id).status == "succeeded"
+    assert truth.calls == []
+
+    completed = service.commit(preview.id)
+    assert completed.status == "completed"
     assert truth.calls == [preview.id]
 
 
