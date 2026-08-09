@@ -84,6 +84,13 @@ class LearningClosureTruthService:
             return LearningClosureTruthResult(status="candidate_source_missing")
 
         evaluation = self._evaluation(candidate, structured_input)
+        if evaluation is None:
+            return LearningClosureTruthResult(status="evaluation_missing")
+        if evaluation.final_decision != "accept":
+            return LearningClosureTruthResult(status="validation_not_accepted")
+        if not _claim_owned_by_evaluation(candidate["claim_text"], evaluation):
+            return LearningClosureTruthResult(status="candidate_claim_mismatch")
+
         objective = _objective(evaluation, structured_input, source)
         topic, goal = self._focus_or_create_goal(
             run,
@@ -119,7 +126,7 @@ class LearningClosureTruthService:
 
         revision = outcome.revision.revision
         validation = _validation_context(structured_input, candidate, evaluation)
-        if evaluation is None or validation is None:
+        if validation is None:
             self._ensure_primary_next_step(goal.id, candidate.get("next_step") or "")
             return LearningClosureTruthResult(
                 status="claim_unverified",
@@ -326,16 +333,12 @@ class LearningClosureTruthService:
         goal_id: str,
         evaluation: PedagogyEvalRun,
     ) -> str:
-        if evaluation.final_decision == "accept":
-            unresolved = [
-                item
-                for item in self.repository.list_hypotheses_for_goal(goal_id)
-                if item.resolved_by_claim_id is None
-            ]
-            return "active" if unresolved else "completed"
-        if _has_misconception(evaluation):
-            return "blocked"
-        return "active"
+        unresolved = [
+            item
+            for item in self.repository.list_hypotheses_for_goal(goal_id)
+            if item.resolved_by_claim_id is None
+        ]
+        return "active" if unresolved else "completed"
 
     def _active_primary_next_step(self, goal_id: str) -> NextStep | None:
         return next(
@@ -397,11 +400,11 @@ def _source_for_candidate(
 
 
 def _objective(
-    evaluation: PedagogyEvalRun | None,
+    evaluation: PedagogyEvalRun,
     structured_input: dict[str, Any],
     source: dict[str, str],
 ) -> str:
-    if evaluation is not None and evaluation.objective.strip():
+    if evaluation.objective.strip():
         return evaluation.objective.strip()
     committed = structured_input.get("committed_learning_state")
     if isinstance(committed, dict):
@@ -414,10 +417,8 @@ def _objective(
 def _validation_context(
     structured_input: dict[str, Any],
     candidate: dict[str, str],
-    evaluation: PedagogyEvalRun | None,
+    evaluation: PedagogyEvalRun,
 ) -> tuple[str, str] | None:
-    if evaluation is None:
-        return None
     turn_id = candidate.get("evaluation_turn_id", "")
     dialogue = structured_input.get("recent_dialogue")
     if not isinstance(dialogue, list):
@@ -439,17 +440,18 @@ def _validation_context(
 
 
 def _default_next_step(evaluation: PedagogyEvalRun) -> str:
-    if evaluation.final_decision == "needs_semantic_review":
-        return "语义评估恢复后，重新做一次短理解验证。"
-    if _has_misconception(evaluation):
-        return "回到源码证据，先修正当前误解，再重新解释一次。"
     return "围绕当前源码命题再做一次应用或迁移验证。"
 
 
-def _has_misconception(evaluation: PedagogyEvalRun) -> bool:
-    deterministic = evaluation.deterministic_result.get("misconceptions", ())
+def _claim_owned_by_evaluation(claim_text: str, evaluation: PedagogyEvalRun) -> bool:
+    normalized = _normalize(claim_text)
     semantic = evaluation.semantic_result
-    return bool(deterministic) or bool(semantic and semantic.misconceptions)
+    if semantic is not None and semantic.claims:
+        return normalized in {_normalize(item) for item in semantic.claims if item.strip()}
+    return bool(
+        evaluation.deterministic_result.get("is_claim") is True
+        and normalized == _normalize(evaluation.learner_input)
+    )
 
 
 def _topic_title(repo_url: str, objective: str) -> str:
