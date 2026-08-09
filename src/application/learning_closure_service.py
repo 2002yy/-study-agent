@@ -32,6 +32,7 @@ _LEGACY_LEARNING_PROTOCOLS = {
     "feynman_diagnosis",
     "project_execution",
 }
+_DURABLE_TRUTH_SUCCESS = {"claim_validated", "claim_unverified", "hypothesis"}
 
 
 class LearningClosureNotEligible(ValueError):
@@ -249,7 +250,13 @@ class LearningClosureService:
             )
             if self.learning_truth_committer is not None:
                 commit_stage = "learning_truth"
-                self.learning_truth_committer.commit(run)
+                truth_result = self.learning_truth_committer.commit(run)
+                if self._has_durable_candidate(run.generated_result):
+                    truth_status = str(getattr(truth_result, "status", ""))
+                    if truth_status not in _DURABLE_TRUTH_SUCCESS:
+                        raise ValueError(
+                            f"Durable learning truth rejected candidate: {truth_status or 'unknown'}"
+                        )
             if run.memory_run_id:
                 commit_stage = "memory"
                 memory_run = self.memory_service.commit(run.memory_run_id)
@@ -302,7 +309,8 @@ class LearningClosureService:
         return run
 
     def list(self, *, limit: int = 20) -> list[LearningClosureRun]:
-        return self.repository.list(limit=limit)
+        safe_limit = max(1, min(limit, 100))
+        return self.repository.list(limit=safe_limit)
 
     def linked_memory_run(self, run: LearningClosureRun):
         return self.memory_service.get(run.memory_run_id) if run.memory_run_id else None
