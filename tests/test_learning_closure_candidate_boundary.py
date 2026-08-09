@@ -75,7 +75,8 @@ def test_closure_input_projects_only_commit_pinned_github_source_calls():
     assert "score" not in serialized
 
 
-def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_ref():
+def test_durable_candidate_requires_learning_summary_accepted_eval_and_known_source_ref():
+    semantic_claim = "恢复 durable learning state 不需要重放完整聊天 turns。"
     structured = {
         "schema_version": "learning-closure-input-v1",
         "summary_kind": "learning_summary",
@@ -83,11 +84,10 @@ def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_
         "final_pedagogy_evaluation": {
             "id": "eval-1",
             "turn_id": "turn-eval",
+            "final_decision": "accept",
             "learner_input": "恢复时 durable state 是 owner，不需要重放完整 turns。",
             "deterministic_result": {"is_claim": True},
-            "semantic_result": {
-                "claims": ["恢复 durable learning state 不需要重放完整聊天 turns。"]
-            },
+            "semantic_result": {"claims": [semantic_claim]},
         },
         "github_learning_sources": [
             {
@@ -102,7 +102,7 @@ def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_
         "candidates": [],
         "durable_learning_candidate": {
             "source_ref": "github_source:turn-source:0",
-            "claim_text": "恢复 durable learning state 不需要重放完整聊天 turns。",
+            "claim_text": semantic_claim,
             "claim_kind": "invariant",
             "scope": "project",
             "next_step": "验证刷新后仍可恢复。",
@@ -114,6 +114,7 @@ def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_
     durable = normalized["durable_learning_candidate"]
     assert durable is not None
     assert durable["source_ref"] == "github_source:turn-source:0"
+    assert durable["claim_text"] == semantic_claim
     assert durable["evaluation_id"] == "eval-1"
     assert durable["evaluation_turn_id"] == "turn-eval"
 
@@ -129,6 +130,30 @@ def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_
     )
     assert unknown["durable_learning_candidate"] is None
 
+    rejected = normalize_structured_closure_result(
+        raw,
+        structured_input={
+            **structured,
+            "final_pedagogy_evaluation": {
+                **structured["final_pedagogy_evaluation"],
+                "final_decision": "reject",
+            },
+        },
+    )
+    assert rejected["durable_learning_candidate"] is None
+
+    paraphrased = normalize_structured_closure_result(
+        {
+            **raw,
+            "durable_learning_candidate": {
+                **raw["durable_learning_candidate"],
+                "claim_text": "大意相同，但这是模型重新改写的句子。",
+            },
+        },
+        structured_input=structured,
+    )
+    assert paraphrased["durable_learning_candidate"] is None
+
     self_report = normalize_structured_closure_result(
         raw,
         structured_input={
@@ -136,6 +161,7 @@ def test_durable_candidate_requires_learning_summary_real_eval_and_known_source_
             "final_pedagogy_evaluation": {
                 "id": "eval-self-report",
                 "turn_id": "turn-self-report",
+                "final_decision": "accept",
                 "learner_input": "我懂了",
                 "deterministic_result": {"is_claim": False},
                 "semantic_result": None,
