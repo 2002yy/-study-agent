@@ -37,10 +37,43 @@ def _task_contract() -> dict:
     }
 
 
+def _memory_candidate_result() -> dict:
+    return {
+        "candidates": [
+            {
+                "target": "progress",
+                "content": "本轮形成了一个待持久化的学习整理。",
+                "confidence": "medium",
+                "source_refs": ["learning_state.objective"],
+                "evaluation_refs": [],
+                "learner_pending": False,
+            }
+        ],
+        "durable_learning_candidate": None,
+    }
+
+
+def _durable_only_result() -> dict:
+    return {
+        "candidates": [],
+        "durable_learning_candidate": {
+            "source_ref": "github_source:turn-1:0",
+            "claim_text": "恢复 durable learning state 不需要重放完整聊天 turns。",
+            "claim_kind": "invariant",
+            "scope": "project",
+            "next_step": "刷新后检查同一 Goal 是否仍可读取。",
+            "evaluation_id": "eval-1",
+            "evaluation_turn_id": "turn-1",
+        },
+    }
+
+
 def _build_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     truth_committer: RecordingTruthCommitter,
+    *,
+    generated_result: dict | None = None,
 ):
     database = RuntimeDatabase(tmp_path / "runtime.db")
     runtime = RuntimeRepository(database)
@@ -86,20 +119,10 @@ def _build_service(
         "src.application.memory_service.is_memory_write_allowed", lambda _modes: True
     )
 
+    frozen_result = generated_result or _memory_candidate_result()
+
     def generator(*_args, **_kwargs):
-        return {
-            "candidates": [
-                {
-                    "target": "progress",
-                    "content": "本轮形成了一个待持久化的学习整理。",
-                    "confidence": "medium",
-                    "source_refs": ["learning_state.objective"],
-                    "evaluation_refs": [],
-                    "learner_pending": False,
-                }
-            ],
-            "durable_learning_candidate": None,
-        }
+        return frozen_result
 
     service = LearningClosureService(
         LearningClosureRepository(database),
@@ -147,6 +170,32 @@ def test_explicit_commit_writes_durable_truth_once_before_memory_commit(
     repeated = service.commit(preview.id)
 
     assert completed.status == "completed"
+    assert repeated.status == "completed"
+    assert truth.calls == [preview.id]
+
+
+def test_durable_only_candidate_reaches_preview_without_fabricated_memory_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    truth = RecordingTruthCommitter()
+    service, _runtime, _memory = _build_service(
+        tmp_path,
+        monkeypatch,
+        truth,
+        generated_result=_durable_only_result(),
+    )
+
+    preview = service.create_and_execute("thread-1")
+
+    assert preview.status == "preview_ready"
+    assert preview.memory_run_id is None
+    assert truth.calls == []
+
+    completed = service.commit(preview.id)
+    repeated = service.commit(preview.id)
+
+    assert completed.status == "completed"
+    assert completed.memory_run_id is None
     assert repeated.status == "completed"
     assert truth.calls == [preview.id]
 
