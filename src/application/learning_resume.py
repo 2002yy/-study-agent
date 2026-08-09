@@ -189,8 +189,9 @@ def _latest_revision_per_claim(
     order: list[str] = []
     for bundle in revisions:
         claim_id = bundle.revision.claim_id
-        if claim_id not in latest:
-            order.append(claim_id)
+        if claim_id in latest:
+            order.remove(claim_id)
+        order.append(claim_id)
         latest[claim_id] = bundle
     return [latest[claim_id] for claim_id in order]
 
