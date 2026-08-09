@@ -257,7 +257,7 @@ function LegacyPanel({
         ) : (
           <p className="muted">没有旧 confirmed_points。</p>
         )}
-        <small>这些条目不是 Claims，也不会显示为“已掌握知识点”。</small>
+        <small>这些条目不是 Claims，也不作为 verified mastery 呈现。</small>
       </section>
 
       <details className="learning-card memory-snapshot">
