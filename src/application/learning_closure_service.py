@@ -171,24 +171,32 @@ class LearningClosureService:
 
             self._ensure_active(run.id, operation_id)
             updates = self._memory_updates(generated)
-            if not updates:
-                raise ValueError("无可靠且有来源的记忆候选")
-            memory_run = self.memory_service.create(
-                updates,
-                run_id=f"memory_{run.id}",
-            )
-            if memory_run.status not in {"previewed", "succeeded"}:
-                raise ValueError(
-                    "Linked MemoryRun is not retryable: "
-                    f"{memory_run.id} ({memory_run.status})"
+            has_durable_candidate = self._has_durable_candidate(generated)
+            if not updates and not has_durable_candidate:
+                raise ValueError("无可靠且有来源的学习成果候选")
+
+            memory_run = None
+            if updates:
+                memory_run = self.memory_service.create(
+                    updates,
+                    run_id=f"memory_{run.id}",
                 )
+                if memory_run.status not in {"previewed", "succeeded"}:
+                    raise ValueError(
+                        "Linked MemoryRun is not retryable: "
+                        f"{memory_run.id} ({memory_run.status})"
+                    )
+
             self._ensure_active(run.id, operation_id)
             preview = self.repository.set_preview_ready(
                 run.id,
                 operation_id=operation_id,
-                memory_run_id=memory_run.id,
+                memory_run_id=memory_run.id if memory_run is not None else None,
             )
-            if memory_run.status == "succeeded":
+            # Preserve the historical auto-commit behavior only for a MemoryRun
+            # that has already succeeded. Durable-only truth remains explicitly
+            # user-confirmed through the normal closure review action.
+            if memory_run is not None and memory_run.status == "succeeded":
                 return self.commit(preview.id)
             return preview
         except LearningClosureCancelled:
@@ -231,8 +239,9 @@ class LearningClosureService:
         if run.status == "completed":
             self._mark_completed_summary(run)
             return run
-        assert run.memory_run_id is not None
+
         commit_stage = "source_check"
+        memory_run = None
         try:
             self.session_service.assert_summary_source_current(
                 run.thread_id,
@@ -241,8 +250,9 @@ class LearningClosureService:
             if self.learning_truth_committer is not None:
                 commit_stage = "learning_truth"
                 self.learning_truth_committer.commit(run)
-            commit_stage = "memory"
-            memory_run = self.memory_service.commit(run.memory_run_id)
+            if run.memory_run_id:
+                commit_stage = "memory"
+                memory_run = self.memory_service.commit(run.memory_run_id)
         except Exception as exc:
             detail = str(exc)
             if "source changed" in detail.lower():
@@ -259,7 +269,7 @@ class LearningClosureService:
                 reason=reason,
             )
 
-        completed = memory_run.status == "succeeded"
+        completed = memory_run is None or memory_run.status == "succeeded"
         error = "" if completed else self._memory_failure_text(memory_run)
         reason = "" if completed else f"memory_{memory_run.status}"
         final_run = self.repository.complete_commit(
@@ -422,6 +432,11 @@ class LearningClosureService:
     def _ensure_active(self, run_id: str, operation_id: str) -> None:
         if self.repository.cancel_requested(run_id, operation_id=operation_id):
             raise LearningClosureCancelled("Learning closure cancelled by user")
+
+    @staticmethod
+    def _has_durable_candidate(generated: dict[str, Any]) -> bool:
+        candidate = generated.get("durable_learning_candidate")
+        return isinstance(candidate, dict) and bool(candidate)
 
     @staticmethod
     def _memory_updates(
