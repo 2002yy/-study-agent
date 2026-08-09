@@ -144,20 +144,36 @@ class LearningTruthRepository:
     def create_claim(self, claim: LearningClaim) -> LearningClaim:
         with self.database.connect() as connection:
             self._require_topic(connection, claim.topic_id)
-            connection.execute(
-                """
-                INSERT INTO learning_claims(id, topic_id, scope, claim_kind, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    claim.id,
-                    claim.topic_id,
-                    claim.scope,
-                    claim.claim_kind,
-                    claim.created_at,
-                ),
-            )
+            self._insert_claim(connection, claim)
         return claim
+
+    def commit_new_claim(
+        self,
+        claim: LearningClaim,
+        revision: ClaimRevision,
+        bindings: Sequence[EvidenceBinding],
+    ) -> ClaimRevisionBundle:
+        """Atomically create a Claim together with its first immutable Revision."""
+
+        normalized = tuple(bindings)
+        self._validate_revision_bindings(normalized)
+        self._validate_revision_text(revision)
+        if revision.claim_id != claim.id:
+            raise ValueError("Claim revision owner does not match new claim id")
+        if revision.reason != "initial":
+            raise ValueError("New learning claim must start with an initial revision")
+
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_topic(connection, claim.topic_id)
+                self._insert_claim(connection, claim)
+                bundle = self._insert_revision_bundle(connection, revision, normalized)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return bundle
 
     def get_claim(self, claim_id: str) -> LearningClaim | None:
         with self.database.connect() as connection:
@@ -184,58 +200,18 @@ class LearningTruthRepository:
     ) -> ClaimRevisionBundle:
         normalized = tuple(bindings)
         self._validate_revision_bindings(normalized)
-        if not revision.claim_text.strip():
-            raise ValueError("Claim revision text is required")
+        self._validate_revision_text(revision)
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._require_claim(connection, revision.claim_id)
-                connection.execute(
-                    """
-                    INSERT INTO claim_revisions(
-                        id, claim_id, claim_text, source_commit, reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        revision.id,
-                        revision.claim_id,
-                        revision.claim_text,
-                        revision.source_commit,
-                        revision.reason,
-                        revision.created_at,
-                    ),
-                )
-                stored_bindings: list[EvidenceBinding] = []
-                for binding in sorted(normalized, key=lambda item: item.position):
-                    stored_source = self._store_or_reuse_source_evidence(
-                        connection, binding.source
-                    )
-                    connection.execute(
-                        """
-                        INSERT INTO claim_revision_evidence(
-                            claim_revision_id, source_evidence_id, role, position
-                        ) VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            revision.id,
-                            stored_source.id,
-                            binding.role,
-                            binding.position,
-                        ),
-                    )
-                    stored_bindings.append(
-                        EvidenceBinding(
-                            source=stored_source,
-                            role=binding.role,
-                            position=binding.position,
-                        )
-                    )
+                bundle = self._insert_revision_bundle(connection, revision, normalized)
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
-        return ClaimRevisionBundle(revision=revision, evidence=tuple(stored_bindings))
+        return bundle
 
     def get_revision(self, revision_id: str) -> ClaimRevisionBundle | None:
         with self.database.connect() as connection:
@@ -422,6 +398,74 @@ class LearningTruthRepository:
                 "SELECT * FROM next_steps WHERE id = ?", (next_step_id,)
             ).fetchone()
         return _next_step_from_row(row) if row else None
+
+    @staticmethod
+    def _insert_claim(connection: sqlite3.Connection, claim: LearningClaim) -> None:
+        connection.execute(
+            """
+            INSERT INTO learning_claims(id, topic_id, scope, claim_kind, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                claim.id,
+                claim.topic_id,
+                claim.scope,
+                claim.claim_kind,
+                claim.created_at,
+            ),
+        )
+
+    @classmethod
+    def _insert_revision_bundle(
+        cls,
+        connection: sqlite3.Connection,
+        revision: ClaimRevision,
+        bindings: tuple[EvidenceBinding, ...],
+    ) -> ClaimRevisionBundle:
+        connection.execute(
+            """
+            INSERT INTO claim_revisions(
+                id, claim_id, claim_text, source_commit, reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                revision.id,
+                revision.claim_id,
+                revision.claim_text,
+                revision.source_commit,
+                revision.reason,
+                revision.created_at,
+            ),
+        )
+        stored_bindings: list[EvidenceBinding] = []
+        for binding in sorted(bindings, key=lambda item: item.position):
+            stored_source = cls._store_or_reuse_source_evidence(connection, binding.source)
+            connection.execute(
+                """
+                INSERT INTO claim_revision_evidence(
+                    claim_revision_id, source_evidence_id, role, position
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    revision.id,
+                    stored_source.id,
+                    binding.role,
+                    binding.position,
+                ),
+            )
+            stored_bindings.append(
+                EvidenceBinding(
+                    source=stored_source,
+                    role=binding.role,
+                    position=binding.position,
+                )
+            )
+        return ClaimRevisionBundle(revision=revision, evidence=tuple(stored_bindings))
+
+    @staticmethod
+    def _validate_revision_text(revision: ClaimRevision) -> None:
+        if not revision.claim_text.strip():
+            raise ValueError("Claim revision text is required")
 
     @staticmethod
     def _validate_revision_bindings(bindings: tuple[EvidenceBinding, ...]) -> None:
