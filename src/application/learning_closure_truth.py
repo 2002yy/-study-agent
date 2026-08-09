@@ -26,9 +26,10 @@ from src.domain.learning_closure import LearningClosureRun
 from src.domain.learning_truth import (
     ClaimRevisionBundle,
     LearningGoal,
-    LearningHypothesis,
     LearningTopic,
     NextStep,
+    SourceEvidence,
+    UnderstandingEvidence,
 )
 from src.pedagogy.evaluation import PedagogyEvalRun
 from src.repositories.learning_truth_repository import LearningTruthRepository
@@ -310,7 +311,7 @@ class LearningClosureTruthService:
         method: str,
         prompt: str,
         user_response: str,
-    ):
+    ) -> tuple[UnderstandingEvidence, str] | None:
         for evidence, result in self.repository.list_understanding_for_revision(revision_id):
             if (
                 evidence.method == method
@@ -467,7 +468,7 @@ def _normalize(value: str) -> str:
     return " ".join(str(value or "").split()).casefold()
 
 
-def _source_identity(source) -> tuple[object, ...]:
+def _source_identity(source: SourceEvidence) -> tuple[object, ...]:
     return (
         source.repository,
         source.commit_sha,
