@@ -18,6 +18,13 @@ _ALLOWED_TARGETS: dict[str, bool] = {
     "session_archive": True,
 }
 _ALLOWED_CONFIDENCE = {"low", "medium", "high"}
+_DURABLE_CLAIM_KINDS = {
+    "mechanism",
+    "boundary",
+    "invariant",
+    "decision_relevant_fact",
+}
+_DURABLE_SCOPES = {"project", "general"}
 _NO_UPDATE_MARKERS = {
     "",
     "本轮无需更新",
@@ -25,14 +32,26 @@ _NO_UPDATE_MARKERS = {
     "无更新",
 }
 _MEMORY_CHAR_LIMIT = 2400
+_DURABLE_CLAIM_CHAR_LIMIT = 800
+_DURABLE_NEXT_STEP_CHAR_LIMIT = 600
 
 _SYSTEM_PROMPT = """你是学习系统的结构化整理生成器。
-只允许根据输入 JSON 中的 committed_learning_state、committed_project_state、final_pedagogy_evaluation、evidence_ids、recent_dialogue 和 memory_context 生成候选。
+只允许根据输入 JSON 中的 committed_learning_state、committed_project_state、final_pedagogy_evaluation、evidence_ids、github_learning_sources、recent_dialogue 和 memory_context 生成候选。
 不得把 excluded_uncommitted_turns、失败回合、planned state、用户仅口头声称“懂了”当作掌握证据。
-confirmed_points 只能来自 committed_learning_state.confirmed_points；项目里程碑、交付物、测试结果和阻塞项只能来自 committed_project_state。
+confirmed_points 只能用于旧记忆整理，绝不能直接升级成 durable Claim；项目里程碑、交付物、测试结果和阻塞项只能来自 committed_project_state。
 最终评估不是 accept 时，不得把其内容写成已掌握；project_validation_passed 不为 true 时，不得声称项目验证通过。
 learner_profile 候选必须 learner_pending=true，不得诊断心理、健康或敏感属性。
-每个候选必须给出 allowed_source_refs 中的 source_refs；没有来源就不要生成该候选。
+每个普通记忆候选必须给出 allowed_source_refs 中的 source_refs；没有来源就不要生成该候选。
+
+对于源码学习，可以额外输出最多一个 durable_learning_candidate，但必须同时满足：
+1. summary_kind 必须是 learning_summary；
+2. final_pedagogy_evaluation.learner_input 中存在一个具体、可核验的源码事实陈述，而不是“懂了/会了”之类自述；
+3. github_learning_sources 中存在与该陈述直接相关的 commit-pinned source；
+4. source_ref 必须原样选择 github_learning_sources 里的 source_ref；不要自己填写 repo/query/commit；
+5. claim_text 只能提炼用户这次被评估的事实陈述，不能把助手新解释、confirmed_points 或模型推测冒充用户理解；
+6. claim_kind 只能是 mechanism|boundary|invariant|decision_relevant_fact；证据是否足够由后端重新 convergence 决定，你不能宣称 confirmed/mastered。
+不满足任一条件时 durable_learning_candidate 必须为 null。
+
 严格输出一个 JSON 对象，不要 markdown：
 {
   "schema_version": "learning-closure-candidates-v1",
@@ -46,9 +65,16 @@ learner_profile 候选必须 learner_pending=true，不得诊断心理、健康�
       "evaluation_refs": ["PedagogyEvalRun id，可为空"],
       "learner_pending": false
     }
-  ]
+  ],
+  "durable_learning_candidate": {
+    "source_ref": "github_learning_sources 中的 source_ref",
+    "claim_text": "用户本轮明确表达、等待源码证据收敛的事实命题",
+    "claim_kind": "mechanism|boundary|invariant|decision_relevant_fact",
+    "scope": "project|general",
+    "next_step": "若本轮不能闭合，下一步最小学习动作，可为空"
+  }
 }
-不要输出 role_updates。没有可靠候选时 candidates 为空数组。"""
+没有可靠普通候选时 candidates 为空数组；没有可靠 durable 候选时 durable_learning_candidate 为 null。不要输出 role_updates。"""
 
 
 def generate_structured_closure_candidates(
@@ -182,12 +208,18 @@ def normalize_structured_closure_result(
             }
         )
         seen_targets.add(target)
+
+    durable_candidate = _normalize_durable_learning_candidate(
+        value.get("durable_learning_candidate"),
+        structured_input=structured_input,
+    )
     return {
         "schema_version": STRUCTURED_CLOSURE_SCHEMA_VERSION,
         "summary_kind": str(structured_input.get("summary_kind") or "learning_summary"),
         "input_schema_version": str(structured_input.get("schema_version") or ""),
         "candidates": candidates,
         "candidate_count": len(candidates),
+        "durable_learning_candidate": durable_candidate,
     }
 
 
@@ -221,6 +253,56 @@ def structured_candidates_to_memory_updates(
             }
         )
     return updates
+
+
+def _normalize_durable_learning_candidate(
+    value: object,
+    *,
+    structured_input: dict[str, Any],
+) -> dict[str, str] | None:
+    if str(structured_input.get("summary_kind") or "") != "learning_summary":
+        return None
+    if not isinstance(value, dict):
+        return None
+    evaluation = structured_input.get("final_pedagogy_evaluation")
+    if not isinstance(evaluation, dict):
+        return None
+    learner_input = _bounded_text(evaluation.get("learner_input"), _DURABLE_CLAIM_CHAR_LIMIT)
+    deterministic = evaluation.get("deterministic_result")
+    semantic = evaluation.get("semantic_result")
+    is_claim = bool(isinstance(deterministic, dict) and deterministic.get("is_claim") is True)
+    semantic_claims = (
+        semantic.get("claims")
+        if isinstance(semantic, dict) and isinstance(semantic.get("claims"), (list, tuple))
+        else ()
+    )
+    if not learner_input or not (is_claim or semantic_claims):
+        return None
+
+    source_ref = str(value.get("source_ref") or "").strip()
+    source_map = {
+        str(item.get("source_ref") or ""): item
+        for item in structured_input.get("github_learning_sources", [])
+        if isinstance(item, dict) and str(item.get("source_ref") or "").strip()
+    }
+    if source_ref not in source_map:
+        return None
+
+    claim_text = _bounded_text(value.get("claim_text"), _DURABLE_CLAIM_CHAR_LIMIT)
+    claim_kind = str(value.get("claim_kind") or "").strip()
+    scope = str(value.get("scope") or "project").strip()
+    if not claim_text or claim_kind not in _DURABLE_CLAIM_KINDS or scope not in _DURABLE_SCOPES:
+        return None
+
+    return {
+        "source_ref": source_ref,
+        "claim_text": claim_text,
+        "claim_kind": claim_kind,
+        "scope": scope,
+        "next_step": _bounded_text(value.get("next_step"), _DURABLE_NEXT_STEP_CHAR_LIMIT),
+        "evaluation_id": str(evaluation.get("id") or "").strip(),
+        "evaluation_turn_id": str(evaluation.get("turn_id") or "").strip(),
+    }
 
 
 def _parse_object(raw: str) -> dict[str, Any]:
@@ -357,3 +439,10 @@ def _allows_high_confidence(
         or ref.startswith("memory:")
         for ref in refs
     )
+
+
+def _bounded_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
