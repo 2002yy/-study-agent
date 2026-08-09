@@ -16,13 +16,13 @@
 - **P2-D-2A：完成。** normalized durable learning truth schema + repository 已进入 main。
 - **P2-D-2B：完成。** deterministic SourceEvidence convergence 已进入 main。
 - **P2-D-2C：完成。** atomic Claim / Hypothesis commit boundary 已进入 main。
-- **D-2 mini Golden Journey：已在 PR #122 head 上通过完整 CI；本 PR 合并即关闭 D-2。**
+- **D-2 mini Golden Journey：完成。** PR #122 已合并进入 main。
+- **P2-D-3A：完成。** Semantic Closure + durable Goal navigation 已进入 main。
+- **P2-D-3B：完成。** bounded durable ResumeContext + read-only resume API 已进入 main。
 - **P2-D GrillMe 决策 1–49：已冻结。**
-- **下一实施批次：P2-D-3 — Semantic Closure + Understanding + Resume + Minimal UI。**
+- **下一实施批次：P2-D-3C — Minimal Durable Learning UI。**
 
-D-2C 后 main 基线：`c66d3cd2d24d63b3464465a7bdc4d4b37128bee4`。
-
-D-2 mini Golden Journey：PR #122，验证 head `c04bde0fd0722e2e4617af5123f93222d569f453`，CI run `31308130930` 在代码/测试 head 上 completed / **success**。本文件的状态同步提交会触发该 PR 的最终同分支复验，仍以最终 head 绿色为合并门槛。
+当前 main 基线：`c7a3fa0d87ec8646c6063b853f4f370d23aa019a`（PR #124 merge）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -92,9 +92,11 @@ PR #121 squash merge：`c66d3cd2d24d63b3464465a7bdc4d4b37128bee4`。
 - 不做 embedding / LLM 自动同义合并；
 - D-2 不决定用户 mastery。
 
-## 3. D-2 mini Golden Journey
+## 3. D-2 mini Golden Journey — COMPLETE
 
-PR #122 的成功路径使用**当前 checkout 中真实的 Study Agent `src/application/github_source_evidence.py` 源码文本**，只把 provider 元数据固定为 deterministic fake snapshot，避免 CI 依赖公网：
+PR #122 merge：`a5112c4bec81ce9993edeeb88bf2a8779c826138`。
+
+成功路径使用**当前 checkout 中真实的 Study Agent `src/application/github_source_evidence.py` 源码文本**，只把 provider 元数据固定为 deterministic fake snapshot，避免 CI 依赖公网：
 
 ```text
 LearningTopic + LearningGoal
@@ -116,7 +118,7 @@ provider unavailable
 → 0 Claim / 0 Revision / 0 SourceEvidence
 ```
 
-该 Journey 还确认 D-2 不会凭空创建 UnderstandingEvidence；理解确认属于 P2-D-3。
+该 Journey 还确认 D-2 不会凭空创建 UnderstandingEvidence；理解确认由 P2-D-3 semantic closure 负责。
 
 ## 4. 仍然有效的迁移禁令
 
@@ -137,43 +139,52 @@ provider unavailable
 
 **合同冻结 ≠ 功能已上线。** 以下实现顺序仍是唯一当前执行顺序。
 
-## 6. P2-D-3 — NEXT
+## 6. P2-D-3 — IN PROGRESS
 
 目标：让 D-2 已存在的 durable truth 真正进入学习闭环，而不是继续依赖 legacy `learning_state` JSON 恢复。
 
-### 6.1 Semantic Closure
+### 6.1 P2-D-3A — Semantic Closure + Understanding — COMPLETE
 
-- 普通 turn / retrieval 只产生 ephemeral candidate；
-- 仅 semantic subsection closure 才允许 convergence → durable commit；
-- 复用现有 `LearningClosureService` 的 source-current / retry / resumable orchestration 模式；
-- 不把 MemoryRun / Markdown memory 改造成 Claim owner；
-- user skip validation 时 Goal 可以继续/结束，但相关 Claim 不得伪造 confirmed。
+PR #123 merge：`0c481c2e32079d0cd371a43663598b32e2aae712`。
 
-### 6.2 UnderstandingEvidence
+已具备：
 
-- 将现有 `PedagogyEvalRun` 作为理解验证输入来源之一；
-- durable UnderstandingEvidence 保存 method / prompt / raw user response；
-- 1 次验证覆盖 1–3 个 ClaimRevision，每个结果独立 pass / partial / fail；
-- 不保存 evaluator chain-of-thought；
-- agent 不能自我确认 mastery。
+- schema v18：`learning_goal_contexts` 与 `learning_goal_claim_revisions`；
+- Goal navigation context 与 LearningGoal truth 分离；
+- pinned focus 优先于最近 active/blocked Goal；terminal Goal 自动失去 pinned focus；
+- D2C Claim/revision commit 原子写入 Goal ↔ ClaimRevision relation；
+- 仅显式 semantic closure 才写 UnderstandingEvidence，不做 per-turn durable auto commit；
+- durable UnderstandingEvidence 保存 method / validation prompt / raw user response；
+- 一次验证覆盖 1–3 个 ClaimRevision，并分别得到 pass / partial / fail；
+- evaluator unavailable / needs semantic review → partial，不能伪造 fail；
+- explicit misconception reject → fail；
+- partial / fail 不得静默完成 Goal；
+- explicit user skip 可以完成 Goal，但不得制造 UnderstandingEvidence；
+- semantic closure transaction 原子提交 UnderstandingEvidence/results + Goal status + optional NextStep；
+- 不保存 evaluator chain-of-thought / confidence 作为 mastery truth。
 
-### 6.3 Durable Resume
+### 6.2 P2-D-3B — Durable Resume — COMPLETE
 
-ResumeContext 从 durable learning truth 派生，优先：
+PR #124 merge：`c7a3fa0d87ec8646c6063b853f4f370d23aa019a`。
 
-```text
-Topic
-→ active/focus Goal
-→ confirmed/unverified Claims
-→ blocking Hypothesis/unresolved
-→ Primary NextStep
-→ relevant SourceEvidence
-→ 必要的最近局部 ChatTurns
-```
+`LearningResumeService` 从 durable Topic / focused Goal / latest ClaimRevision / SourceEvidence / latest Understanding / unresolved Hypothesis / active NextStep 派生 bounded ResumeContext：
 
-旧 `learning_state` 只保留兼容 fallback，不 destructive migrate。
+- Claims ≤ 3；
+- unresolved Hypotheses ≤ 3；
+- 1 Primary NextStep + optional ≤ 2；
+- Claim recency 由**最新 Revision activity**决定，旧 Revision 不重复进入 resume；
+- Understanding 投影轴固定为 `proposed / attempted / partial / confirmed`；
+- 默认不把 raw user validation response 放进 ResumeContext；
+- Primary / Supporting Evidence 保留 exact source identity；
+- `GET /sessions/{session_id}/learning-resume` 已提供 read-only API；
+- durable path **不会调用 `SessionService.get_session()`**，恢复不需要重放完整 turns；
+- 只有从未获得 durable Goal context 的真正 legacy thread 才走旧 navigation fallback；
+- 已有 durable context 但没有 active Goal → `durable/no_active_goal`，绝不 resurrect legacy state；
+- legacy `confirmed_points` 只作为 `legacy_confirmed_points` 展示，`claims` 始终为空，不升级为 formal Claim/mastery。
 
-### 6.4 Minimal UI
+### 6.3 P2-D-3C — Minimal Durable Learning UI — NEXT
+
+目标不是增加管理后台，而是把 D3B ResumeContext 接到当前学习 surface，让用户直接看到“正在学什么、哪些 Claim 有 durable 依据、哪里还没解决、理解验证到哪一步、下一步是什么”。
 
 复用现有：
 
@@ -181,9 +192,26 @@ Topic
 - `LearningPanel`；
 - `EvidenceTrail`。
 
-第一版只展示 Goal、少量 Claim、Primary/Supporting Evidence、Hypothesis、短 Understanding Validation、Primary NextStep。禁止引入知识图谱、Claim dashboard、Route editor、Retention dashboard。
+第一版只展示：
 
-## 7. P2-D-4 — AFTER D-3
+- 当前 Goal；
+- 1–3 个 durable Claim；
+- 每个 Claim 的 Understanding 状态；
+- Primary Evidence + 可展开 Supporting Evidence（symbol → path/line）；
+- unresolved Hypothesis，与 Claim 有明确视觉区别；
+- Primary NextStep；
+- backend 明确返回 `legacy_fallback` 时才显示 legacy compatibility 信息。
+
+硬边界：
+
+- `LearningPanel/Strip` 不自行读取或推断完整 chat history；
+- durable ResumeContext 优先于 `lastChat.route.learning_state`；
+- durable/no_active_goal 不得回退到旧 confirmed_points/objective；
+- legacy confirmed_points 不得以 Claim/已掌握知识点样式呈现；
+- 不引入知识图谱、Claim dashboard、Route editor、Retention dashboard；
+- D3C 不实现 freshness/revalidation。
+
+## 7. P2-D-4 — AFTER D-3C
 
 - Primary unchanged → current；
 - Primary materially changed → stale_candidate；
@@ -201,10 +229,11 @@ P2-D-1                         ✅ complete
 P2-D-2A                        ✅ complete
 P2-D-2B                        ✅ complete
 P2-D-2C                        ✅ complete
-D-2 mini Golden Journey        ✅ validated; PR #122 final merge pending
+D-2 mini Golden Journey        ✅ complete
+P2-D-3A semantic closure       ✅ complete
+P2-D-3B durable resume         ✅ complete
 
-P2-D-3                         ← NEXT
-closure + understanding + resume + minimal UI
+P2-D-3C minimal durable UI     ← NEXT
 
 P2-D-4
 freshness + revalidation + full Golden Journey
