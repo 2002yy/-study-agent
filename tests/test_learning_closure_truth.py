@@ -179,10 +179,14 @@ def test_explicit_closure_reconverges_source_then_commits_claim_and_understandin
         (REPO_URL, "SessionService summary_payload durable resume", COMMIT_SHA),
         (REPO_URL, "SessionService summary_payload durable resume", COMMIT_SHA),
     ]
-    assert truth.get_goal(first.goal_id) is not None
-    assert truth.get_goal(first.goal_id).status == "completed"  # type: ignore[union-attr]
+    goal = truth.get_goal(first.goal_id)
+    assert goal is not None
+    assert goal.status == "active"
+    assert truth.get_focus_goal("thread-1") == goal
     assert len(truth.list_goal_revisions(first.goal_id)) == 1
     assert truth.list_understanding_for_revision(first.claim_revision_id)
+    steps = truth.list_next_steps_for_goal(first.goal_id)
+    assert len([item for item in steps if item.status == "active" and item.is_primary]) == 1
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM learning_claims").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM claim_revisions").fetchone()[0] == 1
@@ -224,8 +228,9 @@ def test_without_real_validation_prompt_claim_stays_unverified(tmp_path):
 
     assert result.status == "claim_unverified"
     assert result.claim_revision_id
-    assert truth.get_goal(result.goal_id) is not None
-    assert truth.get_goal(result.goal_id).status == "active"  # type: ignore[union-attr]
+    goal = truth.get_goal(result.goal_id)
+    assert goal is not None
+    assert goal.status == "active"
     assert truth.list_understanding_for_revision(result.claim_revision_id) == []
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM understanding_evidence").fetchone()[0] == 0
