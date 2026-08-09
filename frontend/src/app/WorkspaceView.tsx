@@ -125,6 +125,8 @@ export function WorkspaceView({
       />
       <div className="chat-column">
         <LearningStrip
+          resume={learningView.learningResume}
+          resumeError={learningView.learningResumeError}
           lastChat={chatController.lastChat}
           visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}
@@ -212,7 +214,7 @@ export function WorkspaceView({
           ragSettings={ui.ragSettings}
           setRagSettings={ui.setRagSettings}
           onSaveSettings={settingsController.save}
-          isSavingSettings={settingsController.isSaving}
+          isSavingSettings={settingsController.isSavingSettings}
           onLoadRole={roleController.load}
           roleDetail={roleController.detail}
           keepCurrentRole={ui.keepCurrentRole}
