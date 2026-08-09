@@ -20,6 +20,7 @@ from src.application.helpers import runtime_settings_payload
 from src.application.learning_closure_service import LearningClosureNotEligible
 from src.application.runtime_repository import (
     get_learning_closure_service,
+    get_learning_resume_service,
     get_session_service,
 )
 from src.application.session_service import SessionService
@@ -51,6 +52,31 @@ def get_session_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return SessionDetailResponse(**detail)
+
+
+@router.get("/sessions/{session_id}/learning-resume")
+def get_learning_resume(
+    session_id: str,
+    service: SessionServiceDependency,
+) -> dict[str, Any]:
+    """Return semantic learning resume state without replaying chat when durable truth exists."""
+
+    resume_service = get_learning_resume_service()
+    resume = resume_service.build(session_id)
+    if resume.get("source") != "legacy_fallback":
+        return resume
+
+    # Compatibility only: use the existing SessionService navigation projection
+    # when this thread has never acquired durable Goal context. Durable threads
+    # never fall back to legacy learning_state, even if all Goals are terminal.
+    detail = service.get_session(session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    navigation = detail.get("navigation")
+    return resume_service.build(
+        session_id,
+        legacy_navigation=navigation if isinstance(navigation, dict) else {},
+    )
 
 
 @router.post("/sessions/new", response_model=SessionNewResponse)
