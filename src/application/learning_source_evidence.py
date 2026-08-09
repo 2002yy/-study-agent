@@ -152,6 +152,49 @@ class LearningSourceEvidenceService:
             one_hop_explored=explored,
         )
 
+    def converge_persisted_tool_trace(
+        self,
+        trace: object,
+    ) -> EvidenceConvergenceResult:
+        """Converge only server-persisted GitHub tool results from one ChatTurn.
+
+        This path performs no provider calls. It is the production bridge used by
+        explicit semantic closure so the browser never submits SourceEvidence
+        identity fields such as commit/path/line.
+        """
+
+        if not isinstance(trace, dict):
+            return EvidenceConvergenceResult(unresolved_reason="missing_source")
+        calls = trace.get("calls")
+        if not isinstance(calls, list):
+            return EvidenceConvergenceResult(unresolved_reason="missing_source")
+
+        refs: list[dict[str, Any]] = []
+        provider_unavailable = False
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            name = str(call.get("name") or "").strip()
+            if not name.startswith("github_"):
+                continue
+            result = call.get("result")
+            if not isinstance(result, dict):
+                continue
+            refs.extend(_nested_evidence_refs(result))
+            if result.get("ok") is False and _search_failure_reason(result) == "provider_unavailable":
+                provider_unavailable = True
+
+        converged = self.converge(
+            self.normalize_candidates(refs, origin="persisted_turn")
+        )
+        if converged.primary is None and provider_unavailable:
+            return EvidenceConvergenceResult(
+                unresolved_reason="provider_unavailable",
+                candidate_count=converged.candidate_count,
+                dropped_count=converged.dropped_count,
+            )
+        return converged
+
     def normalize_candidates(
         self,
         raw_candidates: Iterable[object],
