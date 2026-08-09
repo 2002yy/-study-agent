@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from src.infrastructure.sqlite.learning_semantic_schema import LEARNING_SEMANTIC_MIGRATION_V18
 from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -434,6 +435,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         """,
     ),
     (17, LEARNING_TRUTH_MIGRATION_V17),
+    (18, LEARNING_SEMANTIC_MIGRATION_V18),
 )
 
 
