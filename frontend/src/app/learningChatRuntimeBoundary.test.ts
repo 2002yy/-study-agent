@@ -44,4 +44,11 @@ describe("learning chat runtime boundary", () => {
     expect(learningSource).toContain("chatController.hydrateSession(");
     expect(learningSource).toContain("chatController.setLastChat(");
   });
+
+  it("invalidates the durable ResumeContext read after explicit closure commit", () => {
+    expect(learningSource).toContain("const refreshLearningState = useCallback");
+    expect(learningSource).toContain("onMemoryChanged: refreshLearningState");
+    expect(learningSource).toContain("setLearningResumeRefreshRevision");
+    expect(learningSource).toContain("learningResumeRefreshRevision,");
+  });
 });
