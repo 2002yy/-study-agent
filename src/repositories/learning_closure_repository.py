@@ -280,7 +280,7 @@ class LearningClosureRepository:
         run_id: str,
         *,
         operation_id: str,
-        memory_run_id: str,
+        memory_run_id: str | None,
     ) -> LearningClosureRun:
         run = self._required(run_id)
         self._assert_owner(run, operation_id, expected_status="generating")
@@ -386,7 +386,7 @@ class LearningClosureRepository:
         run = self._required(run_id)
         if run.status == "completed":
             return run
-        if run.status != "preview_ready" or not run.memory_run_id:
+        if run.status != "preview_ready":
             raise ValueError(f"LearningClosureRun is not commit-ready: {run_id}")
         now = utc_now()
         with self.database.connect() as connection:
