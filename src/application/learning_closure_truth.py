@@ -197,13 +197,21 @@ class LearningClosureTruthService:
         objective: str,
         repo_url: str,
     ) -> tuple[LearningTopic, LearningGoal]:
-        focused = self.repository.get_focus_goal(run.thread_id)
-        if focused is not None:
-            topic = self.repository.get_topic(focused.topic_id)
-            if topic is None:
-                raise ValueError(f"Learning topic not found: {focused.topic_id}")
-            self.repository.focus_goal(focused.id)
-            return topic, focused
+        normalized_objective = _normalize(objective)
+
+        # Reuse only the same semantic objective. A new topic/objective may become
+        # the current focus, but the previous active Goal remains durable and can
+        # be focused again later rather than receiving unrelated Claims.
+        for existing in self.repository.list_goals_for_thread(run.thread_id):
+            if (
+                existing.status in {"active", "blocked"}
+                and _normalize(existing.objective) == normalized_objective
+            ):
+                topic = self.repository.get_topic(existing.topic_id)
+                if topic is None:
+                    raise ValueError(f"Learning topic not found: {existing.topic_id}")
+                self.repository.focus_goal(existing.id)
+                return topic, existing
 
         topic_id = _stable_id("topic", run.thread_id, repo_url)
         topic = self.repository.get_topic(topic_id)
@@ -219,6 +227,8 @@ class LearningClosureTruthService:
         goal_id = _stable_id("goal", run.id, objective)
         existing_goal = self.repository.get_goal(goal_id)
         if existing_goal is not None:
+            if existing_goal.status in {"active", "blocked"}:
+                self.repository.focus_goal(existing_goal.id)
             return topic, existing_goal
         goal, _context = self.repository.create_goal_for_thread(
             LearningGoal(
