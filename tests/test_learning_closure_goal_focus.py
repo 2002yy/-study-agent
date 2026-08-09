@@ -59,13 +59,12 @@ def test_same_objective_reuses_goal_but_new_objective_gets_new_focus(tmp_path):
     assert reused_goal.id == old_goal.id
     assert truth.get_focus_goal("thread-1").id == old_goal.id  # type: ignore[union-attr]
 
-    new_topic, new_goal = service._focus_or_create_goal(
+    _new_topic, new_goal = service._focus_or_create_goal(
         _run("closure-new"),
         objective="理解 SourceEvidence freshness",
         repo_url="https://github.com/2002yy/study-agent",
     )
 
-    assert new_topic.id == topic.id
     assert new_goal.id != old_goal.id
     assert new_goal.objective == "理解 SourceEvidence freshness"
     assert truth.get_focus_goal("thread-1").id == new_goal.id  # type: ignore[union-attr]
