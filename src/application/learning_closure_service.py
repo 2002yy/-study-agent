@@ -8,7 +8,7 @@ from dataclasses import asdict
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 from src.after_session import after_session_to_memory_updates
 from src.application.closure_input_builder import build_structured_closure_input
@@ -42,6 +42,10 @@ class LearningClosureCancelled(RuntimeError):
     pass
 
 
+class LearningTruthCommitter(Protocol):
+    def commit(self, run: LearningClosureRun) -> object: ...
+
+
 Generator = Callable[..., dict[str, Any]]
 MemoryBundleLoader = Callable[[str], dict[str, str]]
 
@@ -66,6 +70,7 @@ class LearningClosureService:
         memory_service: MemoryService,
         *,
         evaluation_repository: PedagogyEvalRepository | None = None,
+        learning_truth_committer: LearningTruthCommitter | None = None,
         generator: Generator = generate_structured_closure_candidates,
         memory_bundle_loader: MemoryBundleLoader = read_memory_bundle,
     ):
@@ -73,6 +78,7 @@ class LearningClosureService:
         self.session_service = session_service
         self.memory_service = memory_service
         self.evaluation_repository = evaluation_repository
+        self.learning_truth_committer = learning_truth_committer
         self.generator = generator
         self.memory_bundle_loader = memory_bundle_loader
 
@@ -226,19 +232,25 @@ class LearningClosureService:
             self._mark_completed_summary(run)
             return run
         assert run.memory_run_id is not None
+        commit_stage = "source_check"
         try:
             self.session_service.assert_summary_source_current(
                 run.thread_id,
                 last_completed_turn_id=run.last_completed_turn_id,
             )
+            if self.learning_truth_committer is not None:
+                commit_stage = "learning_truth"
+                self.learning_truth_committer.commit(run)
+            commit_stage = "memory"
             memory_run = self.memory_service.commit(run.memory_run_id)
         except Exception as exc:
             detail = str(exc)
-            reason = (
-                "thread_source_changed"
-                if "source changed" in detail.lower()
-                else "memory_commit_failed"
-            )
+            if "source changed" in detail.lower():
+                reason = "thread_source_changed"
+            elif commit_stage == "learning_truth":
+                reason = "learning_truth_commit_failed"
+            else:
+                reason = "memory_commit_failed"
             return self.repository.complete_commit(
                 run.id,
                 operation_id=operation_id,
