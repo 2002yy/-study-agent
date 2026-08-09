@@ -105,6 +105,8 @@ export function useLearningSessionRuntime(options: {
     useState<LearningResumeState | null>(null);
   const [learningResumeErrorState, setLearningResumeErrorState] =
     useState<LearningResumeErrorState | null>(null);
+  const [learningResumeRefreshRevision, setLearningResumeRefreshRevision] =
+    useState(0);
   const artifactPortRef = useRef<LearningArtifactPort>({
     clearChatArtifacts: () => undefined,
   });
@@ -133,13 +135,17 @@ export function useLearningSessionRuntime(options: {
       dispatch({ type: "SET_ACTIVE_LEARNING_CLOSURE_RUN", runId }),
     [dispatch],
   );
+  const refreshLearningState = useCallback(async () => {
+    await options.refresh();
+    setLearningResumeRefreshRevision((revision) => revision + 1);
+  }, [options.refresh]);
 
   const memoryController = useMemoryController({
     activeRunId: memoryRunId,
     setActiveRunId: setMemoryRunId,
     activeClosureRunId: learningClosureRunId,
     setActiveClosureRunId: setLearningClosureRunId,
-    onMemoryChanged: options.refresh,
+    onMemoryChanged: refreshLearningState,
     onSummaryChanged: (summary) =>
       dispatch({ type: "SET_SESSION_SUMMARY", summary }),
   });
@@ -197,6 +203,7 @@ export function useLearningSessionRuntime(options: {
     chatController.threadId,
     chatController.lastChat?.turn_id,
     learningClosureRunId,
+    learningResumeRefreshRevision,
   ]);
 
   const activeSession = useMemo(
