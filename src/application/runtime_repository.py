@@ -10,6 +10,7 @@ from src.infrastructure.sqlite.database import RuntimeDatabase
 from src.repositories.github_snapshot_repository import GitHubSnapshotRepository
 from src.repositories.group_repository import GroupRepository
 from src.repositories.learning_closure_repository import LearningClosureRepository
+from src.repositories.learning_truth_repository import LearningTruthRepository
 from src.repositories.news_repository import NewsRepository
 from src.repositories.memory_repository import MemoryRepository
 from src.repositories.pedagogy_eval_repository import PedagogyEvalRepository
@@ -107,6 +108,11 @@ def get_memory_repository() -> MemoryRepository:
 @lru_cache(maxsize=1)
 def get_learning_closure_repository() -> LearningClosureRepository:
     return LearningClosureRepository(RuntimeDatabase(runtime_database_path()))
+
+
+@lru_cache(maxsize=1)
+def get_learning_truth_repository() -> LearningTruthRepository:
+    return LearningTruthRepository(RuntimeDatabase(runtime_database_path()))
 
 
 @lru_cache(maxsize=1)
@@ -243,6 +249,20 @@ def get_learning_closure_service():
 
 
 @lru_cache(maxsize=1)
+def get_learning_outcome_commit_service():
+    from src.application.learning_outcome_commit import LearningOutcomeCommitService
+
+    return LearningOutcomeCommitService(get_learning_truth_repository())
+
+
+@lru_cache(maxsize=1)
+def get_learning_semantic_closure_service():
+    from src.application.learning_semantic_closure import LearningSemanticClosureService
+
+    return LearningSemanticClosureService(get_learning_truth_repository())
+
+
+@lru_cache(maxsize=1)
 def get_web_lookup_service():
     from src.application.web_lookup_service import WebLookupService
 
@@ -270,6 +290,9 @@ def reset_runtime_repository_cache() -> None:
     get_provider_cache_repository.cache_clear()
     get_github_snapshot_service.cache_clear()
     get_github_snapshot_repository.cache_clear()
+    get_learning_semantic_closure_service.cache_clear()
+    get_learning_outcome_commit_service.cache_clear()
+    get_learning_truth_repository.cache_clear()
     get_learning_closure_service.cache_clear()
     get_learning_closure_repository.cache_clear()
     get_thread_summary_repository.cache_clear()
