@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-SCHEMA_VERSION = 16
+from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
+
+SCHEMA_VERSION = 17
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -431,6 +433,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON provider_cache_entries(expires_at);
         """,
     ),
+    (17, LEARNING_TRUTH_MIGRATION_V17),
 )
 
 
