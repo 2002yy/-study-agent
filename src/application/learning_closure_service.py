@@ -194,10 +194,14 @@ class LearningClosureService:
                 operation_id=operation_id,
                 memory_run_id=memory_run.id if memory_run is not None else None,
             )
-            # Preserve the historical auto-commit behavior only for a MemoryRun
-            # that has already succeeded. Durable-only truth remains explicitly
-            # user-confirmed through the normal closure review action.
-            if memory_run is not None and memory_run.status == "succeeded":
+            # Historical auto-commit is safe only for pure Markdown-memory closure.
+            # Any durable Claim/Hypothesis candidate always requires the user's
+            # explicit confirmation at the closure review boundary.
+            if (
+                memory_run is not None
+                and memory_run.status == "succeeded"
+                and not has_durable_candidate
+            ):
                 return self.commit(preview.id)
             return preview
         except LearningClosureCancelled:
@@ -248,10 +252,14 @@ class LearningClosureService:
                 run.thread_id,
                 last_completed_turn_id=run.last_completed_turn_id,
             )
+            has_durable_candidate = self._has_durable_candidate(run.generated_result)
+            if has_durable_candidate and self.learning_truth_committer is None:
+                commit_stage = "learning_truth"
+                raise ValueError("Durable learning truth committer is unavailable")
             if self.learning_truth_committer is not None:
                 commit_stage = "learning_truth"
                 truth_result = self.learning_truth_committer.commit(run)
-                if self._has_durable_candidate(run.generated_result):
+                if has_durable_candidate:
                     truth_status = str(getattr(truth_result, "status", ""))
                     if truth_status not in _DURABLE_TRUTH_SUCCESS:
                         raise ValueError(
