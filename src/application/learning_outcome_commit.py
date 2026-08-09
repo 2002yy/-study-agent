@@ -123,14 +123,14 @@ class LearningOutcomeCommitService:
                 revision=bundle,
             )
 
-        claim = self.repository.get_claim(existing_claim_id)
-        if claim is None:
+        existing_claim = self.repository.get_claim(existing_claim_id)
+        if existing_claim is None:
             raise ValueError(f"Learning claim not found: {existing_claim_id}")
-        if claim.topic_id != topic_id:
+        if existing_claim.topic_id != topic_id:
             raise ValueError("Existing Claim belongs to another topic")
-        if claim.scope != scope:
+        if existing_claim.scope != scope:
             raise ValueError("Existing Claim scope does not match requested scope")
-        if claim.claim_kind != claim_kind:
+        if existing_claim.claim_kind != claim_kind:
             raise ValueError("Existing Claim kind does not match requested kind")
         if revision_reason not in _EXISTING_REVISION_REASONS:
             raise ValueError(
@@ -138,7 +138,7 @@ class LearningOutcomeCommitService:
             )
 
         revision = ClaimRevision(
-            claim_id=claim.id,
+            claim_id=existing_claim.id,
             claim_text=text,
             source_commit=primary_commit,
             reason=revision_reason,
@@ -146,7 +146,7 @@ class LearningOutcomeCommitService:
         bundle = self.repository.commit_revision(revision, bindings)
         return LearningOutcomeCommitResult(
             outcome="claim",
-            claim=claim,
+            claim=existing_claim,
             revision=bundle,
         )
 
