@@ -270,6 +270,30 @@ def get_learning_resume_service():
 
 
 @lru_cache(maxsize=1)
+def get_learning_source_evidence_service():
+    from src.application.learning_source_evidence import LearningSourceEvidenceService
+
+    # D3C uses the persisted-trace convergence path, which performs no provider
+    # calls. Keeping the normal snapshot service available preserves one owner.
+    return LearningSourceEvidenceService(get_github_snapshot_service())
+
+
+@lru_cache(maxsize=1)
+def get_learning_turn_bridge_service():
+    from src.application.learning_turn_bridge import LearningTurnBridgeService
+
+    return LearningTurnBridgeService(
+        get_runtime_repository(),
+        get_learning_truth_repository(),
+        get_pedagogy_eval_repository(),
+        get_learning_source_evidence_service(),
+        get_learning_outcome_commit_service(),
+        get_learning_semantic_closure_service(),
+        get_learning_resume_service(),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_web_lookup_service():
     from src.application.web_lookup_service import WebLookupService
 
@@ -297,6 +321,8 @@ def reset_runtime_repository_cache() -> None:
     get_provider_cache_repository.cache_clear()
     get_github_snapshot_service.cache_clear()
     get_github_snapshot_repository.cache_clear()
+    get_learning_turn_bridge_service.cache_clear()
+    get_learning_source_evidence_service.cache_clear()
     get_learning_resume_service.cache_clear()
     get_learning_semantic_closure_service.cache_clear()
     get_learning_outcome_commit_service.cache_clear()
