@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,10 @@ import {
 } from "../features/chat/chatController";
 import { abandonInterruptedTurn } from "../features/chat/recoveryApi";
 import { useMemoryController } from "../features/learning-memory/memoryController";
+import {
+  getLearningResume,
+  type LearningResumeResponse,
+} from "../features/learning/learningResumeApi";
 import {
   CHAT_SETTINGS_DEFAULTS,
   modeOptions,
@@ -30,6 +35,16 @@ import type { WorkspaceRecovery } from "./WorkspacePersistence";
 import { useWorkspace } from "./WorkspaceProvider";
 
 type RuntimeSettings = NonNullable<ApiSnapshot["runtimeSettings"]>["settings"];
+
+type LearningResumeState = {
+  sessionId: string;
+  resume: LearningResumeResponse;
+};
+
+type LearningResumeErrorState = {
+  sessionId: string;
+  error: string;
+};
 
 export type LearningArtifactPort = {
   clearChatArtifacts: () => void;
@@ -86,6 +101,10 @@ export function useLearningSessionRuntime(options: {
   );
   const [keepCurrentRole, setKeepCurrentRole] = useState(false);
   const [conversationInstruction, setConversationInstruction] = useState("");
+  const [learningResumeState, setLearningResumeState] =
+    useState<LearningResumeState | null>(null);
+  const [learningResumeErrorState, setLearningResumeErrorState] =
+    useState<LearningResumeErrorState | null>(null);
   const artifactPortRef = useRef<LearningArtifactPort>({
     clearChatArtifacts: () => undefined,
   });
@@ -149,6 +168,36 @@ export function useLearningSessionRuntime(options: {
     refresh: options.refresh,
     onResearchRunDiscovered: options.evidence.onResearchRunDiscovered,
   });
+
+  useEffect(() => {
+    const sessionId = chatController.threadId;
+    if (!sessionId) {
+      setLearningResumeState(null);
+      setLearningResumeErrorState(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLearningResumeErrorState(null);
+    void getLearningResume(sessionId, controller.signal)
+      .then((resume) => {
+        if (controller.signal.aborted) return;
+        setLearningResumeState({ sessionId, resume });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setLearningResumeErrorState({
+          sessionId,
+          error: error instanceof Error ? error.message : "读取学习恢复状态失败",
+        });
+      });
+
+    return () => controller.abort();
+  }, [
+    chatController.threadId,
+    chatController.lastChat?.turn_id,
+    learningClosureRunId,
+  ]);
 
   const activeSession = useMemo(
     () =>
@@ -299,6 +348,15 @@ export function useLearningSessionRuntime(options: {
     ],
   );
 
+  const learningResume =
+    learningResumeState?.sessionId === chatController.threadId
+      ? learningResumeState.resume
+      : null;
+  const learningResumeError =
+    learningResumeErrorState?.sessionId === chatController.threadId
+      ? learningResumeErrorState.error
+      : "";
+
   const view = useMemo(
     () => ({
       activeSession,
@@ -307,6 +365,8 @@ export function useLearningSessionRuntime(options: {
       isSending: chatController.isSending,
       streamRecovery: chatController.streamRecovery,
       visitedPhases: state.pedagogyPhases,
+      learningResume,
+      learningResumeError,
       requestNewSession,
       abandonRecovery,
     }),
@@ -317,6 +377,8 @@ export function useLearningSessionRuntime(options: {
       chatController.isSending,
       chatController.streamRecovery,
       state.pedagogyPhases,
+      learningResume,
+      learningResumeError,
       requestNewSession,
       abandonRecovery,
     ],
