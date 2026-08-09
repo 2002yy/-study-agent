@@ -45,6 +45,17 @@ _DIMENSION_ORDER = {
     "docs": 5,
     "other": 6,
 }
+_PROVIDER_UNAVAILABLE_MARKERS = (
+    "provider_unavailable",
+    "provider_failed",
+    "github_http_401",
+    "github_http_403",
+    "github_http_429",
+    "rate_limit",
+    "timeout",
+    "connection",
+    "temporarily_unavailable",
+)
 
 
 @dataclass(frozen=True)
@@ -102,7 +113,12 @@ class LearningSourceEvidenceService:
             top_k=top_k,
             include_ci=False,
         )
-        raw_results = searched.get("results", ()) if searched.get("ok") is True else ()
+        if searched.get("ok") is not True:
+            return EvidenceConvergenceResult(
+                unresolved_reason=_search_failure_reason(searched)
+            )
+
+        raw_results = searched.get("results", ())
         direct_candidates = self.normalize_candidates(raw_results, origin="search")
         preliminary = self.converge(direct_candidates)
         if preliminary.primary is None:
@@ -230,6 +246,16 @@ class LearningSourceEvidenceService:
             candidate_count=len(raw),
             dropped_count=max(0, len(raw) - selected_count),
         )
+
+
+def _search_failure_reason(searched: dict[str, Any]) -> str:
+    error = str(searched.get("error") or "").strip().casefold()
+    provider_status = str(searched.get("provider_status") or "").strip().casefold()
+    status = str(searched.get("status") or "").strip().casefold()
+    combined = " ".join((error, provider_status, status))
+    if any(marker in combined for marker in _PROVIDER_UNAVAILABLE_MARKERS):
+        return "provider_unavailable"
+    return "missing_source"
 
 
 def _evidence_ref(raw: dict[str, Any]) -> dict[str, Any]:
