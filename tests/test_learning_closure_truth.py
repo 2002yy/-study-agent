@@ -14,6 +14,7 @@ COMMIT_SHA = "a" * 40
 TREE_SHA = "b" * 40
 REPO_URL = "https://github.com/2002yy/study-agent"
 SOURCE_REF = "github_source:turn-source:0"
+CLAIM_TEXT = "恢复 durable learning state 不需要重放完整聊天 turns。"
 
 
 class FakeSourceEvidenceService:
@@ -72,7 +73,7 @@ def _evaluation(decision: str = "accept") -> PedagogyEvalRun:
             "misconceptions": list(misconceptions),
         },
         semantic_result=SemanticEvaluation(
-            claims=("resume does not replay full turns",),
+            claims=(CLAIM_TEXT,),
             correct_points=("durable truth is the owner",) if decision == "accept" else (),
             misconceptions=misconceptions,
             reasoning_complete=decision == "accept",
@@ -86,7 +87,7 @@ def _evaluation(decision: str = "accept") -> PedagogyEvalRun:
     )
 
 
-def _run(*, include_validation_prompt: bool = True) -> LearningClosureRun:
+def _run(*, include_validation_prompt: bool = True, claim_text: str = CLAIM_TEXT) -> LearningClosureRun:
     recent_dialogue = [
         {
             "turn_id": "turn-source",
@@ -133,7 +134,7 @@ def _run(*, include_validation_prompt: bool = True) -> LearningClosureRun:
         generated_result={
             "durable_learning_candidate": {
                 "source_ref": SOURCE_REF,
-                "claim_text": "恢复 durable learning state 不需要重放完整聊天 turns。",
+                "claim_text": claim_text,
                 "claim_kind": "invariant",
                 "scope": "project",
                 "next_step": "下一次恢复时检查同一 Goal 是否仍可直接读取。",
@@ -228,3 +229,32 @@ def test_without_real_validation_prompt_claim_stays_unverified(tmp_path):
     assert truth.list_understanding_for_revision(result.claim_revision_id) == []
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM understanding_evidence").fetchone()[0] == 0
+
+
+def test_unaccepted_or_model_invented_claim_fails_closed_before_source_convergence(tmp_path):
+    database, _truth, source, service = _service(
+        tmp_path,
+        _convergence(),
+        _evaluation("reject"),
+    )
+
+    rejected = service.commit(_run())
+
+    assert rejected.status == "validation_not_accepted"
+    assert source.calls == []
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM learning_topics").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM learning_claims").fetchone()[0] == 0
+
+    database2, _truth2, source2, service2 = _service(
+        tmp_path / "invented",
+        _convergence(),
+        _evaluation("accept"),
+    )
+    invented = service2.commit(_run(claim_text="模型自己补出来的结论"))
+
+    assert invented.status == "candidate_claim_mismatch"
+    assert source2.calls == []
+    with database2.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM learning_topics").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM learning_claims").fetchone()[0] == 0
