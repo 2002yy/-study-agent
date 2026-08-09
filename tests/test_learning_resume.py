@@ -76,17 +76,6 @@ def test_durable_resume_uses_latest_revision_and_bounded_semantic_state(tmp_path
     )
     assert first.claim is not None and first.revision is not None
 
-    second = outcome_service.commit(
-        topic_id=topic.id,
-        goal_id=goal.id,
-        claim_text="Resume derives from the latest durable Goal revision.",
-        claim_kind="invariant",
-        convergence=_convergence(commit=COMMIT_B, line=20),
-        existing_claim_id=first.claim.id,
-        revision_reason="revalidated",
-    )
-    assert second.revision is not None
-
     other_revisions = []
     for index in range(3):
         item = outcome_service.commit(
@@ -98,6 +87,19 @@ def test_durable_resume_uses_latest_revision_and_bounded_semantic_state(tmp_path
         )
         assert item.revision is not None
         other_revisions.append(item.revision.revision)
+
+    # Revalidate the first Claim last. Resume recency must follow the latest
+    # Revision activity rather than the Claim's original creation position.
+    second = outcome_service.commit(
+        topic_id=topic.id,
+        goal_id=goal.id,
+        claim_text="Resume derives from the latest durable Goal revision.",
+        claim_kind="invariant",
+        convergence=_convergence(commit=COMMIT_B, line=20),
+        existing_claim_id=first.claim.id,
+        revision_reason="revalidated",
+    )
+    assert second.revision is not None
 
     pass_evidence = UnderstandingEvidence(
         method="apply",
@@ -130,7 +132,7 @@ def test_durable_resume_uses_latest_revision_and_bounded_semantic_state(tmp_path
         ),
     )
 
-    truth.create_hypothesis(
+    hypothesis = truth.create_hypothesis(
         LearningHypothesis(
             topic_id=topic.id,
             goal_id=goal.id,
@@ -174,7 +176,7 @@ def test_durable_resume_uses_latest_revision_and_bounded_semantic_state(tmp_path
     assert failed["validation_result"] == "fail"
     assert resume["unresolved"] == [
         {
-            "hypothesis_id": resume["unresolved"][0]["hypothesis_id"],
+            "hypothesis_id": hypothesis.id,
             "text": "One edge path still needs evidence.",
             "reason": "insufficient_evidence",
         }
