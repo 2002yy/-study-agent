@@ -12,6 +12,7 @@ CLOSURE_INPUT_SCHEMA_VERSION = "learning-closure-input-v1"
 DEFAULT_RECENT_TURN_LIMIT = 6
 DEFAULT_DIALOGUE_CHAR_BUDGET = 6000
 DEFAULT_MESSAGE_CHAR_LIMIT = 1800
+DEFAULT_GITHUB_LEARNING_SOURCE_LIMIT = 8
 
 _COMMITTED_STATE_KEYS = (
     "protocol",
@@ -41,6 +42,12 @@ _PROJECT_STATE_KEYS = (
     "validation_required",
     "last_response_violations",
 )
+_GITHUB_LEARNING_TOOL_NAMES = {
+    "github_search",
+    "github_snapshot",
+    "github_structure",
+    "github_impact",
+}
 _PROJECT_STRING_LIMIT = 1200
 _PROJECT_COLLECTION_LIMIT = 20
 
@@ -97,12 +104,14 @@ def build_structured_closure_input(
         }
         | set(_evaluation_evidence_ids(final_evaluation))
     )
+    github_learning_sources = _github_learning_sources(completed_turns)
     allowed_source_refs = _allowed_source_refs(
         committed_state=committed_state,
         committed_project_state=committed_project_state,
         final_evaluation=final_evaluation,
         evidence_ids=evidence_ids,
         recent_dialogue=recent_dialogue,
+        github_learning_sources=github_learning_sources,
     )
     summary_kind = (
         "project_closure"
@@ -119,6 +128,7 @@ def build_structured_closure_input(
         "committed_project_state": committed_project_state,
         "final_pedagogy_evaluation": final_evaluation,
         "evidence_ids": evidence_ids,
+        "github_learning_sources": github_learning_sources,
         "recent_dialogue": recent_dialogue,
         "dialogue_budget": {
             "turn_limit": safe_recent_limit,
@@ -139,6 +149,9 @@ def build_structured_closure_input(
             "project_facts_source": "committed_project_state_only",
             "failed_or_uncommitted_turns_are_not_mastery_evidence": True,
             "project_validation_passed_must_be_true_to_claim_validation": True,
+            "durable_claim_requires_explicit_semantic_closure": True,
+            "durable_claim_requires_commit_pinned_github_source": True,
+            "legacy_confirmed_points_never_auto_promote_to_claim": True,
         },
     }
 
@@ -171,6 +184,7 @@ def _recent_dialogue(
                 "user_message": user_message,
                 "assistant_message": assistant_message,
                 "pedagogy_phase": str(turn.pedagogy_snapshot.get("phase") or ""),
+                "pedagogy_move": str(turn.pedagogy_snapshot.get("move") or ""),
                 "evidence_ids": _turn_evidence_ids(turn),
             }
         )
@@ -219,6 +233,65 @@ def _turn_evidence_ids(turn: ChatTurn) -> list[str]:
     return sorted(identifiers)
 
 
+def _github_learning_sources(
+    completed_turns: list[ChatTurn],
+    *,
+    limit: int = DEFAULT_GITHUB_LEARNING_SOURCE_LIMIT,
+) -> list[dict[str, str]]:
+    """Project only immutable, replayable GitHub source reads into closure input."""
+
+    bounded_limit = max(1, min(int(limit), 20))
+    sources: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for turn in reversed(completed_turns):
+        rag = turn.rag_snapshot if isinstance(turn.rag_snapshot, dict) else {}
+        web_tools = rag.get("web_tools")
+        if not isinstance(web_tools, dict):
+            continue
+        calls = web_tools.get("calls")
+        if not isinstance(calls, list):
+            continue
+        for call_index, call in reversed(list(enumerate(calls))):
+            if not isinstance(call, dict):
+                continue
+            name = str(call.get("name") or "").strip()
+            if name not in _GITHUB_LEARNING_TOOL_NAMES:
+                continue
+            arguments = call.get("arguments")
+            result = call.get("result")
+            if not isinstance(arguments, dict) or not isinstance(result, dict):
+                continue
+            if result.get("ok") is False:
+                continue
+            repo_url = str(arguments.get("repo_url") or "").strip()
+            query = str(
+                arguments.get("query")
+                or arguments.get("symbol")
+                or ""
+            ).strip()
+            commit_sha = str(result.get("commit_sha") or "").strip()
+            if not repo_url or not query or not commit_sha:
+                continue
+            identity = (repo_url, query, commit_sha)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            source_ref = f"github_source:{turn.id}:{call_index}"
+            sources.append(
+                {
+                    "source_ref": source_ref,
+                    "turn_id": turn.id,
+                    "tool_name": name,
+                    "repo_url": repo_url,
+                    "query": query,
+                    "commit_sha": commit_sha,
+                }
+            )
+            if len(sources) >= bounded_limit:
+                return sources
+    return sources
+
+
 def _evaluation_evidence_ids(final_evaluation: dict[str, Any] | None) -> list[str]:
     if not final_evaluation:
         return []
@@ -241,6 +314,7 @@ def _allowed_source_refs(
     final_evaluation: dict[str, Any] | None,
     evidence_ids: list[str],
     recent_dialogue: list[dict[str, Any]],
+    github_learning_sources: list[dict[str, str]],
 ) -> list[str]:
     refs = {
         f"learning_state.{key}"
@@ -256,6 +330,11 @@ def _allowed_source_refs(
         refs.add(f"pedagogy_eval:{final_evaluation['id']}")
     refs.update(f"evidence:{item}" for item in evidence_ids)
     refs.update(f"turn:{item['turn_id']}" for item in recent_dialogue)
+    refs.update(
+        item["source_ref"]
+        for item in github_learning_sources
+        if item.get("source_ref")
+    )
     return sorted(refs)
 
 
