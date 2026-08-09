@@ -208,7 +208,9 @@ export function LearningClosureReview({
     (label) => label !== DURABLE_IMPACT_LABEL,
   );
   const memoryChannelConfirmable =
-    !memoryRun || (Boolean(memoryRun.preview.writable) && hasMemoryImpact);
+    !memoryRun ||
+    memoryRun.status === "succeeded" ||
+    (Boolean(memoryRun.preview.writable) && hasMemoryImpact);
   const canConfirm =
     run.status === "preview_ready" &&
     (hasDurableCandidate || hasMemoryImpact) &&
