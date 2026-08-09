@@ -269,9 +269,14 @@ class LearningClosureService:
                 reason=reason,
             )
 
-        completed = memory_run is None or memory_run.status == "succeeded"
-        error = "" if completed else self._memory_failure_text(memory_run)
-        reason = "" if completed else f"memory_{memory_run.status}"
+        if memory_run is None:
+            completed = True
+            error = ""
+            reason = ""
+        else:
+            completed = memory_run.status == "succeeded"
+            error = "" if completed else self._memory_failure_text(memory_run)
+            reason = "" if completed else f"memory_{memory_run.status}"
         final_run = self.repository.complete_commit(
             run.id,
             operation_id=operation_id,
