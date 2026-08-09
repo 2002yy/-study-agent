@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MemoryRunResponse } from "../../types";
 import type { LearningClosureRunResponse } from "./closureTypes";
@@ -85,6 +85,8 @@ const durableOnlyRun = {
   memory_run_id: null,
   memory_run: null,
 } as LearningClosureRunResponse;
+
+afterEach(cleanup);
 
 describe("LearningClosureReview", () => {
   it("uses committed facts for confirmation and gaps while keeping the frozen next step", () => {
