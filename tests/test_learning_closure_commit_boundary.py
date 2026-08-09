@@ -16,15 +16,16 @@ from src.repositories.runtime_repository import RuntimeRepository
 
 
 class RecordingTruthCommitter:
-    def __init__(self, *, fail: bool = False):
+    def __init__(self, *, fail: bool = False, status: str = "claim_validated"):
         self.fail = fail
+        self.status = status
         self.calls = []
 
     def commit(self, run):
         self.calls.append(run.id)
         if self.fail:
             raise RuntimeError("durable truth unavailable")
-        return object()
+        return SimpleNamespace(status=self.status)
 
 
 def _task_contract() -> dict:
@@ -197,6 +198,26 @@ def test_durable_only_candidate_reaches_preview_without_fabricated_memory_run(
     assert completed.status == "completed"
     assert completed.memory_run_id is None
     assert repeated.status == "completed"
+    assert truth.calls == [preview.id]
+
+
+def test_durable_candidate_rejection_fails_closure_instead_of_silently_completing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    truth = RecordingTruthCommitter(status="candidate_claim_mismatch")
+    service, _runtime, _memory = _build_service(
+        tmp_path,
+        monkeypatch,
+        truth,
+        generated_result=_durable_only_result(),
+    )
+    preview = service.create_and_execute("thread-1")
+
+    failed = service.commit(preview.id)
+
+    assert failed.status == "failed"
+    assert failed.reason == "learning_truth_commit_failed"
+    assert "candidate_claim_mismatch" in failed.error
     assert truth.calls == [preview.id]
 
 
