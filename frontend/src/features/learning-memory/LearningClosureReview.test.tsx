@@ -64,21 +64,23 @@ const closureRun = {
   version: 1,
 } as LearningClosureRunResponse;
 
+const durableCandidate = {
+  source_ref: "github_source:turn-3:0",
+  claim_text: "恢复 durable learning state 不需要重放完整聊天 turns。",
+  claim_kind: "invariant",
+  scope: "project",
+  next_step: "刷新后检查同一 Goal 是否仍可直接读取。",
+  evaluation_id: "eval-1",
+  evaluation_turn_id: "turn-3",
+};
+
 const durableOnlyRun = {
   ...closureRun,
   id: "closure-durable",
   source_hash: "durable-hash",
   generated_result: {
     candidates: [],
-    durable_learning_candidate: {
-      source_ref: "github_source:turn-3:0",
-      claim_text: "恢复 durable learning state 不需要重放完整聊天 turns。",
-      claim_kind: "invariant",
-      scope: "project",
-      next_step: "刷新后检查同一 Goal 是否仍可直接读取。",
-      evaluation_id: "eval-1",
-      evaluation_turn_id: "turn-3",
-    },
+    durable_learning_candidate: durableCandidate,
   },
   memory_run_id: null,
   memory_run: null,
@@ -156,6 +158,41 @@ describe("LearningClosureReview", () => {
       screen.getByText("恢复 durable learning state 不需要重放完整聊天 turns。"),
     ).toBeTruthy();
     expect(screen.getByText("可恢复的源码 Claim 与证据")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", {
+        name: "确认并保存学习成果",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("does not let an already-succeeded memory channel block durable confirmation", () => {
+    const succeededMemory = {
+      ...memoryRun,
+      status: "succeeded",
+      preview: { ...memoryRun.preview, writable: false },
+    } as MemoryRunResponse;
+    const combinedRun = {
+      ...closureRun,
+      id: "closure-combined",
+      source_hash: "combined-hash",
+      generated_result: {
+        ...closureRun.generated_result,
+        durable_learning_candidate: durableCandidate,
+      },
+      memory_run: succeededMemory,
+    } as LearningClosureRunResponse;
+
+    render(
+      <LearningClosureReview
+        isCommitting={false}
+        memoryRun={succeededMemory}
+        onConfirm={vi.fn()}
+        onContinue={vi.fn()}
+        run={combinedRun}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "待确认源码命题" })).toBeTruthy();
     expect(
       (screen.getByRole("button", {
         name: "确认并保存学习成果",
