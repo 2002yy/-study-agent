@@ -31,6 +31,14 @@ class LearningGoal:
 
 
 @dataclass(frozen=True)
+class LearningGoalContext:
+    goal_id: str
+    thread_id: str
+    focused_at: str
+    focus_pinned: bool = False
+
+
+@dataclass(frozen=True)
 class LearningClaim:
     id: str = field(default_factory=lambda: new_id("claim"))
     topic_id: str = ""

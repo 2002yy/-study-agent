@@ -77,7 +77,7 @@ def _build_v16_database(db_path) -> None:
         connection.commit()
 
 
-def test_v17_initializes_normalized_learning_truth_tables(tmp_path):
+def test_runtime_initializes_normalized_learning_truth_tables(tmp_path):
     db_path = tmp_path / "runtime.db"
     RuntimeDatabase(db_path).initialize()
 
@@ -95,7 +95,7 @@ def test_v17_initializes_normalized_learning_truth_tables(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(source_evidence)")
         }
 
-    assert version == str(SCHEMA_VERSION) == "17"
+    assert version == str(SCHEMA_VERSION) == "18"
     assert {
         "learning_topics",
         "learning_goals",
@@ -147,7 +147,7 @@ def test_v16_upgrade_preserves_existing_runtime_data(tmp_path):
         claim_count = connection.execute("SELECT COUNT(*) FROM learning_claims").fetchone()[0]
         evidence_count = connection.execute("SELECT COUNT(*) FROM source_evidence").fetchone()[0]
 
-    assert version == "17"
+    assert version == str(SCHEMA_VERSION) == "18"
     assert "legacy-only" in state
     assert claim_count == 0
     assert evidence_count == 0
@@ -185,9 +185,12 @@ def test_v17_migration_failure_rolls_back_cleanly(tmp_path):
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT value FROM runtime_meta WHERE key = 'schema_version'"
-        ).fetchone()[0] == "17"
+        ).fetchone()[0] == str(SCHEMA_VERSION)
         assert connection.execute(
             "SELECT status FROM runtime_migrations WHERE version = 17"
+        ).fetchone()[0] == "completed"
+        assert connection.execute(
+            "SELECT status FROM runtime_migrations WHERE version = 18"
         ).fetchone()[0] == "completed"
 
 

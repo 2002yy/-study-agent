@@ -11,6 +11,7 @@ from src.domain.learning_truth import (
     EvidenceBinding,
     LearningClaim,
     LearningGoal,
+    LearningGoalContext,
     LearningHypothesis,
     LearningTopic,
     NextStep,
@@ -18,6 +19,7 @@ from src.domain.learning_truth import (
     UnderstandingClaimResult,
     UnderstandingEvidence,
 )
+from src.domain.runtime_entities import utc_now
 from src.infrastructure.sqlite.database import RuntimeDatabase
 
 
@@ -27,6 +29,8 @@ _ALLOWED_EVIDENCE_ROLES = {
     "supporting_prerequisite",
 }
 _ALLOWED_UNDERSTANDING_RESULTS = {"pass", "partial", "fail"}
+_ALLOWED_GOAL_STATUSES = {"active", "blocked", "completed", "abandoned"}
+_TERMINAL_GOAL_STATUSES = {"completed", "abandoned"}
 
 
 class LearningTruthRepository:
@@ -64,26 +68,200 @@ class LearningTruthRepository:
         return [_topic_from_row(row) for row in rows]
 
     def create_goal(self, goal: LearningGoal) -> LearningGoal:
-        if not goal.objective.strip():
-            raise ValueError("Learning goal objective is required")
+        self._validate_goal(goal)
         with self.database.connect() as connection:
             self._require_topic(connection, goal.topic_id)
-            connection.execute(
-                """
-                INSERT INTO learning_goals(
-                    id, topic_id, objective, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    goal.id,
-                    goal.topic_id,
-                    goal.objective,
-                    goal.status,
-                    goal.created_at,
-                    goal.updated_at,
-                ),
-            )
+            self._insert_goal(connection, goal)
         return goal
+
+    def create_goal_for_thread(
+        self,
+        goal: LearningGoal,
+        *,
+        thread_id: str,
+        focus_pinned: bool = False,
+    ) -> tuple[LearningGoal, LearningGoalContext]:
+        """Atomically create a Goal and bind its navigation context to a ChatThread."""
+
+        self._validate_goal(goal)
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_topic(connection, goal.topic_id)
+                self._require_thread(connection, thread_id)
+                self._insert_goal(connection, goal)
+                if focus_pinned:
+                    self._unpin_thread_goals(connection, thread_id)
+                context = LearningGoalContext(
+                    goal_id=goal.id,
+                    thread_id=thread_id,
+                    focused_at=goal.updated_at,
+                    focus_pinned=focus_pinned,
+                )
+                self._insert_goal_context(connection, context)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return goal, context
+
+    def bind_goal_context(
+        self,
+        goal_id: str,
+        *,
+        thread_id: str,
+        focus_pinned: bool = False,
+        focused_at: str | None = None,
+    ) -> LearningGoalContext:
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_goal(connection, goal_id)
+                self._require_thread(connection, thread_id)
+                existing = connection.execute(
+                    "SELECT * FROM learning_goal_contexts WHERE goal_id = ?",
+                    (goal_id,),
+                ).fetchone()
+                if existing is not None and str(existing["thread_id"]) != thread_id:
+                    raise ValueError("Learning Goal is already bound to another thread")
+                if focus_pinned:
+                    self._unpin_thread_goals(connection, thread_id, except_goal_id=goal_id)
+                context = LearningGoalContext(
+                    goal_id=goal_id,
+                    thread_id=thread_id,
+                    focused_at=focused_at or utc_now(),
+                    focus_pinned=focus_pinned,
+                )
+                if existing is None:
+                    self._insert_goal_context(connection, context)
+                else:
+                    connection.execute(
+                        """
+                        UPDATE learning_goal_contexts
+                        SET focused_at = ?, focus_pinned = ?
+                        WHERE goal_id = ?
+                        """,
+                        (context.focused_at, int(context.focus_pinned), goal_id),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return context
+
+    def get_goal_context(self, goal_id: str) -> LearningGoalContext | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM learning_goal_contexts WHERE goal_id = ?",
+                (goal_id,),
+            ).fetchone()
+        return _goal_context_from_row(row) if row else None
+
+    def focus_goal(
+        self,
+        goal_id: str,
+        *,
+        pinned: bool | None = None,
+    ) -> LearningGoalContext:
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                goal = self._require_goal(connection, goal_id)
+                if str(goal["status"]) not in {"active", "blocked"}:
+                    raise ValueError("Only active or blocked Goals can become current focus")
+                row = connection.execute(
+                    "SELECT * FROM learning_goal_contexts WHERE goal_id = ?",
+                    (goal_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Learning Goal has no thread context: {goal_id}")
+                thread_id = str(row["thread_id"])
+                next_pinned = bool(row["focus_pinned"]) if pinned is None else pinned
+                if next_pinned:
+                    self._unpin_thread_goals(connection, thread_id, except_goal_id=goal_id)
+                focused_at = utc_now()
+                connection.execute(
+                    """
+                    UPDATE learning_goal_contexts
+                    SET focused_at = ?, focus_pinned = ?
+                    WHERE goal_id = ?
+                    """,
+                    (focused_at, int(next_pinned), goal_id),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return LearningGoalContext(
+            goal_id=goal_id,
+            thread_id=thread_id,
+            focused_at=focused_at,
+            focus_pinned=next_pinned,
+        )
+
+    def get_focus_goal(self, thread_id: str) -> LearningGoal | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT goal.*
+                FROM learning_goals AS goal
+                JOIN learning_goal_contexts AS context ON context.goal_id = goal.id
+                WHERE context.thread_id = ?
+                  AND goal.status IN ('active', 'blocked')
+                ORDER BY context.focus_pinned DESC,
+                         context.focused_at DESC,
+                         goal.updated_at DESC,
+                         goal.id
+                LIMIT 1
+                """,
+                (thread_id,),
+            ).fetchone()
+        return _goal_from_row(row) if row else None
+
+    def list_goals_for_thread(self, thread_id: str) -> list[LearningGoal]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT goal.*
+                FROM learning_goals AS goal
+                JOIN learning_goal_contexts AS context ON context.goal_id = goal.id
+                WHERE context.thread_id = ?
+                ORDER BY context.focus_pinned DESC,
+                         context.focused_at DESC,
+                         goal.updated_at DESC,
+                         goal.id
+                """,
+                (thread_id,),
+            ).fetchall()
+        return [_goal_from_row(row) for row in rows]
+
+    def update_goal_status(self, goal_id: str, status: str) -> LearningGoal:
+        if status not in _ALLOWED_GOAL_STATUSES:
+            raise ValueError("Unsupported Learning Goal status")
+        now = utc_now()
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_goal(connection, goal_id)
+                connection.execute(
+                    "UPDATE learning_goals SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, now, goal_id),
+                )
+                if status in _TERMINAL_GOAL_STATUSES:
+                    connection.execute(
+                        """
+                        UPDATE learning_goal_contexts
+                        SET focus_pinned = 0
+                        WHERE goal_id = ?
+                        """,
+                        (goal_id,),
+                    )
+                row = self._require_goal(connection, goal_id)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return _goal_from_row(row)
 
     def get_goal(self, goal_id: str) -> LearningGoal | None:
         with self.database.connect() as connection:
@@ -152,6 +330,8 @@ class LearningTruthRepository:
         claim: LearningClaim,
         revision: ClaimRevision,
         bindings: Sequence[EvidenceBinding],
+        *,
+        goal_id: str | None = None,
     ) -> ClaimRevisionBundle:
         """Atomically create a Claim together with its first immutable Revision."""
 
@@ -167,8 +347,17 @@ class LearningTruthRepository:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._require_topic(connection, claim.topic_id)
+                if goal_id is not None:
+                    goal = self._require_goal(connection, goal_id)
+                    if str(goal["topic_id"]) != claim.topic_id:
+                        raise ValueError("Learning Claim Goal belongs to another topic")
                 self._insert_claim(connection, claim)
-                bundle = self._insert_revision_bundle(connection, revision, normalized)
+                bundle = self._insert_revision_bundle(
+                    connection,
+                    revision,
+                    normalized,
+                    goal_id=goal_id,
+                )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -197,6 +386,8 @@ class LearningTruthRepository:
         self,
         revision: ClaimRevision,
         bindings: Sequence[EvidenceBinding],
+        *,
+        goal_id: str | None = None,
     ) -> ClaimRevisionBundle:
         normalized = tuple(bindings)
         self._validate_revision_bindings(normalized)
@@ -205,8 +396,17 @@ class LearningTruthRepository:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                self._require_claim(connection, revision.claim_id)
-                bundle = self._insert_revision_bundle(connection, revision, normalized)
+                claim = self._require_claim(connection, revision.claim_id)
+                if goal_id is not None:
+                    goal = self._require_goal(connection, goal_id)
+                    if str(goal["topic_id"]) != str(claim["topic_id"]):
+                        raise ValueError("Learning Claim Goal belongs to another topic")
+                bundle = self._insert_revision_bundle(
+                    connection,
+                    revision,
+                    normalized,
+                    goal_id=goal_id,
+                )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -258,56 +458,111 @@ class LearningTruthRepository:
                 result.append(bundle)
         return result
 
+    def list_goal_revisions(self, goal_id: str) -> list[ClaimRevisionBundle]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT relation.claim_revision_id
+                FROM learning_goal_claim_revisions AS relation
+                JOIN claim_revisions AS revision
+                  ON revision.id = relation.claim_revision_id
+                WHERE relation.goal_id = ?
+                ORDER BY relation.created_at, revision.created_at, revision.id
+                """,
+                (goal_id,),
+            ).fetchall()
+        result: list[ClaimRevisionBundle] = []
+        for row in rows:
+            bundle = self.get_revision(str(row["claim_revision_id"]))
+            if bundle is not None:
+                result.append(bundle)
+        return result
+
     def create_understanding_evidence(
         self,
         evidence: UnderstandingEvidence,
         results: Sequence[UnderstandingClaimResult],
     ) -> UnderstandingEvidence:
         normalized = tuple(results)
-        if not 1 <= len(normalized) <= 3:
-            raise ValueError("Understanding evidence must evaluate 1 to 3 claim revisions")
-        if len({item.claim_revision_id for item in normalized}) != len(normalized):
-            raise ValueError("Understanding evidence contains duplicate claim revisions")
-        if any(item.understanding_evidence_id != evidence.id for item in normalized):
-            raise ValueError("Understanding result owner does not match evidence id")
-        if any(item.result not in _ALLOWED_UNDERSTANDING_RESULTS for item in normalized):
-            raise ValueError("Unsupported understanding result")
-
+        self._validate_understanding_results(evidence, normalized)
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 for item in normalized:
                     self._require_revision(connection, item.claim_revision_id)
-                connection.execute(
-                    """
-                    INSERT INTO understanding_evidence(
-                        id, method, prompt, user_response, verified_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        evidence.id,
-                        evidence.method,
-                        evidence.prompt,
-                        evidence.user_response,
-                        evidence.verified_at,
-                    ),
-                )
-                connection.executemany(
-                    """
-                    INSERT INTO understanding_evidence_claims(
-                        understanding_evidence_id, claim_revision_id, result
-                    ) VALUES (?, ?, ?)
-                    """,
-                    [
-                        (evidence.id, item.claim_revision_id, item.result)
-                        for item in normalized
-                    ],
-                )
+                self._insert_understanding(connection, evidence, normalized)
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
         return evidence
+
+    def commit_semantic_closure(
+        self,
+        *,
+        goal_id: str,
+        understanding: UnderstandingEvidence | None = None,
+        results: Sequence[UnderstandingClaimResult] = (),
+        goal_status: str | None = None,
+        next_step: NextStep | None = None,
+    ) -> tuple[UnderstandingEvidence | None, NextStep | None, LearningGoal]:
+        """Atomically record a validation attempt and the resulting Goal navigation state."""
+
+        normalized = tuple(results)
+        if understanding is None and normalized:
+            raise ValueError("Understanding results require UnderstandingEvidence")
+        if understanding is not None:
+            self._validate_understanding_results(understanding, normalized)
+        if goal_status is not None and goal_status not in _ALLOWED_GOAL_STATUSES:
+            raise ValueError("Unsupported Learning Goal status")
+        if next_step is not None and next_step.goal_id != goal_id:
+            raise ValueError("NextStep owner does not match semantic closure Goal")
+        if next_step is not None and goal_status in _TERMINAL_GOAL_STATUSES:
+            raise ValueError("Terminal Learning Goal cannot create an active NextStep")
+
+        now = utc_now()
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_goal(connection, goal_id)
+                if understanding is not None:
+                    for item in normalized:
+                        self._require_revision(connection, item.claim_revision_id)
+                        relation = connection.execute(
+                            """
+                            SELECT 1 FROM learning_goal_claim_revisions
+                            WHERE goal_id = ? AND claim_revision_id = ?
+                            """,
+                            (goal_id, item.claim_revision_id),
+                        ).fetchone()
+                        if relation is None:
+                            raise ValueError(
+                                "UnderstandingEvidence can only validate revisions linked to its Goal"
+                            )
+                    self._insert_understanding(connection, understanding, normalized)
+                if goal_status is not None:
+                    connection.execute(
+                        "UPDATE learning_goals SET status = ?, updated_at = ? WHERE id = ?",
+                        (goal_status, now, goal_id),
+                    )
+                if goal_status in _TERMINAL_GOAL_STATUSES:
+                    connection.execute(
+                        "UPDATE learning_goal_contexts SET focus_pinned = 0 WHERE goal_id = ?",
+                        (goal_id,),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE learning_goal_contexts SET focused_at = ? WHERE goal_id = ?",
+                        (now, goal_id),
+                    )
+                if next_step is not None:
+                    self._insert_next_step(connection, next_step)
+                goal_row = self._require_goal(connection, goal_id)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return understanding, next_step, _goal_from_row(goal_row)
 
     def get_understanding_evidence(
         self, evidence_id: str
@@ -334,6 +589,34 @@ class LearningTruthRepository:
             )
             for item in result_rows
         )
+
+    def list_understanding_for_revision(
+        self,
+        revision_id: str,
+    ) -> list[tuple[UnderstandingEvidence, UnderstandingClaimResult]]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT evidence.*, relation.result
+                FROM understanding_evidence_claims AS relation
+                JOIN understanding_evidence AS evidence
+                  ON evidence.id = relation.understanding_evidence_id
+                WHERE relation.claim_revision_id = ?
+                ORDER BY evidence.verified_at, evidence.id
+                """,
+                (revision_id,),
+            ).fetchall()
+        return [
+            (
+                _understanding_from_row(row),
+                UnderstandingClaimResult(
+                    understanding_evidence_id=str(row["id"]),
+                    claim_revision_id=revision_id,
+                    result=str(row["result"]),
+                ),
+            )
+            for row in rows
+        ]
 
     def create_hypothesis(self, hypothesis: LearningHypothesis) -> LearningHypothesis:
         if not hypothesis.text.strip():
@@ -369,27 +652,23 @@ class LearningTruthRepository:
             ).fetchone()
         return _hypothesis_from_row(row) if row else None
 
+    def list_hypotheses_for_goal(self, goal_id: str) -> list[LearningHypothesis]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM learning_hypotheses
+                WHERE goal_id = ? ORDER BY created_at, id
+                """,
+                (goal_id,),
+            ).fetchall()
+        return [_hypothesis_from_row(row) for row in rows]
+
     def create_next_step(self, next_step: NextStep) -> NextStep:
         if not next_step.text.strip():
             raise ValueError("Next step text is required")
         with self.database.connect() as connection:
             self._require_goal(connection, next_step.goal_id)
-            connection.execute(
-                """
-                INSERT INTO next_steps(
-                    id, goal_id, text, status, is_primary, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    next_step.id,
-                    next_step.goal_id,
-                    next_step.text,
-                    next_step.status,
-                    int(next_step.is_primary),
-                    next_step.created_at,
-                    next_step.updated_at,
-                ),
-            )
+            self._insert_next_step(connection, next_step)
         return next_step
 
     def get_next_step(self, next_step_id: str) -> NextStep | None:
@@ -398,6 +677,84 @@ class LearningTruthRepository:
                 "SELECT * FROM next_steps WHERE id = ?", (next_step_id,)
             ).fetchone()
         return _next_step_from_row(row) if row else None
+
+    def list_next_steps_for_goal(self, goal_id: str) -> list[NextStep]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM next_steps
+                WHERE goal_id = ?
+                ORDER BY is_primary DESC, updated_at DESC, id
+                """,
+                (goal_id,),
+            ).fetchall()
+        return [_next_step_from_row(row) for row in rows]
+
+    @staticmethod
+    def _validate_goal(goal: LearningGoal) -> None:
+        if not goal.objective.strip():
+            raise ValueError("Learning goal objective is required")
+        if goal.status not in _ALLOWED_GOAL_STATUSES:
+            raise ValueError("Unsupported Learning Goal status")
+
+    @staticmethod
+    def _insert_goal(connection: sqlite3.Connection, goal: LearningGoal) -> None:
+        connection.execute(
+            """
+            INSERT INTO learning_goals(
+                id, topic_id, objective, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                goal.id,
+                goal.topic_id,
+                goal.objective,
+                goal.status,
+                goal.created_at,
+                goal.updated_at,
+            ),
+        )
+
+    @staticmethod
+    def _insert_goal_context(
+        connection: sqlite3.Connection,
+        context: LearningGoalContext,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO learning_goal_contexts(
+                goal_id, thread_id, focused_at, focus_pinned
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                context.goal_id,
+                context.thread_id,
+                context.focused_at,
+                int(context.focus_pinned),
+            ),
+        )
+
+    @staticmethod
+    def _unpin_thread_goals(
+        connection: sqlite3.Connection,
+        thread_id: str,
+        *,
+        except_goal_id: str | None = None,
+    ) -> None:
+        if except_goal_id is None:
+            connection.execute(
+                "UPDATE learning_goal_contexts SET focus_pinned = 0 WHERE thread_id = ?",
+                (thread_id,),
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE learning_goal_contexts
+                SET focus_pinned = 0
+                WHERE thread_id = ? AND goal_id <> ?
+                """,
+                (thread_id, except_goal_id),
+            )
 
     @staticmethod
     def _insert_claim(connection: sqlite3.Connection, claim: LearningClaim) -> None:
@@ -421,6 +778,8 @@ class LearningTruthRepository:
         connection: sqlite3.Connection,
         revision: ClaimRevision,
         bindings: tuple[EvidenceBinding, ...],
+        *,
+        goal_id: str | None = None,
     ) -> ClaimRevisionBundle:
         connection.execute(
             """
@@ -460,6 +819,15 @@ class LearningTruthRepository:
                     position=binding.position,
                 )
             )
+        if goal_id is not None:
+            connection.execute(
+                """
+                INSERT INTO learning_goal_claim_revisions(
+                    goal_id, claim_revision_id, created_at
+                ) VALUES (?, ?, ?)
+                """,
+                (goal_id, revision.id, revision.created_at),
+            )
         return ClaimRevisionBundle(revision=revision, evidence=tuple(stored_bindings))
 
     @staticmethod
@@ -487,6 +855,73 @@ class LearningTruthRepository:
             raise ValueError("Claim revision contains duplicate source evidence")
         for binding in bindings:
             _validate_source_evidence(binding.source)
+
+    @staticmethod
+    def _validate_understanding_results(
+        evidence: UnderstandingEvidence,
+        results: tuple[UnderstandingClaimResult, ...],
+    ) -> None:
+        if not 1 <= len(results) <= 3:
+            raise ValueError("Understanding evidence must evaluate 1 to 3 claim revisions")
+        if len({item.claim_revision_id for item in results}) != len(results):
+            raise ValueError("Understanding evidence contains duplicate claim revisions")
+        if any(item.understanding_evidence_id != evidence.id for item in results):
+            raise ValueError("Understanding result owner does not match evidence id")
+        if any(item.result not in _ALLOWED_UNDERSTANDING_RESULTS for item in results):
+            raise ValueError("Unsupported understanding result")
+
+    @staticmethod
+    def _insert_understanding(
+        connection: sqlite3.Connection,
+        evidence: UnderstandingEvidence,
+        results: tuple[UnderstandingClaimResult, ...],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO understanding_evidence(
+                id, method, prompt, user_response, verified_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                evidence.id,
+                evidence.method,
+                evidence.prompt,
+                evidence.user_response,
+                evidence.verified_at,
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO understanding_evidence_claims(
+                understanding_evidence_id, claim_revision_id, result
+            ) VALUES (?, ?, ?)
+            """,
+            [
+                (evidence.id, item.claim_revision_id, item.result)
+                for item in results
+            ],
+        )
+
+    @staticmethod
+    def _insert_next_step(connection: sqlite3.Connection, next_step: NextStep) -> None:
+        if not next_step.text.strip():
+            raise ValueError("Next step text is required")
+        connection.execute(
+            """
+            INSERT INTO next_steps(
+                id, goal_id, text, status, is_primary, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                next_step.id,
+                next_step.goal_id,
+                next_step.text,
+                next_step.status,
+                int(next_step.is_primary),
+                next_step.created_at,
+                next_step.updated_at,
+            ),
+        )
 
     @staticmethod
     def _store_or_reuse_source_evidence(
@@ -551,6 +986,15 @@ class LearningTruthRepository:
         ).fetchone()
         if row is None:
             raise ValueError(f"Learning topic not found: {topic_id}")
+        return row
+
+    @staticmethod
+    def _require_thread(connection: sqlite3.Connection, thread_id: str) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM chat_threads WHERE id = ?", (thread_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Chat thread not found: {thread_id}")
         return row
 
     @staticmethod
@@ -629,6 +1073,15 @@ def _goal_from_row(row: sqlite3.Row) -> LearningGoal:
         status=str(row["status"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def _goal_context_from_row(row: sqlite3.Row) -> LearningGoalContext:
+    return LearningGoalContext(
+        goal_id=str(row["goal_id"]),
+        thread_id=str(row["thread_id"]),
+        focused_at=str(row["focused_at"]),
+        focus_pinned=bool(row["focus_pinned"]),
     )
 
 

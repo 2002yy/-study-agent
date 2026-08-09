@@ -116,7 +116,12 @@ class LearningOutcomeCommitService:
                 source_commit=primary_commit,
                 reason="initial",
             )
-            bundle = self.repository.commit_new_claim(claim, revision, bindings)
+            bundle = self.repository.commit_new_claim(
+                claim,
+                revision,
+                bindings,
+                goal_id=goal_id,
+            )
             return LearningOutcomeCommitResult(
                 outcome="claim",
                 claim=claim,
@@ -143,7 +148,11 @@ class LearningOutcomeCommitService:
             source_commit=primary_commit,
             reason=revision_reason,
         )
-        bundle = self.repository.commit_revision(revision, bindings)
+        bundle = self.repository.commit_revision(
+            revision,
+            bindings,
+            goal_id=goal_id,
+        )
         return LearningOutcomeCommitResult(
             outcome="claim",
             claim=existing_claim,
