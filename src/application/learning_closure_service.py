@@ -253,18 +253,16 @@ class LearningClosureService:
                 last_completed_turn_id=run.last_completed_turn_id,
             )
             has_durable_candidate = self._has_durable_candidate(run.generated_result)
-            if has_durable_candidate and self.learning_truth_committer is None:
+            if has_durable_candidate:
                 commit_stage = "learning_truth"
-                raise ValueError("Durable learning truth committer is unavailable")
-            if self.learning_truth_committer is not None:
-                commit_stage = "learning_truth"
+                if self.learning_truth_committer is None:
+                    raise ValueError("Durable learning truth committer is unavailable")
                 truth_result = self.learning_truth_committer.commit(run)
-                if has_durable_candidate:
-                    truth_status = str(getattr(truth_result, "status", ""))
-                    if truth_status not in _DURABLE_TRUTH_SUCCESS:
-                        raise ValueError(
-                            f"Durable learning truth rejected candidate: {truth_status or 'unknown'}"
-                        )
+                truth_status = str(getattr(truth_result, "status", ""))
+                if truth_status not in _DURABLE_TRUTH_SUCCESS:
+                    raise ValueError(
+                        f"Durable learning truth rejected candidate: {truth_status or 'unknown'}"
+                    )
             if run.memory_run_id:
                 commit_stage = "memory"
                 memory_run = self.memory_service.commit(run.memory_run_id)
@@ -317,8 +315,7 @@ class LearningClosureService:
         return run
 
     def list(self, *, limit: int = 20) -> list[LearningClosureRun]:
-        safe_limit = max(1, min(limit, 100))
-        return self.repository.list(limit=safe_limit)
+        return self.repository.list(limit=limit)
 
     def linked_memory_run(self, run: LearningClosureRun):
         return self.memory_service.get(run.memory_run_id) if run.memory_run_id else None
