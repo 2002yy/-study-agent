@@ -349,11 +349,12 @@ export function useLearningSessionRuntime(options: {
   );
 
   const learningResume =
-    learningResumeState?.sessionId === chatController.threadId
+    learningResumeState && learningResumeState.sessionId === chatController.threadId
       ? learningResumeState.resume
       : null;
   const learningResumeError =
-    learningResumeErrorState?.sessionId === chatController.threadId
+    learningResumeErrorState &&
+    learningResumeErrorState.sessionId === chatController.threadId
       ? learningResumeErrorState.error
       : "";
 
