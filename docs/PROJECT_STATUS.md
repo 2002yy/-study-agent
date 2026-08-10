@@ -1,7 +1,7 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-09  
+> 更新：2026-08-10  
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -20,9 +20,10 @@
 - **P2-D-3A：完成。** Semantic Closure + durable Goal navigation 已进入 main。
 - **P2-D-3B：完成。** bounded durable ResumeContext + read-only resume API 已进入 main。
 - **P2-D GrillMe 决策 1–49：已冻结。**
-- **下一实施批次：P2-D-3C — Minimal Durable Learning UI。**
+- **下一实施批次：P2-D-4 - Freshness + Revalidation + Full Golden Journey。**
+- **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 
-当前 main 基线：`c7a3fa0d87ec8646c6063b853f4f370d23aa019a`（PR #124 merge）。
+当前 main 基线：`e413072`（PR #125 merge）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -139,7 +140,7 @@ provider unavailable
 
 **合同冻结 ≠ 功能已上线。** 以下实现顺序仍是唯一当前执行顺序。
 
-## 6. P2-D-3 — IN PROGRESS
+## 6. P2-D-3 — COMPLETE
 
 目标：让 D-2 已存在的 durable truth 真正进入学习闭环，而不是继续依赖 legacy `learning_state` JSON 恢复。
 
@@ -182,7 +183,9 @@ PR #124 merge：`c7a3fa0d87ec8646c6063b853f4f370d23aa019a`。
 - 已有 durable context 但没有 active Goal → `durable/no_active_goal`，绝不 resurrect legacy state；
 - legacy `confirmed_points` 只作为 `legacy_confirmed_points` 展示，`claims` 始终为空，不升级为 formal Claim/mastery。
 
-### 6.3 P2-D-3C — Minimal Durable Learning UI — NEXT
+### 6.3 P2-D-3C - Minimal Durable Learning UI - COMPLETE
+
+PR #125 merge：`e413072`。
 
 目标不是增加管理后台，而是把 D3B ResumeContext 接到当前学习 surface，让用户直接看到“正在学什么、哪些 Claim 有 durable 依据、哪里还没解决、理解验证到哪一步、下一步是什么”。
 
@@ -211,7 +214,7 @@ PR #124 merge：`c7a3fa0d87ec8646c6063b853f4f370d23aa019a`。
 - 不引入知识图谱、Claim dashboard、Route editor、Retention dashboard；
 - D3C 不实现 freshness/revalidation。
 
-## 7. P2-D-4 — AFTER D-3C
+## 7. P2-D-4 — NEXT
 
 - Primary unchanged → current；
 - Primary materially changed → stale_candidate；
@@ -233,7 +236,9 @@ D-2 mini Golden Journey        ✅ complete
 P2-D-3A semantic closure       ✅ complete
 P2-D-3B durable resume         ✅ complete
 
-P2-D-3C minimal durable UI     ← NEXT
+P2-D-3C minimal durable UI     ✅ complete
+
+P2-D-4                         ← NEXT
 
 P2-D-4
 freshness + revalidation + full Golden Journey
