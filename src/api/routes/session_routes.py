@@ -18,8 +18,10 @@ from src.api.models.common import (
 from src.api.models.memory import MemoryRunResponse
 from src.application.helpers import runtime_settings_payload
 from src.application.learning_closure_service import LearningClosureNotEligible
+from src.application.learning_revalidation import LearningRevalidationService
 from src.application.runtime_repository import (
     get_learning_closure_service,
+    get_learning_revalidation_service,
     get_learning_resume_service,
     get_session_service,
 )
@@ -77,6 +79,30 @@ def get_learning_resume(
         session_id,
         legacy_navigation=navigation if isinstance(navigation, dict) else {},
     )
+
+
+@router.post("/sessions/{session_id}/claims/{claim_id}/revalidate")
+def revalidate_claim(
+    session_id: str,
+    claim_id: str,
+    service: LearningRevalidationService = Depends(get_learning_revalidation_service),
+) -> dict[str, Any]:
+    """Re-converge one durable Claim and commit a Revision on the same lineage."""
+
+    try:
+        result = service.revalidate(session_id, claim_id)
+    except ValueError as exc:
+        reason = str(exc)
+        status = 404 if reason == "claim_not_found" else 409
+        raise HTTPException(status_code=status, detail=reason) from exc
+    return {
+        "claim_id": result.claim_id,
+        "outcome": result.outcome,
+        "revision_id": result.revision_id,
+        "unresolved_reason": result.unresolved_reason,
+        "head_commit": result.head_commit,
+        "freshness_status": result.freshness_status,
+    }
 
 
 @router.post("/sessions/new", response_model=SessionNewResponse)

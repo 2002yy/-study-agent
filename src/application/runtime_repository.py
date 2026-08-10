@@ -287,10 +287,45 @@ def get_learning_semantic_closure_service():
 
 
 @lru_cache(maxsize=1)
-def get_learning_resume_service():
-    from src.application.learning_resume import LearningResumeService
+def get_learning_revalidation_service():
+    from src.application.learning_freshness import LearningFreshnessService
+    from src.application.learning_outcome_commit import LearningOutcomeCommitService
+    from src.application.learning_revalidation import LearningRevalidationService
+    from src.application.learning_source_evidence import LearningSourceEvidenceService
+    from src.web.github_freshness import (
+        GitHubFreshnessBlobReader,
+        GitHubFreshnessHeadResolver,
+    )
 
-    return LearningResumeService(get_learning_truth_repository())
+    truth = get_learning_truth_repository()
+    source_evidence = LearningSourceEvidenceService(get_github_snapshot_service())
+    freshness = LearningFreshnessService(
+        head_resolver=GitHubFreshnessHeadResolver(),
+        blob_reader=GitHubFreshnessBlobReader(),
+    )
+    return LearningRevalidationService(
+        truth,
+        source_evidence_service=source_evidence,
+        commit_service=LearningOutcomeCommitService(truth),
+        freshness_service=freshness,
+    )
+
+
+def get_learning_resume_service():
+    from src.application.learning_freshness import LearningFreshnessService
+    from src.application.learning_resume import LearningResumeService
+    from src.web.github_freshness import (
+        GitHubFreshnessBlobReader,
+        GitHubFreshnessHeadResolver,
+    )
+
+    return LearningResumeService(
+        get_learning_truth_repository(),
+        freshness_evaluator=LearningFreshnessService(
+            head_resolver=GitHubFreshnessHeadResolver(),
+            blob_reader=GitHubFreshnessBlobReader(),
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

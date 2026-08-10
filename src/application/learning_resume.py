@@ -8,10 +8,25 @@ context.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
-from src.domain.learning_truth import ClaimRevisionBundle, LearningGoal, NextStep
+from src.domain.learning_truth import (
+    ClaimRevisionBundle,
+    LearningGoal,
+    NextStep,
+)
 from src.repositories.learning_truth_repository import LearningTruthRepository
+
+
+class FreshnessEvaluator(Protocol):
+    """On-demand source-freshness evaluation for a Claim revision bundle."""
+
+    def evaluate(
+        self,
+        bundle: ClaimRevisionBundle,
+        *,
+        ref: str = "",
+    ) -> Any: ...
 
 
 _MAX_RESUME_CLAIMS = 3
@@ -22,8 +37,13 @@ _MAX_OPTIONAL_NEXT_STEPS = 2
 class LearningResumeService:
     """Build the compact semantic state needed to continue learning."""
 
-    def __init__(self, repository: LearningTruthRepository) -> None:
+    def __init__(
+        self,
+        repository: LearningTruthRepository,
+        freshness_evaluator: FreshnessEvaluator | None = None,
+    ) -> None:
         self.repository = repository
+        self.freshness_evaluator = freshness_evaluator
 
     def build(
         self,
@@ -55,7 +75,17 @@ class LearningResumeService:
         )
         claim_count = len(latest_revisions)
         selected_revisions = latest_revisions[-_MAX_RESUME_CLAIMS:]
-        claims = [self._claim_projection(bundle) for bundle in selected_revisions]
+        if self.freshness_evaluator is None:
+            claims = [
+                self._claim_projection(bundle) for bundle in selected_revisions
+            ]
+        else:
+            claims = [
+                self._claim_projection(
+                    bundle, freshness=self._evaluate_freshness(bundle)
+                )
+                for bundle in selected_revisions
+            ]
 
         hypotheses = [
             item
@@ -98,7 +128,12 @@ class LearningResumeService:
             ],
         }
 
-    def _claim_projection(self, bundle: ClaimRevisionBundle) -> dict[str, Any]:
+    def _claim_projection(
+        self,
+        bundle: ClaimRevisionBundle,
+        *,
+        freshness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         claim = self.repository.get_claim(bundle.revision.claim_id)
         validations = self.repository.list_understanding_for_revision(
             bundle.revision.id
@@ -118,7 +153,7 @@ class LearningResumeService:
             None,
         )
         supporting = [item for item in bundle.evidence if item.role != "primary"]
-        return {
+        projection = {
             "claim_id": bundle.revision.claim_id,
             "revision_id": bundle.revision.id,
             "text": bundle.revision.claim_text,
@@ -139,6 +174,34 @@ class LearningResumeService:
             "supporting_evidence": [
                 _evidence_projection(item) for item in supporting
             ],
+        }
+        if freshness is not None:
+            projection["freshness"] = freshness
+        return projection
+
+
+    def _evaluate_freshness(self, bundle: ClaimRevisionBundle) -> dict[str, Any]:
+        if self.freshness_evaluator is None:
+            return {}
+        try:
+            evaluation = self.freshness_evaluator.evaluate(bundle)
+        except Exception as exc:  # noqa: BLE001 - provider boundary explicit
+            return {
+                "status": "unavailable",
+                "unavailable_reason": f"{type(exc).__name__}: {exc}",
+            }
+        primary = _freshness_detail(evaluation.primary, drift=False)
+        supporting_drift = tuple(
+            _freshness_detail(item, drift=True)
+            for item in evaluation.supporting_drift
+        )
+        return {
+            "status": str(evaluation.status),
+            "head_commit": str(evaluation.head_commit or ""),
+            "reason": str(primary.get("reason") or ""),
+            "primary": primary,
+            "supporting_drift": supporting_drift,
+            "unavailable_reason": str(evaluation.unavailable_reason or ""),
         }
 
     @staticmethod
@@ -180,6 +243,22 @@ class LearningResumeService:
             # Deliberately not exposed as formal Claims/mastery.
             "legacy_confirmed_points": legacy_points,
         }
+
+
+
+def _freshness_detail(payload: Any, *, drift: bool) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    keys = (
+        "role",
+        "path",
+        "symbol",
+        "reason",
+        "head_file_sha",
+        "materially_changed",
+        "error",
+    )
+    return {key: payload.get(key) for key in keys if key in payload}
 
 
 def _latest_revision_per_claim(
