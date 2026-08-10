@@ -225,7 +225,7 @@ PR #125 merge：`e413072`。
 - 完成 full Golden Learning Journey；
 - Chromium + Firefox sample + WebKit sample + 实体手机验收。
 
-### D-4A — Freshness evaluation service (NEXT)
+### D-4A — Freshness evaluation service - COMPLETE
 
 - 新服务 LearningFreshnessService.evaluate(claim, head_snapshot)：
   - freshness 是 on-demand derived 状态，不新增持久化表/migration；
@@ -237,7 +237,7 @@ PR #125 merge：`e413072`。
   - provider 找不到→ unavailable，不推导 Claim false；
   - 归一化单元测试覆盖 TESTING.md L109–119 判定规则。
 
-### D-4B — Resume freshness + UI + revalidation entry (AFTER D-4A)
+### D-4B — Resume freshness + UI + revalidation entry (NEXT)
 
 - GET /learning-resume 成列输出 freshness status + drift detail（案例化；
 - LearningPanel 情境化提示：stale_candidate/source_changed 徽章 + 渐进披露（F1/F2）；
@@ -268,7 +268,8 @@ P2-D-3B durable resume         ✅ complete
 
 P2-D-3C minimal durable UI     ✅ complete
 
-P2-D-4A freshness service      ← NEXT
+P2-D-4A freshness service      ✅ complete (PR #126)
+P2-D-4B resume freshness + UI ← NEXT
 P2-D-4B resume freshness + UI
 P2-D-4C full Golden Journey
 P2-D-4D cross-browser
