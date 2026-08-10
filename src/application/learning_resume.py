@@ -135,9 +135,7 @@ class LearningResumeService:
         freshness: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         claim = self.repository.get_claim(bundle.revision.claim_id)
-        validations = self.repository.list_understanding_for_revision(
-            bundle.revision.id
-        )
+        validations = self._understanding_for_lineage(bundle)
         latest_validation = validations[-1] if validations else None
         validation_result = (
             latest_validation[1].result if latest_validation is not None else "none"
@@ -179,6 +177,34 @@ class LearningResumeService:
             projection["freshness"] = freshness
         return projection
 
+
+    def _understanding_for_lineage(
+        self,
+        bundle: ClaimRevisionBundle,
+    ) -> list[tuple[Any, Any]]:
+        """Resolve understanding evidence along the Claim lineage.
+
+        Understanding belongs to the Claim, not to a single Revision snapshot, so
+        an explicit revalidation (which never decides mastery) must not reset the
+        projection to ``proposed`` just because the newest Revision has no
+        evidence row of its own yet.
+        """
+        validations = self.repository.list_understanding_for_revision(
+            bundle.revision.id
+        )
+        if validations:
+            return validations
+        for older in reversed(
+            self.repository.list_revisions(bundle.revision.claim_id)
+        ):
+            if older.revision.id == bundle.revision.id:
+                continue
+            validations = self.repository.list_understanding_for_revision(
+                older.revision.id
+            )
+            if validations:
+                return validations
+        return []
 
     def _evaluate_freshness(self, bundle: ClaimRevisionBundle) -> dict[str, Any]:
         if self.freshness_evaluator is None:

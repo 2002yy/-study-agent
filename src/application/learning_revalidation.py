@@ -30,6 +30,16 @@ class RevalidationResult:
     unavailable_reason: str = ""
 
 
+def _repository_url(value: str) -> str:
+    """Normalize a persisted ``owner/repo`` identity back into a snapshot-parseable URL."""
+    repository = str(value or "").strip()
+    if not repository:
+        return ""
+    if "://" in repository:
+        return repository
+    return f"https://github.com/{repository}"
+
+
 class LearningRevalidationService:
     """Revalidate an existing durable Claim without forking its lineage."""
 
@@ -60,7 +70,7 @@ class LearningRevalidationService:
             (item for item in bundle.evidence if item.role == "primary"),
             None,
         )
-        repository_url = primary.source.repository if primary is not None else ""
+        repository_url = _repository_url(primary.source.repository) if primary is not None else ""
         if not repository_url:
             raise ValueError("claim_has_no_primary_source")
 
@@ -68,6 +78,7 @@ class LearningRevalidationService:
         convergence = self.source_evidence_service.search_and_converge(
             repository_url,
             claim_text,
+            force_refresh=True,
         )
         if not convergence.claim_ready:
             return RevalidationResult(

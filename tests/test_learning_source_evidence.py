@@ -266,6 +266,7 @@ def test_search_and_converge_uses_exact_commit_and_one_hop_only():
             "ref": "main",
             "top_k": 12,
             "include_ci": False,
+            "force_refresh": False,
         }
     ]
     assert graph.calls == [

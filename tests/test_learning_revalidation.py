@@ -63,10 +63,12 @@ class FakeSourceEvidence:
         self.result = result or EvidenceConvergenceResult(
             unresolved_reason="missing_source"
         )
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, bool]] = []
 
-    def search_and_converge(self, repo_url: str, query: str):
-        self.calls.append((repo_url, query))
+    def search_and_converge(
+        self, repo_url: str, query: str, *, force_refresh: bool = False
+    ):
+        self.calls.append((repo_url, query, force_refresh))
         return self.result
 
 
@@ -135,7 +137,7 @@ def test_revalidate_no_convergence_returns_unresolved(tmp_path):
     assert result.unresolved_reason == "ambiguous_owner"
     assert result.revision_id == ""
     assert source_evidence.calls == [
-        ("2002yy/study-agent", "This claim will not re-converge.")
+        ("https://github.com/2002yy/study-agent", "This claim will not re-converge.", True)
     ]
 
 

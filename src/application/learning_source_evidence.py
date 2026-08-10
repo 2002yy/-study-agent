@@ -105,6 +105,7 @@ class LearningSourceEvidenceService:
         *,
         ref: str = "",
         top_k: int = 12,
+        force_refresh: bool = False,
     ) -> EvidenceConvergenceResult:
         searched = self.snapshot_service.search_repository(
             repo_url,
@@ -112,6 +113,7 @@ class LearningSourceEvidenceService:
             ref=ref,
             top_k=top_k,
             include_ci=False,
+            force_refresh=force_refresh,
         )
         if searched.get("ok") is not True:
             return EvidenceConvergenceResult(

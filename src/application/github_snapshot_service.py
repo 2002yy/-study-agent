@@ -264,6 +264,7 @@ class GitHubSnapshotService:
         ref: str = "",
         top_k: int = 12,
         include_ci: bool | None = None,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         focused_query = _focused(query)
         if not focused_query:
@@ -277,6 +278,7 @@ class GitHubSnapshotService:
             repo_url,
             query=focused_query,
             ref=ref,
+            force_refresh=force_refresh,
         )
         if snapshot.get("ok") is not True:
             return {
