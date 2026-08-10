@@ -279,7 +279,7 @@ P2-D-3B durable resume         ✅ complete
 P2-D-3C minimal durable UI     ✅ complete
 
 P2-D-4A freshness service      ✅ complete (PR #126)
-P2-D-4B resume freshness + UI  ✅ complete (PR #127)
+P2-D-4B resume freshness + UI  ✅ complete (PR #126)
 P2-D-4C full Golden Journey    ← NEXT
 P2-D-4D cross-browser
 
