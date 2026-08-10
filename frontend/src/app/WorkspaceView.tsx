@@ -125,6 +125,8 @@ export function WorkspaceView({
       />
       <div className="chat-column">
         <LearningStrip
+          resume={learningView.learningResume}
+          resumeError={learningView.learningResumeError}
           lastChat={chatController.lastChat}
           visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}

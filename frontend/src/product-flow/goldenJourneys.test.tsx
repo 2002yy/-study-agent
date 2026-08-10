@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChatResponse } from "../types";
 import { LearningStrip } from "../features/learning/LearningStrip";
+import type { LearningResumeResponse } from "../features/learning/learningResumeApi";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
 import { RestoreCard } from "../features/single-chat/RestoreCard";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
@@ -117,6 +118,43 @@ function learningResponse(): ChatResponse {
       },
     },
     rag: baseRag,
+  };
+}
+
+function sourceLearningResume(): LearningResumeResponse {
+  return {
+    source: "durable",
+    status: "active",
+    topic: { topic_id: "topic-source", title: "FastAPI 源码学习" },
+    goal: {
+      goal_id: "goal-source",
+      topic_id: "topic-source",
+      objective: "通过 FastAPI 源码理解依赖注入调用链",
+      status: "active",
+    },
+    claims: [
+      {
+        claim_id: "claim-source",
+        revision_id: "revision-source",
+        text: "依赖解析沿当前调用链逐层完成。",
+        claim_kind: "mechanism",
+        scope: "FastAPI dependency injection",
+        understanding_status: "partial",
+        validation_result: "partial",
+        latest_validation: { method: "explain", result: "partial" },
+        primary_evidence: {},
+        supporting_evidence: [],
+      },
+    ],
+    claim_count: 1,
+    unresolved: [],
+    next_step: {
+      next_step_id: "step-source",
+      text: "用自己的话解释一次依赖解析调用链",
+      status: "active",
+      is_primary: true,
+    },
+    optional_next_steps: [],
   };
 }
 
@@ -282,7 +320,13 @@ describe("Study Agent product-level Golden Journeys", () => {
     expect(productSurfaces).toBeLessThanOrEqual(budget.maxProductSurfaces);
 
     const { container: stripContainer } = render(
-      <LearningStrip lastChat={learningResponse()} visitedPhases={["verify"]} memoryStatus={null} />,
+      <LearningStrip
+        resume={sourceLearningResume()}
+        resumeError=""
+        lastChat={learningResponse()}
+        visitedPhases={["verify"]}
+        memoryStatus={null}
+      />,
     );
     const stripText = stripContainer.innerHTML;
     expect(stripText).toContain("通过 FastAPI 源码理解依赖注入调用链");

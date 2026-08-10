@@ -1,4 +1,11 @@
-import { Archive, CheckCircle2, Compass, MessageCircle, ShieldCheck } from "lucide-react";
+import {
+  Archive,
+  BookOpenCheck,
+  CheckCircle2,
+  Compass,
+  MessageCircle,
+  ShieldCheck,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { MemoryRunResponse } from "../../types";
@@ -10,10 +17,17 @@ type ClosureCandidate = {
   learner_pending?: boolean;
 };
 
+type DurableLearningCandidate = {
+  sourceRef: string;
+  claimText: string;
+  nextStep: string;
+};
+
 export type ClosureReviewModel = {
   confirmed: string[];
   unresolved: string[];
   next: string[];
+  pendingDurable: string[];
   impactLabels: string[];
 };
 
@@ -26,6 +40,7 @@ const IMPACT_LABELS: Record<string, string> = {
   revision_notes: "仍需补强的内容",
   session_archive: "本次学习归档",
 };
+const DURABLE_IMPACT_LABEL = "可恢复的源码 Claim 与证据";
 
 function candidatesFrom(run: LearningClosureRunResponse): ClosureCandidate[] {
   const raw = run.generated_result.candidates;
@@ -40,6 +55,20 @@ function candidatesFrom(run: LearningClosureRunResponse): ClosureCandidate[] {
           candidate.content.trim(),
       ),
   );
+}
+
+function durableCandidateFrom(
+  run: LearningClosureRunResponse,
+): DurableLearningCandidate | null {
+  const raw = asRecord(run.generated_result.durable_learning_candidate);
+  const sourceRef = stringValue(raw.source_ref);
+  const claimText = stringValue(raw.claim_text);
+  if (!sourceRef || !claimText) return null;
+  return {
+    sourceRef,
+    claimText,
+    nextStep: stringValue(raw.next_step),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -66,6 +95,7 @@ export function buildClosureReviewModel(
   memoryRun: MemoryRunResponse | null,
 ): ClosureReviewModel {
   const candidates = candidatesFrom(run);
+  const durableCandidate = durableCandidateFrom(run);
   const committedSnapshot = asRecord(run.committed_snapshot);
   const structuredInput = asRecord(committedSnapshot.structured_input);
   const committedLearning = asRecord(structuredInput.committed_learning_state);
@@ -113,17 +143,20 @@ export function buildClosureReviewModel(
     ...candidates
       .filter((candidate) => candidate.target === "current_focus")
       .map((candidate) => candidate.content.trim()),
+    durableCandidate?.nextStep ?? "",
   ]);
+  const pendingDurable = durableCandidate ? [durableCandidate.claimText] : [];
 
   const impactLabels = Array.from(
-    new Set(
-      (memoryRun?.updates ?? []).map(
+    new Set([
+      ...(memoryRun?.updates ?? []).map(
         (update) => IMPACT_LABELS[update.target] ?? "长期学习记录",
       ),
-    ),
+      ...(durableCandidate ? [DURABLE_IMPACT_LABEL] : []),
+    ]),
   );
 
-  return { confirmed, unresolved, next, impactLabels };
+  return { confirmed, unresolved, next, pendingDurable, impactLabels };
 }
 
 function ReviewSection({
@@ -170,10 +203,18 @@ export function LearningClosureReview({
   onContinue: () => void;
 }) {
   const review = buildClosureReviewModel(run, memoryRun);
+  const hasDurableCandidate = review.pendingDurable.length > 0;
+  const hasMemoryImpact = Boolean(memoryRun) && review.impactLabels.some(
+    (label) => label !== DURABLE_IMPACT_LABEL,
+  );
+  const memoryChannelConfirmable =
+    !memoryRun ||
+    memoryRun.status === "succeeded" ||
+    (Boolean(memoryRun.preview.writable) && hasMemoryImpact);
   const canConfirm =
     run.status === "preview_ready" &&
-    Boolean(memoryRun?.preview.writable) &&
-    review.impactLabels.length > 0;
+    (hasDurableCandidate || hasMemoryImpact) &&
+    memoryChannelConfirmable;
 
   return (
     <section
@@ -185,10 +226,29 @@ export function LearningClosureReview({
         <div>
           <span className="closure-review-kicker">保存前确认</span>
           <h2 id="closure-review-title">回顾这次学习</h2>
-          <p>确认内容与缺口来自已提交状态；建议下一步和保存范围来自冻结的整理候选。</p>
+          <p>
+            已确认内容与缺口来自已提交状态；源码 Claim 仍是待确认候选，确认时后端会重新收敛固定 commit 的源码证据。
+          </p>
         </div>
         <ShieldCheck aria-hidden="true" size={22} />
       </header>
+
+      {hasDurableCandidate ? (
+        <section className="closure-review-section durable-claim-review">
+          <div className="closure-review-section-title">
+            <BookOpenCheck aria-hidden="true" size={17} />
+            <h3>待确认源码命题</h3>
+          </div>
+          <ul>
+            {review.pendingDurable.map((item, index) => (
+              <li key={`durable-${index}`}>{item}</li>
+            ))}
+          </ul>
+          <p className="closure-review-empty">
+            这里还不是“已掌握”。确认后仍需通过真实 PedagogyEvalRun、源码重新收敛和 UnderstandingEvidence 边界。
+          </p>
+        </section>
+      ) : null}
 
       <div className="closure-review-grid">
         <ReviewSection

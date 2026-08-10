@@ -8,7 +8,7 @@ from dataclasses import asdict
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 from src.after_session import after_session_to_memory_updates
 from src.application.closure_input_builder import build_structured_closure_input
@@ -32,6 +32,7 @@ _LEGACY_LEARNING_PROTOCOLS = {
     "feynman_diagnosis",
     "project_execution",
 }
+_DURABLE_TRUTH_SUCCESS = {"claim_validated", "claim_unverified", "hypothesis"}
 
 
 class LearningClosureNotEligible(ValueError):
@@ -40,6 +41,10 @@ class LearningClosureNotEligible(ValueError):
 
 class LearningClosureCancelled(RuntimeError):
     pass
+
+
+class LearningTruthCommitter(Protocol):
+    def commit(self, run: LearningClosureRun) -> object: ...
 
 
 Generator = Callable[..., dict[str, Any]]
@@ -66,6 +71,7 @@ class LearningClosureService:
         memory_service: MemoryService,
         *,
         evaluation_repository: PedagogyEvalRepository | None = None,
+        learning_truth_committer: LearningTruthCommitter | None = None,
         generator: Generator = generate_structured_closure_candidates,
         memory_bundle_loader: MemoryBundleLoader = read_memory_bundle,
     ):
@@ -73,6 +79,7 @@ class LearningClosureService:
         self.session_service = session_service
         self.memory_service = memory_service
         self.evaluation_repository = evaluation_repository
+        self.learning_truth_committer = learning_truth_committer
         self.generator = generator
         self.memory_bundle_loader = memory_bundle_loader
 
@@ -165,24 +172,36 @@ class LearningClosureService:
 
             self._ensure_active(run.id, operation_id)
             updates = self._memory_updates(generated)
-            if not updates:
-                raise ValueError("无可靠且有来源的记忆候选")
-            memory_run = self.memory_service.create(
-                updates,
-                run_id=f"memory_{run.id}",
-            )
-            if memory_run.status not in {"previewed", "succeeded"}:
-                raise ValueError(
-                    "Linked MemoryRun is not retryable: "
-                    f"{memory_run.id} ({memory_run.status})"
+            has_durable_candidate = self._has_durable_candidate(generated)
+            if not updates and not has_durable_candidate:
+                raise ValueError("无可靠且有来源的学习成果候选")
+
+            memory_run = None
+            if updates:
+                memory_run = self.memory_service.create(
+                    updates,
+                    run_id=f"memory_{run.id}",
                 )
+                if memory_run.status not in {"previewed", "succeeded"}:
+                    raise ValueError(
+                        "Linked MemoryRun is not retryable: "
+                        f"{memory_run.id} ({memory_run.status})"
+                    )
+
             self._ensure_active(run.id, operation_id)
             preview = self.repository.set_preview_ready(
                 run.id,
                 operation_id=operation_id,
-                memory_run_id=memory_run.id,
+                memory_run_id=memory_run.id if memory_run is not None else None,
             )
-            if memory_run.status == "succeeded":
+            # Historical auto-commit is safe only for pure Markdown-memory closure.
+            # Any durable Claim/Hypothesis candidate always requires the user's
+            # explicit confirmation at the closure review boundary.
+            if (
+                memory_run is not None
+                and memory_run.status == "succeeded"
+                and not has_durable_candidate
+            ):
                 return self.commit(preview.id)
             return preview
         except LearningClosureCancelled:
@@ -225,20 +244,38 @@ class LearningClosureService:
         if run.status == "completed":
             self._mark_completed_summary(run)
             return run
-        assert run.memory_run_id is not None
+
+        commit_stage = "source_check"
+        memory_run = None
         try:
             self.session_service.assert_summary_source_current(
                 run.thread_id,
                 last_completed_turn_id=run.last_completed_turn_id,
             )
-            memory_run = self.memory_service.commit(run.memory_run_id)
+            has_durable_candidate = self._has_durable_candidate(run.generated_result)
+            if has_durable_candidate and self.learning_truth_committer is None:
+                commit_stage = "learning_truth"
+                raise ValueError("Durable learning truth committer is unavailable")
+            if self.learning_truth_committer is not None:
+                commit_stage = "learning_truth"
+                truth_result = self.learning_truth_committer.commit(run)
+                if has_durable_candidate:
+                    truth_status = str(getattr(truth_result, "status", ""))
+                    if truth_status not in _DURABLE_TRUTH_SUCCESS:
+                        raise ValueError(
+                            f"Durable learning truth rejected candidate: {truth_status or 'unknown'}"
+                        )
+            if run.memory_run_id:
+                commit_stage = "memory"
+                memory_run = self.memory_service.commit(run.memory_run_id)
         except Exception as exc:
             detail = str(exc)
-            reason = (
-                "thread_source_changed"
-                if "source changed" in detail.lower()
-                else "memory_commit_failed"
-            )
+            if "source changed" in detail.lower():
+                reason = "thread_source_changed"
+            elif commit_stage == "learning_truth":
+                reason = "learning_truth_commit_failed"
+            else:
+                reason = "memory_commit_failed"
             return self.repository.complete_commit(
                 run.id,
                 operation_id=operation_id,
@@ -247,9 +284,14 @@ class LearningClosureService:
                 reason=reason,
             )
 
-        completed = memory_run.status == "succeeded"
-        error = "" if completed else self._memory_failure_text(memory_run)
-        reason = "" if completed else f"memory_{memory_run.status}"
+        if memory_run is None:
+            completed = True
+            error = ""
+            reason = ""
+        else:
+            completed = memory_run.status == "succeeded"
+            error = "" if completed else self._memory_failure_text(memory_run)
+            reason = "" if completed else f"memory_{memory_run.status}"
         final_run = self.repository.complete_commit(
             run.id,
             operation_id=operation_id,
@@ -275,7 +317,8 @@ class LearningClosureService:
         return run
 
     def list(self, *, limit: int = 20) -> list[LearningClosureRun]:
-        return self.repository.list(limit=limit)
+        safe_limit = max(1, min(limit, 100))
+        return self.repository.list(limit=safe_limit)
 
     def linked_memory_run(self, run: LearningClosureRun):
         return self.memory_service.get(run.memory_run_id) if run.memory_run_id else None
@@ -410,6 +453,11 @@ class LearningClosureService:
     def _ensure_active(self, run_id: str, operation_id: str) -> None:
         if self.repository.cancel_requested(run_id, operation_id=operation_id):
             raise LearningClosureCancelled("Learning closure cancelled by user")
+
+    @staticmethod
+    def _has_durable_candidate(generated: dict[str, Any]) -> bool:
+        candidate = generated.get("durable_learning_candidate")
+        return isinstance(candidate, dict) and bool(candidate)
 
     @staticmethod
     def _memory_updates(

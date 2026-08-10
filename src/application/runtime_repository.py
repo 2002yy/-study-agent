@@ -148,6 +148,18 @@ def get_github_snapshot_service():
 
 
 @lru_cache(maxsize=1)
+def get_learning_source_evidence_service():
+    from src.application.github_graph_service import graph_service_for
+    from src.application.learning_source_evidence import LearningSourceEvidenceService
+
+    snapshot_service = get_github_snapshot_service()
+    return LearningSourceEvidenceService(
+        snapshot_service,
+        graph_service_for(snapshot_service),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_web_tool_agent():
     from src.tools.persistent_web_agent import PersistentWebToolAgent
     from src.web.persistent_tool_gateway import PersistentGeneralWebGateway
@@ -237,6 +249,17 @@ def get_memory_service():
 
 
 @lru_cache(maxsize=1)
+def get_learning_closure_truth_service():
+    from src.application.learning_closure_truth import LearningClosureTruthService
+
+    return LearningClosureTruthService(
+        get_learning_truth_repository(),
+        get_learning_source_evidence_service(),
+        get_pedagogy_eval_repository(),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_learning_closure_service():
     from src.application.learning_closure_service import LearningClosureService
 
@@ -245,6 +268,7 @@ def get_learning_closure_service():
         get_session_service(),
         get_memory_service(),
         evaluation_repository=get_pedagogy_eval_repository(),
+        learning_truth_committer=get_learning_closure_truth_service(),
     )
 
 
@@ -295,11 +319,13 @@ def reset_runtime_repository_cache() -> None:
     get_github_work_item_service.cache_clear()
     get_github_change_impact_service.cache_clear()
     get_provider_cache_repository.cache_clear()
+    get_learning_source_evidence_service.cache_clear()
     get_github_snapshot_service.cache_clear()
     get_github_snapshot_repository.cache_clear()
     get_learning_resume_service.cache_clear()
     get_learning_semantic_closure_service.cache_clear()
     get_learning_outcome_commit_service.cache_clear()
+    get_learning_closure_truth_service.cache_clear()
     get_learning_truth_repository.cache_clear()
     get_learning_closure_service.cache_clear()
     get_learning_closure_repository.cache_clear()

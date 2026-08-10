@@ -117,7 +117,7 @@ class MemoryService:
                     preview_item[key] = update[key]
             preview_items.append(preview_item)
         now = utc_now()
-        return self.repository.create(
+        run = self.repository.create(
             MemoryRun(
                 id=run_id or new_id("memory"),
                 updates=frozen,
@@ -133,6 +133,12 @@ class MemoryService:
                 updated_at=now,
             )
         )
+        if writable and modes.memory_mode == "auto":
+            try:
+                run = self.commit(run.id, runtime_modes=modes)
+            except Exception:
+                pass
+        return run
 
     def commit(self, run_id: str, *, runtime_modes=None) -> MemoryRun:
         existing = self.repository.get(run_id)
