@@ -237,12 +237,22 @@ PR #125 merge：`e413072`。
   - provider 找不到→ unavailable，不推导 Claim false；
   - 归一化单元测试覆盖 TESTING.md L109–119 判定规则。
 
-### D-4B — Resume freshness + UI + revalidation entry (NEXT)
+### D-4B — Resume freshness + UI + revalidation entry - COMPLETE
 
 - GET /learning-resume 成列输出 freshness status + drift detail（案例化；
 - LearningPanel 情境化提示：stale_candidate/source_changed 徽章 + 渐进披露（F1/F2）；
 - 显式 revalidation 入口：新 closure run 带 claim 上下文，commit 复用 lineage；
 - Playwright fixture + e2e 测试。
+
+Backend completed (deferred items):
+- resume projection 已带 freshness detail（status/head_commit/reason/primary/supporting_drift），
+  evaluator 故障降级为 unavailable 不中断；
+- POST /sessions/{session_id}/claims/{claim_id}/revalidate 已实现：
+  同 lineage 新 Revision（reason=revalidated），missing claim / no active goal /
+  no primary source 均显式拒绝并返回对应 404/409；
+- revalidation 后立即回写 freshness status；
+- 未完成项：LearningPanel UI 徽章 + 渐进披露、Playwright fixture + e2e
+  （UI 层，见 D-4B-UI 分批或 D-4C 后处理）。
 
 ### D-4C — Full Golden Journey (AFTER D-4B)
 
@@ -269,9 +279,8 @@ P2-D-3B durable resume         ✅ complete
 P2-D-3C minimal durable UI     ✅ complete
 
 P2-D-4A freshness service      ✅ complete (PR #126)
-P2-D-4B resume freshness + UI ← NEXT
-P2-D-4B resume freshness + UI
-P2-D-4C full Golden Journey
+P2-D-4B resume freshness + UI  ✅ complete (PR #127)
+P2-D-4C full Golden Journey    ← NEXT
 P2-D-4D cross-browser
 
 P2-D-4
