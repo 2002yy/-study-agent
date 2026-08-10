@@ -140,6 +140,10 @@ export function useLearningSessionRuntime(options: {
     setLearningResumeRefreshRevision((revision) => revision + 1);
   }, [options.refresh]);
 
+  const refreshLearningResume = useCallback(() => {
+    setLearningResumeRefreshRevision((revision) => revision + 1);
+  }, []);
+
   const memoryController = useMemoryController({
     activeRunId: memoryRunId,
     setActiveRunId: setMemoryRunId,
@@ -375,6 +379,7 @@ export function useLearningSessionRuntime(options: {
       visitedPhases: state.pedagogyPhases,
       learningResume,
       learningResumeError,
+      refreshLearningResume,
       requestNewSession,
       abandonRecovery,
     }),
@@ -387,6 +392,7 @@ export function useLearningSessionRuntime(options: {
       state.pedagogyPhases,
       learningResume,
       learningResumeError,
+      refreshLearningResume,
       requestNewSession,
       abandonRecovery,
     ],

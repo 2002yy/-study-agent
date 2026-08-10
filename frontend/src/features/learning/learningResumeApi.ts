@@ -13,6 +13,25 @@ export type LearningResumeEvidence = {
   evidence_kind?: string;
 };
 
+export type FreshnessDetail = {
+  role?: string;
+  path?: string;
+  symbol?: string | null;
+  reason?: string;
+  head_file_sha?: string;
+  materially_changed?: boolean;
+  error?: string;
+};
+
+export type ClaimFreshness = {
+  status: "current" | "stale_candidate" | "unavailable" | string;
+  head_commit?: string;
+  reason?: string;
+  primary?: FreshnessDetail;
+  supporting_drift?: FreshnessDetail[];
+  unavailable_reason?: string;
+};
+
 export type LearningResumeClaim = {
   claim_id: string;
   revision_id: string;
@@ -28,6 +47,7 @@ export type LearningResumeClaim = {
   };
   primary_evidence: LearningResumeEvidence;
   supporting_evidence: LearningResumeEvidence[];
+  freshness?: ClaimFreshness;
 };
 
 export type LearningResumeResponse = {
@@ -87,4 +107,35 @@ export async function getLearningResume(
     );
   }
   return (await response.json()) as LearningResumeResponse;
+}
+
+export type RevalidationResult = {
+  claim_id: string;
+  outcome: string;
+  revision_id?: string;
+  unresolved_reason?: string;
+  head_commit?: string;
+  freshness_status?: string;
+};
+
+export async function revalidateClaim(
+  sessionId: string,
+  claimId: string,
+  signal?: AbortSignal,
+): Promise<RevalidationResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/claims/${encodeURIComponent(claimId)}/revalidate`,
+    {
+      method: "POST",
+      signal,
+      headers: API_TOKEN ? { "X-Study-Agent-Token": API_TOKEN } : undefined,
+    },
+  );
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `${response.status} ${response.statusText}${body ? `: ${body}` : ""}`,
+    );
+  }
+  return (await response.json()) as RevalidationResult;
 }

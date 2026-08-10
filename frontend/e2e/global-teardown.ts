@@ -38,6 +38,11 @@ const EXPECTED_JOURNEYS: ExpectedJourney[] = [
     steps: ["failure-visible", "recovered", "recovered-restored"],
   },
   {
+    journey: "stale_revalidation",
+    projects: ["desktop-chromium", "mobile-chromium"],
+    steps: ["stale-visible", "revalidated-current", "revalidated-restored"],
+  },
+  {
     journey: "complex_content_narrow",
     projects: ["narrow-chromium"],
     steps: [

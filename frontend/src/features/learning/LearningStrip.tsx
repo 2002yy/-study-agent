@@ -34,6 +34,17 @@ function durableUnderstandingSummary(resume: LearningResumeResponse) {
       icon: CircleHelp,
     };
   }
+  const staleCount = resume.claims.filter(
+    (claim) => claim.freshness?.status === "stale_candidate",
+  ).length;
+  if (staleCount) {
+    return {
+      label: `${staleCount} 条源码已变动`,
+      detail: "存在依据的源码已实质变更、尚未重新验证的 Claim。",
+      className: "stale_source",
+      icon: RotateCcw,
+    };
+  }
   const counts = {
     confirmed: resume.claims.filter((claim) => claim.understanding_status === "confirmed").length,
     partial: resume.claims.filter((claim) => claim.understanding_status === "partial").length,
@@ -75,12 +86,16 @@ function durableUnderstandingSummary(resume: LearningResumeResponse) {
 export function LearningStrip({
   resume,
   resumeError,
+  sessionId,
+  onRevalidated,
   lastChat,
   visitedPhases,
   memoryStatus,
 }: {
   resume: LearningResumeResponse | null;
   resumeError: string;
+  sessionId?: string;
+  onRevalidated?: () => void;
   lastChat: ChatResponse | null;
   visitedPhases: string[];
   memoryStatus: MemoryStatusResponse | null;
@@ -143,6 +158,8 @@ export function LearningStrip({
             <LearningPanel
               resume={null}
               resumeError={resumeError}
+              sessionId={sessionId}
+              onRevalidated={onRevalidated}
               lastChat={lastChat}
               visitedPhases={visitedPhases}
               memoryStatus={memoryStatus}
@@ -209,6 +226,8 @@ export function LearningStrip({
             <LearningPanel
               resume={resume}
               resumeError=""
+              sessionId={sessionId}
+              onRevalidated={onRevalidated}
               lastChat={lastChat}
               visitedPhases={visitedPhases}
               memoryStatus={memoryStatus}
@@ -257,6 +276,8 @@ export function LearningStrip({
           <LearningPanel
             resume={resume}
             resumeError=""
+            sessionId={sessionId}
+            onRevalidated={onRevalidated}
             lastChat={lastChat}
             visitedPhases={visitedPhases}
             memoryStatus={memoryStatus}

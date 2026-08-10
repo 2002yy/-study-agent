@@ -7,6 +7,7 @@ import {
   RETRY_REPLY,
   installApiFixture,
   makeLearningSession,
+  makeStaleLearningResume,
   seedWorkspaceRecovery,
 } from "./api-fixture";
 import {
@@ -150,6 +151,70 @@ test("chat failure exposes one-click retry and restores the answer", async ({ pa
     composer_decisions: composerDecisions,
     refresh_restore: true,
     has_actionable_failure: true,
+    success_artifacts: successArtifacts,
+  });
+});
+
+test("stale source claim surfaces and revalidates to current", async ({ page }, testInfo) => {
+  const session = makeLearningSession();
+  const fixture = await installApiFixture(page, {
+    session,
+    learningResume: makeStaleLearningResume(),
+  });
+  await seedWorkspaceRecovery(page, session.row.session_id);
+  await installJourneyRecorder(page);
+  await page.goto("/");
+
+  const successArtifacts: string[] = [];
+  const restoreCard = page.getByRole("region", { name: "继续当前任务" });
+  await expect(restoreCard).toBeVisible();
+  await restoreCard.getByRole("button", { name: "继续这里" }).click();
+  const composer = page.getByLabel("输入学习问题");
+  await expect(composer).toHaveValue(/继续当前任务/);
+
+  const strip = page.getByRole("button", { name: /1 条源码已变动/ });
+  await expect(strip).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "stale_revalidation", "stale-visible"),
+  );
+
+  const composerDecisions = await requiredComposerDecisions(page);
+  await strip.click();
+  const panel = page.locator("aside.learning-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("每轮循环会缩小搜索区间", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByText("左右边界更新时机取决于中位数的取法", { exact: true }),
+  ).toBeVisible();
+  const revalidate = panel.getByRole("button", { name: /^重新验证 / }).first();
+  await expect(revalidate).toBeVisible();
+  await revalidate.click();
+  await expect(
+    page.getByRole("button", { name: /2 条已验证/ }),
+  ).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "stale_revalidation", "revalidated-current"),
+  );
+
+  await page.waitForTimeout(350);
+  await page.reload();
+  const restoredCard = page.getByRole("region", { name: "继续当前任务" });
+  await expect(restoredCard).toBeVisible();
+  await restoredCard.getByRole("button", { name: "继续这里" }).click();
+  await expect(
+    page.getByRole("button", { name: /2 条已验证/ }),
+  ).toBeVisible();
+  successArtifacts.push(
+    await captureSuccessStep(page, testInfo, "stale_revalidation", "revalidated-restored"),
+  );
+
+  expect(fixture.chatAttempts).toBe(0);
+  expect(fixture.unexpectedApiPaths).toEqual([]);
+  await recordObservedMetric(page, testInfo, {
+    journey: "stale_revalidation",
+    composer_decisions: composerDecisions,
+    refresh_restore: true,
+    has_actionable_failure: false,
     success_artifacts: successArtifacts,
   });
 });

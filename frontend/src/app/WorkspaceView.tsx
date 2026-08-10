@@ -127,6 +127,8 @@ export function WorkspaceView({
         <LearningStrip
           resume={learningView.learningResume}
           resumeError={learningView.learningResumeError}
+          sessionId={learningView.sessionId ?? undefined}
+          onRevalidated={learningView.refreshLearningResume}
           lastChat={chatController.lastChat}
           visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}

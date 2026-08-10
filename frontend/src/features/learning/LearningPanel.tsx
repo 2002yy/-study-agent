@@ -4,18 +4,21 @@ import {
   CheckCircle2,
   CircleHelp,
   History,
+  RefreshCw,
   RotateCcw,
   ShieldQuestion,
   Target,
 } from "lucide-react";
+import { useState } from "react";
 
 import type { ChatResponse, MemoryStatusResponse } from "../../types";
 import { DurableEvidenceTrail } from "../evidence/DurableEvidenceTrail";
 import { phaseLabel, protocolLabel } from "../pedagogy/pedagogyLabels";
 import { latestMemorySection } from "../single-chat/ChatPanel";
-import type {
-  LearningResumeClaim,
-  LearningResumeResponse,
+import {
+  revalidateClaim,
+  type LearningResumeClaim,
+  type LearningResumeResponse,
 } from "./learningResumeApi";
 import { projectTrustworthyLearningStatus } from "./trustworthyLearningStatus";
 
@@ -53,10 +56,43 @@ function validationMethodLabel(method?: string): string {
   return method || "尚无验证";
 }
 
-function ClaimCard({ claim }: { claim: LearningResumeClaim }) {
+function freshnessNote(claim: LearningResumeClaim): string {
+  const freshness = claim.freshness;
+  const reason = freshness?.reason || freshness?.primary?.reason;
+  if (reason) return reason;
+  return "Claim 依据的 primary 源码已发生实质变更，尚未对最新源码重新验证。";
+}
+
+function ClaimCard({
+  claim,
+  sessionId,
+  onRevalidated,
+}: {
+  claim: LearningResumeClaim;
+  sessionId?: string;
+  onRevalidated?: () => void;
+}) {
   const meta = UNDERSTANDING_META[claim.understanding_status];
   const StatusIcon = meta.icon;
   const latest = claim.latest_validation;
+  const [revalidating, setRevalidating] = useState(false);
+  const [revalidateError, setRevalidateError] = useState("");
+
+  const handleRevalidate = async () => {
+    if (!sessionId || revalidating) return;
+    setRevalidating(true);
+    setRevalidateError("");
+    try {
+      await revalidateClaim(sessionId, claim.claim_id);
+      onRevalidated?.();
+    } catch (error) {
+      setRevalidateError(
+        error instanceof Error ? error.message : "重新验证失败",
+      );
+    } finally {
+      setRevalidating(false);
+    }
+  };
 
   return (
     <li className="durable-claim-item">
@@ -74,6 +110,34 @@ function ClaimCard({ claim }: { claim: LearningResumeClaim }) {
           ? `${validationMethodLabel(latest.method)} · ${meta.detail}`
           : meta.detail}
       </p>
+      {claim.freshness?.status === "stale_candidate" ? (
+        <div className="durable-freshness-row">
+          <span className="learning-verification-badge stale_source">
+            <RefreshCw size={12} /> 源码已变动
+          </span>
+          <p className="durable-freshness-note">{freshnessNote(claim)}</p>
+          {revalidating ? (
+            <span className="durable-revalidation-status">重新验证中…</span>
+          ) : (
+            <button
+              aria-label={`重新验证 ${claim.text}`}
+              className="durable-revalidate-button"
+              onClick={handleRevalidate}
+              type="button"
+            >
+              <RefreshCw size={12} /> 重新验证
+            </button>
+          )}
+          {revalidateError ? (
+            <p className="durable-revalidation-error">{revalidateError}</p>
+          ) : null}
+        </div>
+      ) : claim.freshness?.status === "unavailable" ? (
+        <p className="durable-freshness-note muted">
+          源码新鲜度暂不可用：
+          {claim.freshness.unavailable_reason || "评估失败"}
+        </p>
+      ) : null}
       <DurableEvidenceTrail
         primary={claim.primary_evidence}
         supporting={claim.supporting_evidence}
@@ -82,7 +146,15 @@ function ClaimCard({ claim }: { claim: LearningResumeClaim }) {
   );
 }
 
-function DurablePanel({ resume }: { resume: LearningResumeResponse }) {
+function DurablePanel({
+  resume,
+  sessionId,
+  onRevalidated,
+}: {
+  resume: LearningResumeResponse;
+  sessionId?: string;
+  onRevalidated?: () => void;
+}) {
   if (resume.status === "no_active_goal") {
     return (
       <aside className="learning-panel">
@@ -129,7 +201,12 @@ function DurablePanel({ resume }: { resume: LearningResumeResponse }) {
           <>
             <ul className="durable-claim-list">
               {resume.claims.map((claim) => (
-                <ClaimCard key={claim.revision_id} claim={claim} />
+                <ClaimCard
+                  key={claim.revision_id}
+                  claim={claim}
+                  sessionId={sessionId}
+                  onRevalidated={onRevalidated}
+                />
               ))}
             </ul>
             <p className="learning-evidence-note">
@@ -271,18 +348,28 @@ function LegacyPanel({
 export function LearningPanel({
   resume,
   resumeError,
+  sessionId,
+  onRevalidated,
   lastChat,
   visitedPhases,
   memoryStatus,
 }: {
   resume: LearningResumeResponse | null;
   resumeError: string;
+  sessionId?: string;
+  onRevalidated?: () => void;
   lastChat: ChatResponse | null;
   visitedPhases: string[];
   memoryStatus: MemoryStatusResponse | null;
 }) {
   if (resume?.source === "durable") {
-    return <DurablePanel resume={resume} />;
+    return (
+      <DurablePanel
+        resume={resume}
+        sessionId={sessionId}
+        onRevalidated={onRevalidated}
+      />
+    );
   }
   if (resume?.source === "legacy_fallback") {
     return (

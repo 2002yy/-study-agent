@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatResponse } from "../../types";
 import { LearningPanel } from "./LearningPanel";
@@ -199,5 +199,127 @@ describe("LearningPanel durable resume", () => {
     expect(text).toContain("不是 Claims");
     expect(text).not.toContain("Durable Claims");
     expect(text).not.toContain("已掌握知识点");
+  });
+
+  describe("durable claim freshness", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("surfaces a stale source claim with a revalidate action and refreshes after success", async () => {
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(
+            JSON.stringify({
+              claim_id: "claim-1",
+              outcome: "revalidated",
+              revision_id: "rev-3",
+              head_commit: "c".repeat(40),
+              freshness_status: "current",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const resume = durableResume();
+      if (resume.claims[0]) {
+        resume.claims[0].freshness = {
+          status: "stale_candidate",
+          head_commit: "f".repeat(40),
+          reason: "Primary 源码已实质变更",
+          primary: {
+            role: "primary",
+            path: "src/application/learning_resume.py",
+            materially_changed: true,
+            reason: "Primary 源码已实质变更",
+          },
+        };
+      }
+      const onRevalidated = vi.fn();
+      const { container } = render(
+        <LearningPanel
+          resume={resume}
+          resumeError=""
+          sessionId="session-1"
+          onRevalidated={onRevalidated}
+          lastChat={null}
+          visitedPhases={[]}
+          memoryStatus={null}
+        />,
+      );
+
+      const text = container.textContent ?? "";
+      expect(text).toContain("源码已变动");
+      expect(text).toContain("Primary 源码已实质变更");
+      const button = within(container).getByRole("button", { name: /重新验证/ });
+      expect(button).toBeInTheDocument();
+      fireEvent.click(button);
+
+      await waitFor(() => expect(onRevalidated).toHaveBeenCalledTimes(1));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(String(url)).toBe(
+        "/sessions/session-1/claims/claim-1/revalidate",
+      );
+      expect(options?.method).toBe("POST");
+    });
+
+    it("does not offer revalidation when freshness is unavailable", () => {
+      const resume = durableResume();
+      if (resume.claims[0]) {
+        resume.claims[0].freshness = {
+          status: "unavailable",
+          unavailable_reason: "unavailable: NetworkError: boom",
+        };
+      }
+      const { container } = render(
+        <LearningPanel
+          resume={resume}
+          resumeError=""
+          sessionId="session-1"
+          onRevalidated={() => undefined}
+          lastChat={null}
+          visitedPhases={[]}
+          memoryStatus={null}
+        />,
+      );
+
+      const text = container.textContent ?? "";
+      expect(text).toContain("源码新鲜度暂不可用");
+      expect(text).toContain("NetworkError");
+      expect(
+        within(container).queryByRole("button", { name: /重新验证/ }),
+      ).toBeNull();
+    });
+
+    it("keeps current claims unobtrusive", () => {
+      const resume = durableResume();
+      if (resume.claims[0]) {
+        resume.claims[0].freshness = {
+          status: "current",
+          head_commit: "c".repeat(40),
+        };
+      }
+      const { container } = render(
+        <LearningPanel
+          resume={resume}
+          resumeError=""
+          sessionId="session-1"
+          onRevalidated={() => undefined}
+          lastChat={null}
+          visitedPhases={[]}
+          memoryStatus={null}
+        />,
+      );
+
+      const text = container.textContent ?? "";
+      expect(text).not.toContain("源码已变动");
+      expect(text).not.toContain("源码新鲜度暂不可用");
+      expect(
+        within(container).queryByRole("button", { name: /重新验证/ }),
+      ).toBeNull();
+    });
   });
 });

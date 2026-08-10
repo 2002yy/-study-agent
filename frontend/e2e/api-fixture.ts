@@ -99,6 +99,7 @@ export type ApiFixtureState = {
   sessions: SessionRow[];
   details: Map<string, SessionDetail>;
   closureRuns: Map<string, Record<string, unknown>>;
+  learningResume: Map<string, Record<string, unknown>>;
   failNextChat: boolean;
   chatAttempts: number;
   unexpectedApiPaths: string[];
@@ -196,6 +197,102 @@ export function makeLearningSession(): { row: SessionRow; detail: SessionDetail 
       },
       conversation_instruction: "",
     },
+  };
+}
+
+export function makeStaleLearningResume(): Record<string, unknown> {
+  const now = new Date().toISOString();
+  const currentFreshness = (headCommit: string) => ({
+    status: "current",
+    head_commit: headCommit,
+    reason: "head matches verified commit",
+  });
+  return {
+    source: "durable",
+    status: "active",
+    topic: {
+      topic_id: "topic-binary-search",
+      title: "二分查找",
+      scope: "边界条件",
+    },
+    goal: {
+      goal_id: "goal-boundary",
+      topic_id: "topic-binary-search",
+      objective: "理解二分查找边界条件",
+      status: "active",
+    },
+    claims: [
+      {
+        claim_id: "claim-loop-shrink",
+        revision_id: "rev-1",
+        text: "每轮循环会缩小搜索区间",
+        claim_kind: "understanding",
+        scope: "core",
+        understanding_status: "confirmed",
+        validation_result: "pass",
+        latest_validation: {
+          method: "socratic_check",
+          result: "pass",
+          verified_at: now,
+        },
+        primary_evidence: {
+          path: "src/algorithms/binary_search.py",
+          kind: "code",
+          head_file_sha: "sha-loop-shrink",
+        },
+        supporting_evidence: [],
+        freshness: currentFreshness("commit-loop-shrink"),
+      },
+      {
+        claim_id: "claim-boundary-update",
+        revision_id: "rev-2",
+        text: "左右边界更新时机取决于中位数的取法",
+        claim_kind: "understanding",
+        scope: "core",
+        understanding_status: "confirmed",
+        validation_result: "pass",
+        latest_validation: {
+          method: "socratic_check",
+          result: "pass",
+          verified_at: now,
+        },
+        primary_evidence: {
+          path: "src/algorithms/binary_search.py",
+          kind: "code",
+          head_file_sha: "sha-boundary-new",
+        },
+        supporting_evidence: [],
+        freshness: {
+          status: "stale_candidate",
+          head_commit: "commit-boundary-old",
+          reason: "primary evidence file changed after verified commit",
+          primary: {
+            path: "src/algorithms/binary_search.py",
+            kind: "code",
+            status: "suspicious",
+            head_file_sha: "sha-boundary-new",
+            materially_changed: true,
+          },
+          supporting_drift: [],
+        },
+      },
+    ],
+    claim_count: 2,
+    unresolved: [
+      {
+        hypothesis_id: "hyp-boundary",
+        text: "左右边界更新时机",
+        reason: "仍待解释",
+      },
+    ],
+    next_step: {
+      next_step_id: "step-boundary-practice",
+      text: "完成一次边界迁移练习",
+      status: "pending",
+      is_primary: true,
+    },
+    optional_next_steps: [],
+    legacy_confirmed_points: [],
   };
 }
 
@@ -335,6 +432,7 @@ export async function installApiFixture(
   page: Page,
   options: {
     session?: { row: SessionRow; detail: SessionDetail };
+    learningResume?: Record<string, unknown>;
     failNextChat?: boolean;
   } = {},
 ): Promise<ApiFixtureState> {
@@ -346,6 +444,11 @@ export async function installApiFixture(
         : [],
     ),
     closureRuns: new Map(),
+    learningResume: new Map(
+      options.session && options.learningResume
+        ? [[options.session.row.session_id, structuredClone(options.learningResume)]]
+        : [],
+    ),
     failNextChat: options.failNextChat ?? false,
     chatAttempts: 0,
     unexpectedApiPaths: [],
@@ -506,6 +609,61 @@ export async function installApiFixture(
         kind: "archived",
         path: `${sessionId}.md`,
         archived: true,
+      });
+      return;
+    }
+    const resumeMatch = path.match(/^\/sessions\/([^/]+)\/learning-resume$/);
+    if (resumeMatch && request.method() === "GET") {
+      const sessionId = decodeURIComponent(resumeMatch[1]);
+      const resume = state.learningResume.get(sessionId);
+      if (!resume) {
+        await fulfillJson(route, {
+          source: "durable",
+          status: "no_active_goal",
+          topic: {},
+          goal: {},
+          claims: [],
+          claim_count: 0,
+          unresolved: [],
+          next_step: {},
+          optional_next_steps: [],
+          legacy_confirmed_points: [],
+        });
+        return;
+      }
+      await fulfillJson(route, resume);
+      return;
+    }
+    const revalidateMatch = path.match(
+      /^\/sessions\/([^/]+)\/claims\/([^/]+)\/revalidate$/,
+    );
+    if (revalidateMatch && request.method() === "POST") {
+      const sessionId = decodeURIComponent(revalidateMatch[1]);
+      const claimId = decodeURIComponent(revalidateMatch[2]);
+      const resume = state.learningResume.get(sessionId);
+      if (!resume) {
+        await fulfillJson(route, { detail: "claim not found" }, 404);
+        return;
+      }
+      const claims = (resume.claims as Array<Record<string, unknown>>) ?? [];
+      if (!claims.some((claim) => claim.claim_id === claimId)) {
+        await fulfillJson(route, { detail: "claim not found" }, 404);
+        return;
+      }
+      claims.forEach((claim) => {
+        claim.freshness = {
+          status: "current",
+          head_commit: "verified-head-commit",
+          reason: "revalidated against current head",
+        };
+      });
+      state.learningResume.set(sessionId, resume);
+      await fulfillJson(route, {
+        claim_id: claimId,
+        outcome: "revalidated",
+        revision_id: "rev-revalidated",
+        head_commit: "verified-head-commit",
+        freshness_status: "current",
       });
       return;
     }

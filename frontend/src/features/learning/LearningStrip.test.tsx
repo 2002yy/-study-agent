@@ -140,6 +140,35 @@ describe("LearningStrip durable resume status", () => {
     expect(text).not.toContain("旧 confirmed point");
   });
 
+  it("surfaces stale source claims above confirmed understanding in the summary", () => {
+    const resume = durableResume();
+    if (resume.claims[0]) {
+      resume.claims[0].freshness = {
+        status: "stale_candidate",
+        head_commit: "f".repeat(40),
+        reason: "Primary 源码已实质变更",
+      };
+    }
+    const { container } = render(
+      <LearningStrip
+        resume={resume}
+        resumeError=""
+        lastChat={responseWithTask({
+          task_intent: "learn",
+          source_policy: "local_only",
+          closure_eligibility: "learning_summary",
+          learning_state_enabled: true,
+        })}
+        visitedPhases={[]}
+        memoryStatus={null}
+      />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("1 条源码已变动");
+    expect(text).not.toContain("1 条已验证");
+  });
+
   it("never resurrects legacy navigation for durable no_active_goal", () => {
     const { container } = render(
       <LearningStrip

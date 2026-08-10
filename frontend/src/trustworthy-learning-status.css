@@ -85,6 +85,12 @@
   border-color: rgba(190, 126, 24, 0.32);
 }
 
+.learning-verification-badge.stale_source,
+.verification-card.stale_source {
+  border-color: rgba(184, 59, 59, 0.32);
+  color: var(--danger, var(--text));
+}
+
 .non-learning-status {
   display: flex;
   align-items: center;
@@ -311,4 +317,56 @@
   .durable-claim-head .learning-verification-badge {
     width: fit-content;
   }
+}
+
+.durable-freshness-row {
+  display: grid;
+  gap: 6px;
+  align-items: start;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(184, 59, 59, 0.32);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.durable-freshness-note {
+  margin: 0;
+  color: var(--text-secondary, var(--text));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.durable-revalidate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.durable-revalidate-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.durable-revalidation-status,
+.durable-revalidation-error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.durable-revalidation-status {
+  color: var(--text-secondary, var(--text));
+}
+
+.durable-revalidation-error {
+  color: var(--danger, var(--amber));
 }
