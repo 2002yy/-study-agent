@@ -225,6 +225,36 @@ PR #125 merge：`e413072`。
 - 完成 full Golden Learning Journey；
 - Chromium + Firefox sample + WebKit sample + 实体手机验收。
 
+### D-4A — Freshness evaluation service (NEXT)
+
+- 新服务 LearningFreshnessService.evaluate(claim, head_snapshot)：
+  - freshness 是 on-demand derived 状态，不新增持久化表/migration；
+  - Primary 在 HEAD 重定位（match_line_range + structure index重映射）；
+  - path 不存在/无法重映射 → source_changed；
+  - HEAD file_sha == 记录 file_sha → current（零内容比较）；
+  - file_sha 不同 → symbol body 归一化比较（strip 尾空白、忽略空行）→ 相同 current / 不同 stale_candidate；
+  - corroborating drift 只记录；prerequisite 实质变化可触发 stale_candidate；
+  - provider 找不到→ unavailable，不推导 Claim false；
+  - 归一化单元测试覆盖 TESTING.md L109–119 判定规则。
+
+### D-4B — Resume freshness + UI + revalidation entry (AFTER D-4A)
+
+- GET /learning-resume 成列输出 freshness status + drift detail（案例化；
+- LearningPanel 情境化提示：stale_candidate/source_changed 徽章 + 渐进披露（F1/F2）；
+- 显式 revalidation 入口：新 closure run 带 claim 上下文，commit 复用 lineage；
+- Playwright fixture + e2e 测试。
+
+### D-4C — Full Golden Journey (AFTER D-4B)
+
+- 拓展 mini journey 到 step 1–17，用真实源码 + 双 commit 对；
+- step 14–17：Primary 实质修改 → rev1/confirmed 保留、freshness → stale_candidate → 显式 revalidation → rev2 同 lineage；
+- e2e golden journey 同步扩展。
+
+### D-4D — Cross-browser acceptance (AFTER D-4C)
+
+- playwright config 新增 desktop-firefox / desktop-webkit sample；
+- 实体手机验收步骤（人工执行，方法写入验收记录）。
+
 ## 8. 当前执行顺序
 
 ```text
@@ -238,7 +268,10 @@ P2-D-3B durable resume         ✅ complete
 
 P2-D-3C minimal durable UI     ✅ complete
 
-P2-D-4                         ← NEXT
+P2-D-4A freshness service      ← NEXT
+P2-D-4B resume freshness + UI
+P2-D-4C full Golden Journey
+P2-D-4D cross-browser
 
 P2-D-4
 freshness + revalidation + full Golden Journey
