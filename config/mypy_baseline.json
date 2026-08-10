@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated_from": "main@a343a7f897db92f7f0424af8d46cf94d1559c503",
-  "known_error_count": 127,
+  "known_error_count": 128,
   "signatures": {
     "src/api/routes/chat_routes.py|arg-type|Argument 1 to \"create_task\" has incompatible type \"Awaitable[str]\"; expected \"Coroutine[Any, Any, Never]\"": 1,
     "src/api/routes/chat_routes.py|attr-defined|\"AsyncIterator[str]\" has no attribute \"aclose\"": 1,
@@ -26,6 +26,7 @@
     "src/repositories/github_snapshot_repository.py|attr-defined|\"list?[src.domain.runtime_entities.RagRun]\" has no attribute \"__iter__\" (not iterable)": 2,
     "src/repositories/github_snapshot_repository.py|valid-type|Function \"src.repositories.github_snapshot_repository.GitHubSnapshotRepository.list\" is not valid as a type": 1,
     "src/repositories/web_lookup_repository.py|valid-type|Function \"src.repositories.web_lookup_repository.WebLookupRepository.list\" is not valid as a type": 11,
+    "src/structured_closure.py|union-attr|Item \"None\" of \"Any | tuple[()] | None\" has no attribute \"__iter__\" (not iterable)": 1,
     "src/task_contract.py|arg-type|Argument \"confidence\" to \"replace\" of \"TaskContract\" has incompatible type \"str\"; expected \"Literal['low', 'medium', 'high']\"": 1,
     "src/web/github_change_impact.py|union-attr|Item \"None\" of \"Any | dict[Any, Any] | None\" has no attribute \"get\"": 3,
     "src/web/github_history.py|union-attr|Item \"None\" of \"Any | dict[Any, Any] | None\" has no attribute \"get\"": 25,
