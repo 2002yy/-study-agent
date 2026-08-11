@@ -87,7 +87,7 @@ SQLite durable state + Markdown long-term memory + RAG indexes
 - `RagRun`；
 - `WebLookupRun`；
 - `PedagogyEvalRun`；
-- 后续 `LearningClosureRun`。
+- `LearningClosureRun`（已实现：`src/domain/learning_closure.py` + `src/application/learning_closure_service.py` + `src/api/routes/learning_closure_routes.py`，含 source_hash 幂等 / retry / cancel / commit）。
 
 通用原则：
 

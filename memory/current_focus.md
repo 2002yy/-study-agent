@@ -1,42 +1,25 @@
-# 当前焦点
+# 当前状态
 
-## 优先任务
+## 当前变更组
 
-- v0.7.5 已发布：文档同步收口、死代码清理、YAML 同步 I/O 优化、重复逻辑消除
-- 下一阶段 v0.7.6 回归功能增量，重点：联网搜索质量提升、来源 UI 优化、搜索交互体验、测试覆盖扩展
-- 保持测试全量通过，新增改动前先跑 `python -m pytest -q`
-- 继续稳住正文提取三层回退链路和现有测试覆盖
+- P2-E：post-P2-D 验收收口与测试加固（2026-08-11 开始）：
+  - E-5 仓库清理：已删 15 个已合并本地残留分支；
+  - E-1 验收收口：文档基线 / TECH_STACK / memory 同步（进行中）；实体手机验收按 `docs/MOBILE_ACCEPTANCE_D4D.md` 人工执行；
+  - E-2 backend 辅助模块直测补缺（src/web + src/application 17 模块）；
+  - E-3 前端 surface 测试补缺。
 
-## 暂缓任务
+## 上一阶段
 
-- 更重的 UI 视觉重做
-- 更激进的联网搜索扩源
-- 非必要的自动化流程继续增加
-- 不在此阶段引入新的 LLM 调用链路
+- P2-D 全系列完成（main 基线 e05c191）：
+  - D-1 commit-pinned source symbol；D-2 normalized durable learning truth + 原子 commit 边界；
+  - D-3A semantic closure + durable Goal navigation；D-3B bounded durable ResumeContext；
+  - D-3C minimal durable UI（LearningPanel/Strip/EvidenceTrail）；
+  - D-4A freshness service；D-4B resume freshness + revalidation；D-4C full golden journey；
+  - D-4D cross-browser（firefox/webkit sample，5 项目 51/51）。
 
 ## 版本同步文件清单
 
-> 改版本号时，以下文件 **必须全部同步**，缺一不可：
+> 改版本时请将以下文件**全部同步**，缺一不可：
 
-| 文件 | 字段/位置 |
-|---|---|
-| `src/mode_manager.py` | `current_version`、`next_version`（默认值） |
-| `memory/internal_state.md` | `current_version`、`next_version` |
-| `memory/summary.md` | `## 当前阶段`、`## 版本进度` |
-| `memory/current_focus.md` | `## 不要误动` 中的版本号、本清单 |
-| `memory/progress.md` | `## 当前阶段`、`## 已完成` |
-| `memory/agent.md` | `## 当前阶段` |
-| `PROJECT_PLAN.md` | 首行活跃阶段、章节标题、`## 文档分工` |
-| `USER_GUIDE.md` | `## 1. 当前阶段`、README 引用路径 |
-| `COMPREHENSIVE_PROJECT.md` | 首行开发阶段、`## 6. 当前推荐阅读顺序` |
-| `FUTURE.md` | 当前阶段/下一阶段文本、章节标题 |
-| `README_internal_modes.md` | 首行对应版本 |
-| `README.md` | `## 版本历史` 新增条目 |
-| `changelog/README_v{version}.md` | 文件名与内容同步新建/更新 |
-
-## 不要误动
-
-- 不改 router 主逻辑
-- 不改 memory 写入边界
-- 不把当前真实版本字段从 `v0.7.5` 强行改到别的值
-- 不引入额外自动 LLM 调用
+- `docs/PROJECT_STATUS.md`（唯一进度入口 / 执行顺序 owner）
+- `memory/index.md` / `summary.md` / `current_focus.md` / `progress.md` / `task_board.md` / `project_context.md`

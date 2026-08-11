@@ -20,11 +20,12 @@
 - **P2-D-3A：完成。** Semantic Closure + durable Goal navigation 已进入 main。
 - **P2-D-3B：完成。** bounded durable ResumeContext + read-only resume API 已进入 main。
 - **P2-D GrillMe 决策 1–49：已冻结。**
-- **下一实施批次：P2-D-4D - Cross-browser acceptance（AFTER D-4C）。**- **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
+- **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 - **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
 - **P2-D-4D：完成（自动验收部分）。** firefox/webkit sample + 5 项目 51/51 通过；实体手机验收清单已写入 docs/MOBILE_ACCEPTANCE_D4D.md，待执行人填写记录。
+- **P2-E：下一实施批次。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 验收收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺。
 
-当前 main 基线：`1700d5a`（P2-D-4D 前）。
+当前 main 基线：`e05c191`（P2-D-4D）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -279,6 +280,33 @@ Known environment notes:
 - 本机 `npx playwright install chromium` 默认 CDN 不可达，使用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright` 完成安装；
 - 系统 Chrome（channel: chrome）下 complex-content linkRectCount 断言失败（渲染差异），headless shell 下通过；CI 保持默认 headless。
 
+## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - NEXT
+
+范围（2026-08-11 现状调研确认；G 系列产品能力评审已排除）：
+
+### E-5 — Repo cleanup - NEXT
+
+- 删除 15 个已合并/过时的本地残留分支（codex/p2-d3c-durable-learning-ui、codex/g8-browser-validation、codex/p0-a5-a6-review-session-owner、codex/p1-r1-research-stage-explanations、codex/core-architecture-cleanup、codex/chat-research-cancel 等）；
+- 远程分支不动；不改变 main 内容。
+
+### E-1 — Acceptance + docs/memory sync - NEXT
+
+- 实体手机验收（人工）：按 docs/MOBILE_ACCEPTANCE_D4D.md 10 步执行并填写记录表（执行人/日期/浏览器/设备），完成后回写本 owner；
+- docs 收口：TECH_STACK.md "后续 LearningClosureRun" 已过时（G1 已实现，需改描述）；memory/ 六个版本文件（index/summary/task_board/current_focus/progress/project_context）从 v0.7.x 同步到 P2-D/P2-E 时代；
+- 基线收口：e05c191。
+
+### E-2 — Backend direct tests for helper modules - NEXT
+
+- 覆盖审计：确认 src/web/ 与 src/application/ 中 17 个无命名匹配测试的模块，哪些已被集成测试间接覆盖；
+- 为无覆盖模块建立命名匹配直测：lsp_adapter、structure_quality、advanced_module_semantics、module_aliases、evidence_pinning、concurrency、security、orchestrator、tool_gateway、persistent_tool_gateway、research_gateway、closure_input_builder、memory_service、policy_chat_service、rag_run_service、web_lookup_service、runtime_repository（估计 30–50 个测试）；
+- 不改变产品行为，纯测试补缺。
+
+### E-3 — Frontend surface tests - NEXT
+
+- MarkdownMessage、StatusDot、RoadmapPanel、RoutePanel、roleCatalog/roleController 建立直测（约 8–12 个测试文件）；
+- features/evidence（7 源/4 测）、features/learning-memory（9 源/4 测）覆盖加厚；
+- 不改变 UI 行为。
+
 ## 8. 当前执行顺序
 
 ```text
@@ -297,8 +325,13 @@ P2-D-4B resume freshness + UI  ✅ complete (PR #126)
 P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
 P2-D-4D cross-browser          ✅ complete (automation 51/51; manual checklist in docs/MOBILE_ACCEPTANCE_D4D.md)
 
-P2-D-4
-freshness + revalidation + full Golden Journey
+P2-E-5 repo cleanup            ← NEXT（删 15 个已合并本地残留分支）
+P2-E-1 acceptance + docs sync  ← NEXT（手机验收人工部分 + 文档/memory 收口）
+P2-E-2 backend direct tests    ← NEXT（src/web + src/application 17 模块直测）
+P2-E-3 frontend surface tests  ← NEXT（MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roles）
+
+P2-E
+post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 ```
 
 任何后续实现若改变该顺序或扩大 scope，必须先更新本唯一状态 owner，再执行。

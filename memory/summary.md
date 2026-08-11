@@ -1,54 +1,20 @@
-# 核心摘要
+# 学习记忆摘要
 
-> 本文件为 `memory/` 的压缩版，回答优先读取此文件。
+> 本文件为 `memory/` 压缩版，重大变更只读此文件即可。
 
 ## 当前阶段
 
-v0.7.5 - 文档同步收口：版本信息同步、死代码清理、I/O 优化、重复逻辑消除
+P2-E - post-P2-D 验收收口与测试加固（2026-08-11 起）。
 
-## 当前任务
+## 当前重点
 
-继续收口微信群联网链路，包括：
-- 默认优先保留近 90 天结果，不足再回填旧结果
-- 搜索结果正文改为三层提取：`trafilatura` / `readability-lxml` / `HTMLParser`
-- 来源块压缩为短标题、来源行与域名展示，减少群聊占屏和上下文负担
-- 摘要 prompt 明确正文可用性边界，避免把标题线索写成确定事实
-- 让侧栏阶段与任务说明、README 与当前打包内容保持同步
+- P2-D durable learning truth 全链路已进入 main：semantic closure、durable resume、freshness/revalidation、full golden journey、cross-browser e2e 51/51；
+- 执行顺序唯一 owner：`docs/PROJECT_STATUS.md`（2026-08-11 更新：P2-E-5 → E-1 → E-2 → E-3，G 系列产品能力评审已排除）；
+- backend 无直接测试的辅助模块 17 个（src/web 与 src/application），正在补直测；
+- 前端零测试 surface：MarkdownMessage / StatusDot / RoadmapPanel / RoutePanel / roles。
 
-## 版本进度
+## 里程碑
 
-- v0.1: 对话链路、双模型、日志
-- v0.2: 长期记忆读取
-- v0.3: 课后更新 + safe_writer
-- v0.4: 微信群反馈
-- v0.5: 自动路由
-- v0.5.3: 微信群记忆提取 + 互动氛围 + LLM Router
-- v0.6: 视觉增强 + 模块拆分
-- v0.6.2: 响应速度优化
-- v0.6.3: 默认进入微信群
-- v0.6.4: 群聊开场生成、四角色调度、打包与守护测试收口
-- v0.6.5: memory 文档与群聊体验继续收口
-- v0.6.6: 未知 speaker 展示安全、safe_writer 临时文件隔离、打包守护测试对齐
-- v0.6.7: rerun 体验、课后更新与侧栏展示继续压缩
-- v0.6.8: 打包安全、写盘稳定和刷新体验继续收口
-- v0.6.9: 微信群联网搜索入口、页面文本读取与来源写回落地
-- v0.7.0: 多源新闻搜索、解析降级、来源压缩和状态同步补强
-- v0.7.2: 4 Bug 修复、@st.cache_data 缓存、YAML 去重解析、常量抽取、模块拆分、fragment rerun 修复
-- v0.7.3: wechat_service 拆分、session flush 批量提交、GitHub Actions CI、架构级测试、LLM client 扩展、YAML state 真源化
-- v0.7.4: 自动化版本管理工具、LLM 配置文档化、NewsRoundResult 结果对象化、UI 来源可信度展示
-- v0.7.5: 文档同步收口、死代码清理、YAML 同步 I/O 优化、重复逻辑消除
-
-## 最近关键决策
-
-- 搜索结果默认优先展示近 90 天条目，仅在结果不足时回填旧新闻
-- Google News 中转链接优先解析到原文，正文读取不再浪费在未解析开的中转页上
-- 来源块只展示域名和短标题，完整链接保留在内部字段
-- 成功读取正文时显示简短提取器状态：`正文已读｜trafilatura` 等
-- 摘要前显式告知“正文可用性概况”，防止模型把标题推断写成已证实事实
-
-## 边界
-
-- 不自动污染长期记忆
-- 不绕过用户确认写入
-- 不让微信群替代正式学习主链路
-- 不新增不必要的自动 LLM 调用
+- P1：基线功能；P2-A：CI；P2-B/C：React 前端重构（v19）与核心体验；
+- P2-D-1..4D：durable learning truth 系列（D-4D main 基线 e05c191）；
+- 旧版本线（v0.1–v0.7.x）为历史档案，不参与当前执行顺序。

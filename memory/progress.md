@@ -1,42 +1,24 @@
 # 学习进度
 
-## 当前项目
+## 当前批次
 
-个人学习 Agent 系统
+P2-E - post-P2-D acceptance + test hardening（唯一执行顺序 owner：`docs/PROJECT_STATUS.md`）。
 
-## 已完成
+## 批次进度
 
-- v0.1：对话链路、角色 / 模式手动选择、会话日志
-- v0.2：长期记忆读取
-- v0.3：课后更新与安全写入
-- v0.4：微信群反馈与互动雏形
-- v0.5：自动路由与模式扩展
-- v0.6：视觉增强、模块拆分、群聊主入口重构
-- v0.6.2：响应速度优化
-- v0.6.3：默认进入微信群
-- v0.6.4：群聊开场控制、四角色调度、状态与打包链路收口
-- v0.6.5：memory 文档同步、群聊体验继续调整
-- v0.6.6：展示身份安全、safe_writer 临时文件隔离、打包守护测试对齐
-- v0.6.7：sidebar / rerun / 课后更新体验继续收口
-- v0.6.8：打包安全、写盘稳定和刷新体验继续补强
-- v0.6.9：微信群联网搜索、正文尝试读取、来源块写回落地
-- v0.7.0：多源搜索、Google News 解析、短链接来源块与摘要边界补强
-- v0.7.2：4 Bug 修复、缓存优化、常量抽取、模块拆分、fragment rerun 修复
-- v0.7.3：服务层拆分与工程化收口（wechat_service 拆分 + session flush 批量 + CI + 架构测试 + LLM 扩展 + YAML state）
-- v0.7.4：工程体验收口（自动化版本管理、LLM 配置文档化、NewsRoundResult 对象化、UI 来源可信度展示）
-- v0.7.5：版本同步收口 + 代码清理
-- v0.7.6：工程安全与新闻链路收口
+- P2-E-5 仓库清理：✅ 完成（15 个已合并本地残留分支已删除，保留 main + release-v0.8.0）
+- P2-E-1 验收收口：进行中（docs/memory 同步；实体手机验收待人工执行）
+- P2-E-2 backend 直测补缺：未开始
+- P2-E-3 前端 surface 测试：未开始
 
-## 当前阶段
+## 里程碑
 
-v0.7.6 - 工程安全与新闻链路收口：.gitignore 加固、HTML 转义、新闻链路优化、URL 安全校验、CI 强化
-
-## 当前重点
-
-- 持续观察搜索结果质量
-- 跟踪 CI 新步骤（package helper / detect-secrets / expanded mypy）的稳定性
-
-## 下一步
-
-- 推进 post-v0.7.6 稳定化
-- 补跑 `pytest` 全量测试和 UI 手测
+- P2-D-4D cross-browser：✅ e05c191（5 项目 51/51，firefox/webkit sample）
+- P2-D-4C full golden journey：✅ 35336cc + 8fc1746
+- P2-D-4B resume freshness + revalidation：✅ PR #127
+- P2-D-4A freshness service：✅ PR #126
+- P2-D-3C minimal durable UI：✅ PR #125
+- P2-D-3B durable resume：✅ PR #124
+- P2-D-3A semantic closure：✅ PR #123
+- D-2 mini golden journey：✅ PR #122
+- 旧版本线（v0.1–v0.7.x）：历史档案
