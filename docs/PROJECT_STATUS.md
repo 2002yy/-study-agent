@@ -1,7 +1,7 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-10  
+> 更新：2026-08-11
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -23,9 +23,9 @@
 - **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 - **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
 - **P2-D-4D：完成（自动验收部分）。** firefox/webkit sample + 5 项目 51/51 通过；实体手机验收清单已写入 docs/MOBILE_ACCEPTANCE_D4D.md，待执行人填写记录。
-- **P2-E：已完成。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 验收收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺。
+- **P2-E：自动化批次完成；实体手机人工验收待完成。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；人工验收不得在记录表填写前标记完成。
 
-当前 main 基线：`1f00e06`（P2-E-3 完成）。
+当前已验证 CI 基线：`2c891a2`（[CI #31504516618](https://github.com/2002yy/study-agent/actions/runs/31504516618) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -216,7 +216,7 @@ PR #125 merge：`e413072`。
 - 不引入知识图谱、Claim dashboard、Route editor、Retention dashboard；
 - D3C 不实现 freshness/revalidation。
 
-## 7. P2-D-4 — COMPLETE
+## 7. P2-D-4 — COMPLETE (automation; manual mobile acceptance pending)
 
 - Primary unchanged → current；
 - Primary materially changed → stale_candidate；
@@ -225,7 +225,7 @@ PR #125 merge：`e413072`。
 - prerequisite support materially changed 可触发 stale_candidate；
 - explicit revalidation → same Claim lineage + immutable next Revision；
 - 完成 full Golden Learning Journey；
-- Chromium + Firefox sample + WebKit sample + 实体手机验收。
+- Chromium + Firefox sample + WebKit sample 已完成；实体手机验收待人工执行并填写记录。
 
 ### D-4A — Freshness evaluation service - COMPLETE
 
@@ -246,15 +246,15 @@ PR #125 merge：`e413072`。
 - 显式 revalidation 入口：新 closure run 带 claim 上下文，commit 复用 lineage；
 - Playwright fixture + e2e 测试。
 
-Backend completed (deferred items):
+Backend completed (items deferred at that time):
 - resume projection 已带 freshness detail（status/head_commit/reason/primary/supporting_drift），
   evaluator 故障降级为 unavailable 不中断；
 - POST /sessions/{session_id}/claims/{claim_id}/revalidate 已实现：
   同 lineage 新 Revision（reason=revalidated），missing claim / no active goal /
   no primary source 均显式拒绝并返回对应 404/409；
 - revalidation 后立即回写 freshness status；
-- 未完成项：LearningPanel UI 徽章 + 渐进披露、Playwright fixture + e2e
-  （UI 层，见 D-4B-UI 分批或 D-4C 后处理）。
+- 当时延期项：LearningPanel UI 徽章 + 渐进披露、Playwright fixture + e2e；
+  以上项目随后已由 D-4C 完成，不是当前缺口。
 
 ### D-4C — Full Golden Journey (AFTER D-4B) - COMPLETE
 
@@ -280,7 +280,7 @@ Known environment notes:
 - 本机 `npx playwright install chromium` 默认 CDN 不可达，使用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright` 完成安装；
 - 系统 Chrome（channel: chrome）下 complex-content linkRectCount 断言失败（渲染差异），headless shell 下通过；CI 保持默认 headless。
 
-## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - COMPLETE
+## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - AUTOMATION COMPLETE / MANUAL MOBILE ACCEPTANCE PENDING
 
 范围（2026-08-11 现状调研确认；G 系列产品能力评审已排除）：
 
@@ -289,7 +289,7 @@ Known environment notes:
 - 删除 15 个已合并/过时的本地残留分支（codex/*、claude/*、P2-D-4A-freshness 等），保留 main + release-v0.8.0；
 - 远程分支不动；不改变 main 内容。
 
-### E-1 — Acceptance + docs/memory sync - COMPLETE (automation)
+### E-1 — Acceptance + docs/memory sync - AUTOMATION COMPLETE / MANUAL MOBILE ACCEPTANCE PENDING
 
 - 实体手机验收（人工）：按 docs/MOBILE_ACCEPTANCE_D4D.md 10 步执行并填写记录表（执行人/日期/浏览器/设备），完成后回写本 owner；
 - docs 收口：TECH_STACK.md “后续 LearningClosureRun”已更新（G1 已实现）；memory/ 六个版本文件已同步到 P2-E 时代；
@@ -324,7 +324,7 @@ P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
 P2-D-4D cross-browser          ✅ complete (automation 51/51; manual checklist in docs/MOBILE_ACCEPTANCE_D4D.md)
 
 P2-E-5 repo cleanup            ← 已完成（删 15 个已合并本地残留分支）
-P2-E-1 acceptance + docs sync  ← 已完成（手机验收人工部分 + 文档/memory 收口）
+P2-E-1 acceptance + docs sync  ← 自动化/文档收口完成；实体手机人工验收待填写
 P2-E-2 backend direct tests    ← 已完成（src/web + src/application 17 模块直测）
 P2-E-3 frontend surface tests  ← 已完成（MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roles）
 
