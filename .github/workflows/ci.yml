@@ -188,7 +188,7 @@ jobs:
           set -o pipefail
           {
             npm install --no-save --package-lock=false @playwright/test@1.55.0
-            npx playwright install --with-deps chromium
+            npx playwright install --with-deps chromium firefox webkit
             npm run test:e2e
           } > ../browser-e2e.log 2>&1
 

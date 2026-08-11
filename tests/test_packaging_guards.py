@@ -226,6 +226,7 @@ def test_ci_workflow_exists_and_runs_core_checks():
     assert "mypy --explicit-package-bases src/" in text
     assert "Run package helper" in text
     assert "detect-secrets" in text
+    assert "playwright install --with-deps chromium firefox webkit" in text
 
 
 def test_ci_secret_scan_fails_on_any_detect_secrets_finding():
