@@ -22,8 +22,8 @@
 - **P2-D GrillMe 决策 1–49：已冻结。**
 - **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 - **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
-- **P2-D-4D：完成（自动验收部分）。** firefox/webkit sample + 5 项目 51/51 通过；实体手机验收清单已写入 docs/MOBILE_ACCEPTANCE_D4D.md，待执行人填写记录。
-- **P2-E：自动化批次完成；实体手机人工验收待完成。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；人工验收不得在记录表填写前标记完成。
+- **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
+- **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
 当前已验证 CI 基线：`2c891a2`（[CI #31504516618](https://github.com/2002yy/study-agent/actions/runs/31504516618) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
@@ -216,7 +216,7 @@ PR #125 merge：`e413072`。
 - 不引入知识图谱、Claim dashboard、Route editor、Retention dashboard；
 - D3C 不实现 freshness/revalidation。
 
-## 7. P2-D-4 — COMPLETE (automation; manual mobile acceptance pending)
+## 7. P2-D-4 — COMPLETE (automation; manual mobile acceptance deferred)
 
 - Primary unchanged → current；
 - Primary materially changed → stale_candidate；
@@ -225,7 +225,7 @@ PR #125 merge：`e413072`。
 - prerequisite support materially changed 可触发 stale_candidate；
 - explicit revalidation → same Claim lineage + immutable next Revision；
 - 完成 full Golden Learning Journey；
-- Chromium + Firefox sample + WebKit sample 已完成；实体手机验收待人工执行并填写记录。
+- Chromium + Firefox sample + WebKit sample 已完成；实体手机验收因 Android 导出/部署配置未就绪而延期。
 
 ### D-4A — Freshness evaluation service - COMPLETE
 
@@ -268,19 +268,19 @@ Completed（35336cc + 8fc1746）:
 - LearningPanel「重新验证」按钮条件渲染守卫（仅 stale/source_changed 显示），单测锁定；
 - e2e `stale_revalidation` journey：stale 条可见 → 重新验证 → 全部 current，desktop + mobile 双项目通过；golden-journeys manifest 期望 29 项已完成。
 
-### D-4D — Cross-browser acceptance (AFTER D-4C) - COMPLETE (automation)
+### D-4D — Cross-browser acceptance (AFTER D-4C) - COMPLETE (automation) / MANUAL MOBILE DEFERRED
 
 - playwright config 新增 desktop-firefox / desktop-webkit sample（仅 golden-journeys，避免双倍全量成本）；
 - `channel: chrome` 限定到 chromium 项目（原先顶层 use 会让 firefox 报 Unsupported channel）；
 - 核心 journey 在 firefox / webkit 上通过：golden-journeys 4 条 × firefox/webkit 8/8；
 - teardown manifest 扩展为 53 项（4 golden journeys × 4 桌面/移动项目 + complex_content_narrow），全量 5 项目 51/51 通过；
-- 实体手机验收步骤已写入验收记录 `docs/MOBILE_ACCEPTANCE_D4D.md`（人工执行，执行人填写后归档）。
+- 实体手机验收步骤保留在 `docs/MOBILE_ACCEPTANCE_D4D.md`；当前因 Android 导出/部署配置未就绪而延期，恢复后由执行人填写并归档。
 
 Known environment notes:
 - 本机 `npx playwright install chromium` 默认 CDN 不可达，使用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright` 完成安装；
 - 系统 Chrome（channel: chrome）下 complex-content linkRectCount 断言失败（渲染差异），headless shell 下通过；CI 保持默认 headless。
 
-## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - AUTOMATION COMPLETE / MANUAL MOBILE ACCEPTANCE PENDING
+## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - AUTOMATION COMPLETE / MANUAL MOBILE DEFERRED
 
 范围（2026-08-11 现状调研确认；G 系列产品能力评审已排除）：
 
@@ -289,9 +289,9 @@ Known environment notes:
 - 删除 15 个已合并/过时的本地残留分支（codex/*、claude/*、P2-D-4A-freshness 等），保留 main + release-v0.8.0；
 - 远程分支不动；不改变 main 内容。
 
-### E-1 — Acceptance + docs/memory sync - AUTOMATION COMPLETE / MANUAL MOBILE ACCEPTANCE PENDING
+### E-1 — Acceptance + docs/memory sync - AUTOMATION COMPLETE / MANUAL MOBILE DEFERRED
 
-- 实体手机验收（人工）：按 docs/MOBILE_ACCEPTANCE_D4D.md 10 步执行并填写记录表（执行人/日期/浏览器/设备），完成后回写本 owner；
+- 实体手机验收（人工）：因 Android 导出/部署配置未就绪而延期；恢复时按 docs/MOBILE_ACCEPTANCE_D4D.md 10 步执行并填写记录表（执行人/日期/浏览器/设备），完成后回写本 owner；
 - docs 收口：TECH_STACK.md “后续 LearningClosureRun”已更新（G1 已实现）；memory/ 六个版本文件已同步到 P2-E 时代；
 - 基线收口：8dcaf11。
 
@@ -321,10 +321,10 @@ P2-D-3C minimal durable UI     ✅ complete
 P2-D-4A freshness service      ✅ complete (PR #126)
 P2-D-4B resume freshness + UI  ✅ complete (PR #126)
 P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
-P2-D-4D cross-browser          ✅ complete (automation 51/51; manual checklist in docs/MOBILE_ACCEPTANCE_D4D.md)
+P2-D-4D cross-browser          ✅ complete (automation 51/51; manual mobile deferred until Android export/deploy readiness)
 
 P2-E-5 repo cleanup            ← 已完成（删 15 个已合并本地残留分支）
-P2-E-1 acceptance + docs sync  ← 自动化/文档收口完成；实体手机人工验收待填写
+P2-E-1 acceptance + docs sync  ← 自动化/文档收口完成；实体手机人工验收延期
 P2-E-2 backend direct tests    ← 已完成（src/web + src/application 17 模块直测）
 P2-E-3 frontend surface tests  ← 已完成（MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roles）
 
@@ -333,3 +333,23 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 ```
 
 任何后续实现若改变该顺序或扩大 scope，必须先更新本唯一状态 owner，再执行。
+
+## 9. 后续核心路线审计（2026-08-11）
+
+当前代码核验确认，历史计划中的以下项目已经实现，不得重复建设：
+
+- PedagogyEvalRun 已接入真实 turn completion、SQLite repository 和 semantic evaluation；
+- pedagogy golden dialogues 与质量门禁已存在；
+- after-session preview/commit 与 durable learning closure 已存在；
+- 前端已升级 React 19 并迁移到 Testing Library，`react-test-renderer` 已移除；
+- Streamlit `app.py`、`src/ui` 和依赖已移除。
+
+下一项真实核心缺口是 **Learner Model**。进入实现前必须冻结以下 owner 边界：
+
+- LearningTruth 继续唯一拥有 Claim、SourceEvidence 与 UnderstandingEvidence；
+- PedagogyEvalRun 继续只是逐轮评估记录，不直接成为长期画像；
+- learner-profile memory 只保存用户确认的偏好，推断候选默认 pending；
+- Learner Model 不创建 mastery 百分比，不推断敏感属性，不形成第二套学习真值；
+- 第一实现切片不得夹带 GraphRAG、临时附件、统计面板或新的角色专属画像。
+
+当前阶段：**Learner Model contract audit / boundary freeze；生产实现尚未开始。**
