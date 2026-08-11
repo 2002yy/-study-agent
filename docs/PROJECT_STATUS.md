@@ -20,10 +20,11 @@
 - **P2-D-3A：完成。** Semantic Closure + durable Goal navigation 已进入 main。
 - **P2-D-3B：完成。** bounded durable ResumeContext + read-only resume API 已进入 main。
 - **P2-D GrillMe 决策 1–49：已冻结。**
-- **下一实施批次：P2-D-4 - Freshness + Revalidation + Full Golden Journey。**
+- **下一实施批次：P2-D-4D - Cross-browser acceptance（AFTER D-4C）。**
 - **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
+- **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
 
-当前 main 基线：`e413072`（PR #125 merge）。
+当前 main 基线：`8fc1746`（P2-D-4C）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -254,15 +255,22 @@ Backend completed (deferred items):
 - 未完成项：LearningPanel UI 徽章 + 渐进披露、Playwright fixture + e2e
   （UI 层，见 D-4B-UI 分批或 D-4C 后处理）。
 
-### D-4C — Full Golden Journey (AFTER D-4B)
+### D-4C — Full Golden Journey (AFTER D-4B) - COMPLETE
 
 - 拓展 mini journey 到 step 1–17，用真实源码 + 双 commit 对；
 - step 14–17：Primary 实质修改 → rev1/confirmed 保留、freshness → stale_candidate → 显式 revalidation → rev2 同 lineage；
 - e2e golden journey 同步扩展。
 
-### D-4D — Cross-browser acceptance (AFTER D-4C)
+Completed（35336cc + 8fc1746）:
+- backend 侧 suspension 保留 rev1/confirmed → freshness stale_candidate → revalidate → rev2 同 lineage 已全链路验证；
+- 前端缺陷修复：LearningStrip 缺行与来源补充、摘要刷新、stale/current 角度刷新、badge 标题 tooltip、server-only 断言（网络环境不可取时逐层降级而不报错）；
+- LearningPanel「重新验证」按钮条件渲染守卫（仅 stale/source_changed 显示），单测锁定；
+- e2e `stale_revalidation` journey：stale 条可见 → 重新验证 → 全部 current，desktop + mobile 双项目通过；golden-journeys manifest 期望 29 项已完成。
+
+### D-4D — Cross-browser acceptance (AFTER D-4C) - NEXT
 
 - playwright config 新增 desktop-firefox / desktop-webkit sample；
+- 核心 journey 子集在 firefox / webkit 上通过（golden-journeys + teardown manifest 同步扩展）；
 - 实体手机验收步骤（人工执行，方法写入验收记录）。
 
 ## 8. 当前执行顺序
@@ -280,8 +288,8 @@ P2-D-3C minimal durable UI     ✅ complete
 
 P2-D-4A freshness service      ✅ complete (PR #126)
 P2-D-4B resume freshness + UI  ✅ complete (PR #126)
-P2-D-4C full Golden Journey    ← NEXT
-P2-D-4D cross-browser
+P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
+P2-D-4D cross-browser          ← NEXT
 
 P2-D-4
 freshness + revalidation + full Golden Journey
