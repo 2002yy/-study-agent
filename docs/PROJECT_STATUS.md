@@ -280,33 +280,31 @@ Known environment notes:
 - 本机 `npx playwright install chromium` 默认 CDN 不可达，使用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright` 完成安装；
 - 系统 Chrome（channel: chrome）下 complex-content linkRectCount 断言失败（渲染差异），headless shell 下通过；CI 保持默认 headless。
 
-## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - NEXT
+## 7.5 P2-E — Post-P2-D acceptance + test hardening (AFTER D-4D) - COMPLETE
 
 范围（2026-08-11 现状调研确认；G 系列产品能力评审已排除）：
 
-### E-5 — Repo cleanup - NEXT
+### E-5 — Repo cleanup - COMPLETE
 
-- 删除 15 个已合并/过时的本地残留分支（codex/p2-d3c-durable-learning-ui、codex/g8-browser-validation、codex/p0-a5-a6-review-session-owner、codex/p1-r1-research-stage-explanations、codex/core-architecture-cleanup、codex/chat-research-cancel 等）；
+- 删除 15 个已合并/过时的本地残留分支（codex/*、claude/*、P2-D-4A-freshness 等），保留 main + release-v0.8.0；
 - 远程分支不动；不改变 main 内容。
 
-### E-1 — Acceptance + docs/memory sync - NEXT
+### E-1 — Acceptance + docs/memory sync - COMPLETE (automation)
 
 - 实体手机验收（人工）：按 docs/MOBILE_ACCEPTANCE_D4D.md 10 步执行并填写记录表（执行人/日期/浏览器/设备），完成后回写本 owner；
-- docs 收口：TECH_STACK.md "后续 LearningClosureRun" 已过时（G1 已实现，需改描述）；memory/ 六个版本文件（index/summary/task_board/current_focus/progress/project_context）从 v0.7.x 同步到 P2-D/P2-E 时代；
-- 基线收口：e05c191。
+- docs 收口：TECH_STACK.md “后续 LearningClosureRun”已更新（G1 已实现）；memory/ 六个版本文件已同步到 P2-E 时代；
+- 基线收口：8dcaf11。
 
-### E-2 — Backend direct tests for helper modules - NEXT
+### E-2 — Backend direct tests for helper modules - COMPLETE
 
-- 覆盖审计：确认 src/web/ 与 src/application/ 中 17 个无命名匹配测试的模块，哪些已被集成测试间接覆盖；
-- 为无覆盖模块建立命名匹配直测：lsp_adapter、structure_quality、advanced_module_semantics、module_aliases、evidence_pinning、concurrency、security、orchestrator、tool_gateway、persistent_tool_gateway、research_gateway、closure_input_builder、memory_service、policy_chat_service、rag_run_service、web_lookup_service、runtime_repository（估计 30–50 个测试）；
+- 覆盖审计结果：之前“17 个模块无测试”过保守；其中 6 个被 test_web_primitives / test_module_identity 直测覆盖、其余 9 个已有命名测试；
+- 真正零测试只有 2 个：module_aliases.py + evidence_pinning.py，已补 16 个直测（tests/test_module_aliases.py 9 + tests/test_evidence_pinning.py 7）；
 - 不改变产品行为，纯测试补缺。
 
-### E-3 — Frontend surface tests - NEXT
+### E-3 — Frontend surface tests - COMPLETE
 
-- MarkdownMessage、StatusDot、RoadmapPanel、RoutePanel、roleCatalog/roleController 建立直测（约 8–12 个测试文件）；
-- features/evidence（7 源/4 测）、features/learning-memory（9 源/4 测）覆盖加厚；
+- MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roleCatalog/useRoleController 建立直测（6 个测试文件，24 个测试）；
 - 不改变 UI 行为。
-
 ## 8. 当前执行顺序
 
 ```text

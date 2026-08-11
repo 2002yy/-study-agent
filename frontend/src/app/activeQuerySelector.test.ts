@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -72,7 +72,7 @@ describe("active query selector", () => {
 
     const declarationOwners = productionFiles(srcRoot).flatMap((path) =>
       readFileSync(path, "utf8").includes("const activeQuery =")
-        ? [relative(srcRoot, path)]
+        ? [relative(srcRoot, path).split(sep).join("/")]
         : [],
     );
     expect(declarationOwners).toEqual(["app/useExtensionRuntime.ts"]);

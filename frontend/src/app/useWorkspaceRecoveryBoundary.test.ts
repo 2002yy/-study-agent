@@ -2,29 +2,27 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const runtimeSource = readFileSync(
+function readNormalizedSource(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const runtimeSource = readNormalizedSource(
   fileURLToPath(new URL("./WorkspaceRuntime.tsx", import.meta.url)),
-  "utf8",
 );
-const recoverySource = readFileSync(
+const recoverySource = readNormalizedSource(
   fileURLToPath(new URL("./useWorkspaceRecovery.ts", import.meta.url)),
-  "utf8",
 );
-const evidenceSource = readFileSync(
+const evidenceSource = readNormalizedSource(
   fileURLToPath(new URL("./useEvidenceRuntime.ts", import.meta.url)),
-  "utf8",
 );
-const learningSource = readFileSync(
+const learningSource = readNormalizedSource(
   fileURLToPath(new URL("./useLearningSessionRuntime.ts", import.meta.url)),
-  "utf8",
 );
-const extensionSource = readFileSync(
+const extensionSource = readNormalizedSource(
   fileURLToPath(new URL("./useExtensionRuntime.ts", import.meta.url)),
-  "utf8",
 );
-const viewSource = readFileSync(
+const viewSource = readNormalizedSource(
   fileURLToPath(new URL("./WorkspaceView.tsx", import.meta.url)),
-  "utf8",
 );
 const recoveryCall = runtimeSource.slice(
   runtimeSource.indexOf("useWorkspaceRecovery({"),
