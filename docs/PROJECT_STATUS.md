@@ -20,11 +20,11 @@
 - **P2-D-3A：完成。** Semantic Closure + durable Goal navigation 已进入 main。
 - **P2-D-3B：完成。** bounded durable ResumeContext + read-only resume API 已进入 main。
 - **P2-D GrillMe 决策 1–49：已冻结。**
-- **下一实施批次：P2-D-4D - Cross-browser acceptance（AFTER D-4C）。**
-- **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
+- **下一实施批次：P2-D-4D - Cross-browser acceptance（AFTER D-4C）。**- **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 - **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
+- **P2-D-4D：完成（自动验收部分）。** firefox/webkit sample + 5 项目 51/51 通过；实体手机验收清单已写入 docs/MOBILE_ACCEPTANCE_D4D.md，待执行人填写记录。
 
-当前 main 基线：`8fc1746`（P2-D-4C）。
+当前 main 基线：`1700d5a`（P2-D-4D 前）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -267,11 +267,17 @@ Completed（35336cc + 8fc1746）:
 - LearningPanel「重新验证」按钮条件渲染守卫（仅 stale/source_changed 显示），单测锁定；
 - e2e `stale_revalidation` journey：stale 条可见 → 重新验证 → 全部 current，desktop + mobile 双项目通过；golden-journeys manifest 期望 29 项已完成。
 
-### D-4D — Cross-browser acceptance (AFTER D-4C) - NEXT
+### D-4D — Cross-browser acceptance (AFTER D-4C) - COMPLETE (automation)
 
-- playwright config 新增 desktop-firefox / desktop-webkit sample；
-- 核心 journey 子集在 firefox / webkit 上通过（golden-journeys + teardown manifest 同步扩展）；
-- 实体手机验收步骤（人工执行，方法写入验收记录）。
+- playwright config 新增 desktop-firefox / desktop-webkit sample（仅 golden-journeys，避免双倍全量成本）；
+- `channel: chrome` 限定到 chromium 项目（原先顶层 use 会让 firefox 报 Unsupported channel）；
+- 核心 journey 在 firefox / webkit 上通过：golden-journeys 4 条 × firefox/webkit 8/8；
+- teardown manifest 扩展为 53 项（4 golden journeys × 4 桌面/移动项目 + complex_content_narrow），全量 5 项目 51/51 通过；
+- 实体手机验收步骤已写入验收记录 `docs/MOBILE_ACCEPTANCE_D4D.md`（人工执行，执行人填写后归档）。
+
+Known environment notes:
+- 本机 `npx playwright install chromium` 默认 CDN 不可达，使用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright` 完成安装；
+- 系统 Chrome（channel: chrome）下 complex-content linkRectCount 断言失败（渲染差异），headless shell 下通过；CI 保持默认 headless。
 
 ## 8. 当前执行顺序
 
@@ -289,7 +295,7 @@ P2-D-3C minimal durable UI     ✅ complete
 P2-D-4A freshness service      ✅ complete (PR #126)
 P2-D-4B resume freshness + UI  ✅ complete (PR #126)
 P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
-P2-D-4D cross-browser          ← NEXT
+P2-D-4D cross-browser          ✅ complete (automation 51/51; manual checklist in docs/MOBILE_ACCEPTANCE_D4D.md)
 
 P2-D-4
 freshness + revalidation + full Golden Journey

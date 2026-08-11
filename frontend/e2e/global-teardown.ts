@@ -21,27 +21,35 @@ type ComplexArtifact = SuccessArtifact & {
   conversation_distance_from_bottom?: number;
 };
 
-const EXPECTED_JOURNEYS: ExpectedJourney[] = [
+const GOLDEN_JOURNEY_SAMPLES: Array<{ journey: string; steps: string[] }> = [
   {
     journey: "first_answer",
-    projects: ["desktop-chromium", "mobile-chromium"],
     steps: ["ready", "completed", "restored"],
   },
   {
     journey: "returning_learning",
-    projects: ["desktop-chromium", "mobile-chromium"],
     steps: ["restored-context", "continued", "continued-restored"],
   },
   {
     journey: "chat_failure_recovery",
-    projects: ["desktop-chromium", "mobile-chromium"],
     steps: ["failure-visible", "recovered", "recovered-restored"],
   },
   {
     journey: "stale_revalidation",
-    projects: ["desktop-chromium", "mobile-chromium"],
     steps: ["stale-visible", "revalidated-current", "revalidated-restored"],
   },
+];
+
+const EXPECTED_JOURNEYS: ExpectedJourney[] = [
+  ...GOLDEN_JOURNEY_SAMPLES.map((sample) => ({
+    ...sample,
+    projects: [
+      "desktop-chromium",
+      "mobile-chromium",
+      "desktop-firefox",
+      "desktop-webkit",
+    ],
+  })),
   {
     journey: "complex_content_narrow",
     projects: ["narrow-chromium"],

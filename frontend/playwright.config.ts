@@ -28,7 +28,6 @@ export default defineConfig({
   ],
   use: {
     baseURL: "http://127.0.0.1:5173",
-    channel: process.env.PLAYWRIGHT_USE_SYSTEM_CHROME ? "chrome" : undefined,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -39,6 +38,7 @@ export default defineConfig({
       testIgnore: STANDARD_FIXTURE_IGNORES,
       use: {
         browserName: "chromium",
+        channel: process.env.PLAYWRIGHT_USE_SYSTEM_CHROME ? "chrome" : undefined,
         viewport: { width: 1440, height: 900 },
       },
     },
@@ -47,6 +47,7 @@ export default defineConfig({
       testIgnore: STANDARD_FIXTURE_IGNORES,
       use: {
         browserName: "chromium",
+        channel: process.env.PLAYWRIGHT_USE_SYSTEM_CHROME ? "chrome" : undefined,
         viewport: { width: 390, height: 844 },
         isMobile: true,
         hasTouch: true,
@@ -62,9 +63,28 @@ export default defineConfig({
       testIgnore: REAL_STACK_TESTS,
       use: {
         browserName: "chromium",
+        channel: process.env.PLAYWRIGHT_USE_SYSTEM_CHROME ? "chrome" : undefined,
         viewport: { width: 360, height: 520 },
         isMobile: true,
         hasTouch: true,
+      },
+    },
+    {
+      name: "desktop-firefox",
+      testMatch: ["**/golden-journeys.spec.ts"],
+      testIgnore: REAL_STACK_TESTS,
+      use: {
+        browserName: "firefox",
+        viewport: { width: 1440, height: 900 },
+      },
+    },
+    {
+      name: "desktop-webkit",
+      testMatch: ["**/golden-journeys.spec.ts"],
+      testIgnore: REAL_STACK_TESTS,
+      use: {
+        browserName: "webkit",
+        viewport: { width: 1440, height: 900 },
       },
     },
   ],
