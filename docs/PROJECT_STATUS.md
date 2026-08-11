@@ -216,7 +216,7 @@ PR #125 merge：`e413072`。
 - 不引入知识图谱、Claim dashboard、Route editor、Retention dashboard；
 - D3C 不实现 freshness/revalidation。
 
-## 7. P2-D-4 — NEXT
+## 7. P2-D-4 — COMPLETE
 
 - Primary unchanged → current；
 - Primary materially changed → stale_candidate；
