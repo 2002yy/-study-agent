@@ -311,6 +311,7 @@ def get_learning_revalidation_service():
     )
 
 
+@lru_cache(maxsize=1)
 def get_learning_resume_service():
     from src.application.learning_freshness import LearningFreshnessService
     from src.application.learning_resume import LearningResumeService

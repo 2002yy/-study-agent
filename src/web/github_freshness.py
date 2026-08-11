@@ -85,7 +85,7 @@ class GitHubFreshnessHeadResolver:
         cache_key = f"{repository}:{commit_sha}"
         cached = self._tree_cache.get(cache_key)
         if cached is not None:
-            inserted, tree = cached
+            inserted, cached_tree = cached
             ttl = _env_int(
                 "GITHUB_FRESHNESS_TREE_TTL_SECONDS",
                 900,
@@ -93,7 +93,7 @@ class GitHubFreshnessHeadResolver:
                 maximum=86400,
             )
             if ttl <= 0 or time.monotonic() - inserted < ttl:
-                return tree
+                return cached_tree
         try:
             payload = self.request_json(
                 _api(
