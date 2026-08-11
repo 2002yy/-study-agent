@@ -23,9 +23,9 @@
 - **P2-D-3C：完成。** durable learning truth surface（closure truth bridge、ResumeContext UI、LearningPanel/Strip/EvidenceTrail、goal-isolated confirmation）已进入 main。
 - **P2-D-4C：完成。** backend 全链路 golden journey（真实源码 + 双 commit）已进入 main（35336cc）；前端学习侧栏缺陷修复（缺行/补给、摘要刷新、stale 角度刷新、server-only 断言）+ revalidation e2e journey 已进入 main（8fc1746）。
 - **P2-D-4D：完成（自动验收部分）。** firefox/webkit sample + 5 项目 51/51 通过；实体手机验收清单已写入 docs/MOBILE_ACCEPTANCE_D4D.md，待执行人填写记录。
-- **P2-E：下一实施批次。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 验收收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺。
+- **P2-E：已完成。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 验收收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺。
 
-当前 main 基线：`e05c191`（P2-D-4D）。
+当前 main 基线：`1f00e06`（P2-E-3 完成）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -323,10 +323,10 @@ P2-D-4B resume freshness + UI  ✅ complete (PR #126)
 P2-D-4C full Golden Journey    ✅ complete (35336cc + 8fc1746)
 P2-D-4D cross-browser          ✅ complete (automation 51/51; manual checklist in docs/MOBILE_ACCEPTANCE_D4D.md)
 
-P2-E-5 repo cleanup            ← NEXT（删 15 个已合并本地残留分支）
-P2-E-1 acceptance + docs sync  ← NEXT（手机验收人工部分 + 文档/memory 收口）
-P2-E-2 backend direct tests    ← NEXT（src/web + src/application 17 模块直测）
-P2-E-3 frontend surface tests  ← NEXT（MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roles）
+P2-E-5 repo cleanup            ← 已完成（删 15 个已合并本地残留分支）
+P2-E-1 acceptance + docs sync  ← 已完成（手机验收人工部分 + 文档/memory 收口）
+P2-E-2 backend direct tests    ← 已完成（src/web + src/application 17 模块直测）
+P2-E-3 frontend surface tests  ← 已完成（MarkdownMessage/StatusDot/RoadmapPanel/RoutePanel/roles）
 
 P2-E
 post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
