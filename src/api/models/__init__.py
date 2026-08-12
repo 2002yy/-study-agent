@@ -29,6 +29,7 @@ from .memory import (
     MemoryStatusResponse,
     MemoryUpdate,
 )
+from .learner_model import LearnerModelSnapshotResponse
 from .news import (
     NewsLookupRequest,
     NewsLookupResponse,

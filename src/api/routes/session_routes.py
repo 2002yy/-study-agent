@@ -16,11 +16,14 @@ from src.api.models.common import (
     SessionTitleUpdateResponse,
 )
 from src.api.models.memory import MemoryRunResponse
+from src.api.models.learner_model import LearnerModelSnapshotResponse
 from src.application.helpers import runtime_settings_payload
+from src.application.learner_model import LearnerModelService
 from src.application.learning_closure_service import LearningClosureNotEligible
 from src.application.learning_revalidation import LearningRevalidationService
 from src.application.runtime_repository import (
     get_learning_closure_service,
+    get_learner_model_service,
     get_learning_revalidation_service,
     get_learning_resume_service,
     get_session_service,
@@ -29,6 +32,9 @@ from src.application.session_service import SessionService
 
 router = APIRouter(tags=["sessions"])
 SessionServiceDependency = Annotated[SessionService, Depends(get_session_service)]
+LearnerModelServiceDependency = Annotated[
+    LearnerModelService, Depends(get_learner_model_service)
+]
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -78,6 +84,24 @@ def get_learning_resume(
     return resume_service.build(
         session_id,
         legacy_navigation=navigation if isinstance(navigation, dict) else {},
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/learner-model",
+    response_model=LearnerModelSnapshotResponse,
+)
+def get_learner_model_snapshot(
+    session_id: str,
+    session_service: SessionServiceDependency,
+    learner_model_service: LearnerModelServiceDependency,
+) -> LearnerModelSnapshotResponse:
+    """Expose the bounded learner-model projection without adding a write owner."""
+
+    if session_service.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return LearnerModelSnapshotResponse(
+        **learner_model_service.build(session_id).to_dict()
     )
 
 
