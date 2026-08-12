@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+from src.tools.web_agent import WebToolTrace
+
 from src.api.models.chat import ChatRequest
 from src.api.routes.chat_routes import chat_stream_endpoint
 from src.application.chat_service import ChatDependencies, ChatService
@@ -111,6 +113,82 @@ def test_preparation_streams_owned_research_progress_before_session(
     assert "event: research" in body
     assert '"stage": "searching"' in body
     assert body.index("event: research") < body.index("event: session")
+
+
+def test_failed_research_emits_visible_notice_before_model_tokens(runtime_test_context):
+    async def tokens(*args, **kwargs):
+        yield "offline answer"
+
+    service = _service(runtime_test_context, tokens)
+    dependencies = service.dependencies
+    service.dependencies = ChatDependencies(
+        **{
+            **dependencies.__dict__,
+            "resolve_web_tools": lambda *_args, **_kwargs: WebToolTrace(
+                error="TimeoutError: provider timeout",
+                run_id="web_lookup_failed",
+            ),
+        }
+    )
+
+    body = asyncio.run(
+        _consume_stream(
+            service,
+            runtime_test_context.web_lookup_service,
+            ConnectedRequest(),
+            "failed-research-visible-notice",
+        )
+    )
+
+    notice = "联网搜索失败，本回答未使用联网来源。"
+    assert notice in body
+    assert body.index(notice) < body.index("offline answer")
+
+
+def test_successful_research_emits_source_preview_before_model_tokens(
+    runtime_test_context,
+):
+    async def tokens(*args, **kwargs):
+        yield "synthesized answer"
+
+    service = _service(runtime_test_context, tokens)
+    dependencies = service.dependencies
+    service.dependencies = ChatDependencies(
+        **{
+            **dependencies.__dict__,
+            "resolve_web_tools": lambda *_args, **_kwargs: WebToolTrace(
+                calls=(
+                    {
+                        "name": "web_search",
+                        "arguments": {"query": "official docs"},
+                        "result": {
+                            "status": "ok",
+                            "results": [
+                                {
+                                    "title": "Official documentation",
+                                    "url": "https://example.test/docs",
+                                }
+                            ],
+                        },
+                    },
+                ),
+                run_id="web_lookup_found",
+            ),
+        }
+    )
+
+    body = asyncio.run(
+        _consume_stream(
+            service,
+            runtime_test_context.web_lookup_service,
+            ConnectedRequest(),
+            "successful-research-visible-preview",
+        )
+    )
+
+    assert "联网搜索已完成" in body
+    assert "https://example.test/docs" in body
+    assert body.index("联网搜索已完成") < body.index("synthesized answer")
 
 
 def test_disconnect_before_first_token_interrupts_turn(runtime_test_context):

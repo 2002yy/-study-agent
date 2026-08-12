@@ -97,7 +97,15 @@ def test_chat_service_injects_model_selected_web_evidence(tmp_path):
             {
                 "name": "web_search",
                 "arguments": {"query": "FastAPI"},
-                "result": {"results": [{"url": "https://fastapi.tiangolo.com"}]},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "FastAPI documentation",
+                            "url": "https://fastapi.tiangolo.com",
+                        }
+                    ],
+                },
             },
         )
     )

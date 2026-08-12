@@ -10,9 +10,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 import os
+import time
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 from src.news.article_fetcher import fetch_article_read_result
 from src.news.search_sources.searxng_source import (
@@ -30,6 +32,20 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(
+    name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
 
 
 class _DuckDuckGoResultsParser(HTMLParser):
@@ -159,20 +175,21 @@ class GeneralWebGateway:
                 "searched_at": current.isoformat(),
             }
 
-        results = self._search_single(focused, limit)
-        provider_errors: list[str] = []
-        error = get_last_searxng_error()
-        if error:
-            provider_errors.append(error)
-        providers_enabled = searxng_enabled() or _env_flag(
-            "WEB_ENABLE_DUCKDUCKGO", default=True
-        )
+        outcome = self._search_single(focused, limit)
+        results = list(outcome["results"])
+        provider_errors = list(outcome["provider_errors"])
+        providers_enabled = bool(outcome["providers_attempted"])
         if results:
             status = "ok"
             reason = "results_found"
         elif not providers_enabled:
             status = "unavailable"
             reason = "no_search_provider_enabled"
+        elif provider_errors and len(provider_errors) >= len(
+            outcome["providers_attempted"]
+        ):
+            status = "unavailable"
+            reason = "providers_failed"
         else:
             status = "empty"
             reason = "providers_returned_no_results"
@@ -182,6 +199,7 @@ class GeneralWebGateway:
             "query": focused,
             "results": results,
             "provider_errors": provider_errors,
+            "providers_attempted": list(outcome["providers_attempted"]),
             "searched_at": current.isoformat(),
         }
 
@@ -221,6 +239,8 @@ class GeneralWebGateway:
             for error in exact.get("provider_errors", []):
                 if error and error not in provider_errors:
                     provider_errors.append(str(error))
+            if exact["status"] == "unavailable" and exact.get("provider_errors"):
+                break
             results = _dedupe_results(
                 [*results, *list(exact.get("results", []))],
                 limit,
@@ -233,7 +253,9 @@ class GeneralWebGateway:
             reason = "results_found"
         elif not saw_available_provider:
             status = "unavailable"
-            reason = "no_search_provider_enabled"
+            reason = (
+                "providers_failed" if provider_errors else "no_search_provider_enabled"
+            )
         else:
             status = "empty"
             reason = "providers_returned_no_results"
@@ -247,30 +269,93 @@ class GeneralWebGateway:
             "searched_at": current.isoformat(),
         }
 
-    def _search_single(self, query: str, limit: int) -> list[dict[str, str]]:
-        searx_results = search_searxng(
-            query,
-            max_results=limit,
-            categories=os.getenv("WEB_SEARXNG_CATEGORIES", "general"),
+    def _search_single(self, query: str, limit: int) -> dict[str, Any]:
+        provider_timeout = _env_float(
+            "WEB_SEARCH_PROVIDER_TIMEOUT_SECONDS",
+            6.0,
+            minimum=1.0,
+            maximum=8.0,
         )
-        if searx_results:
-            return [
-                {
-                    "title": str(item.get("title", "")),
-                    "url": str(item.get("link") or item.get("resolved_link") or ""),
-                    "snippet": str(
-                        item.get("search_excerpt") or item.get("summary") or ""
-                    ),
-                    "source": str(item.get("source") or "SearXNG"),
-                    "published_at": str(item.get("published_at") or ""),
-                }
-                for item in searx_results[:limit]
-                if item.get("title")
-                and (item.get("link") or item.get("resolved_link"))
-            ]
-        if not _env_flag("WEB_ENABLE_DUCKDUCKGO", default=True):
-            return []
-        return self._search_duckduckgo(query, limit)
+        total_timeout = _env_float(
+            "WEB_SEARCH_TOTAL_TIMEOUT_SECONDS",
+            8.0,
+            minimum=3.0,
+            maximum=10.0,
+        )
+        deadline = time.monotonic() + total_timeout
+        results: list[dict[str, str]] = []
+        provider_errors: list[str] = []
+        providers_attempted: list[str] = []
+
+        def remaining_timeout(provider: str) -> float:
+            remaining = deadline - time.monotonic()
+            if remaining < 0.25:
+                provider_errors.append(f"{provider}:search_budget_exhausted")
+                return 0.0
+            return min(provider_timeout, remaining)
+
+        if searxng_enabled():
+            providers_attempted.append("searxng")
+            timeout = remaining_timeout("searxng")
+            searx_results = (
+                search_searxng(
+                    query,
+                    max_results=limit,
+                    timeout=timeout,
+                    categories=os.getenv("WEB_SEARXNG_CATEGORIES", "general"),
+                )
+                if timeout
+                else []
+            )
+            if searx_results:
+                results = [
+                    {
+                        "title": str(item.get("title", "")),
+                        "url": str(
+                            item.get("link") or item.get("resolved_link") or ""
+                        ),
+                        "snippet": str(
+                            item.get("search_excerpt") or item.get("summary") or ""
+                        ),
+                        "source": str(item.get("source") or "SearXNG"),
+                        "published_at": str(item.get("published_at") or ""),
+                    }
+                    for item in searx_results[:limit]
+                    if item.get("title")
+                    and (item.get("link") or item.get("resolved_link"))
+                ]
+            else:
+                error = get_last_searxng_error()
+                if error:
+                    provider_errors.append(f"searxng:{error}")
+
+        if not results and _env_flag("WEB_ENABLE_BING_RSS", default=True):
+            providers_attempted.append("bing_rss")
+            timeout = remaining_timeout("bing_rss")
+            if timeout:
+                bing_results, bing_error = self._search_bing_rss(
+                    query, limit, timeout
+                )
+                results = bing_results
+                if bing_error:
+                    provider_errors.append(bing_error)
+
+        if not results and _env_flag("WEB_ENABLE_DUCKDUCKGO", default=True):
+            providers_attempted.append("duckduckgo_html")
+            timeout = remaining_timeout("duckduckgo_html")
+            if timeout:
+                ddg_results, ddg_error = self._search_duckduckgo(
+                    query, limit, timeout
+                )
+                results = ddg_results
+                if ddg_error:
+                    provider_errors.append(ddg_error)
+
+        return {
+            "results": _dedupe_results(results, limit),
+            "provider_errors": provider_errors,
+            "providers_attempted": providers_attempted,
+        }
 
     def read(self, url: str, *, max_chars: int = 6000) -> dict[str, Any]:
         value = str(url or "").strip()
@@ -347,19 +432,75 @@ class GeneralWebGateway:
         )
 
     @staticmethod
-    def _search_duckduckgo(query: str, limit: int) -> list[dict[str, str]]:
+    def _search_bing_rss(
+        query: str,
+        limit: int,
+        timeout: float,
+    ) -> tuple[list[dict[str, str]], str]:
+        request = Request(
+            "https://www.bing.com/search?" + urlencode({"format": "rss", "q": query}),
+            headers={"User-Agent": "StudyAgent/1.0 (+general-web-tool)"},
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                status = int(getattr(response, "status", 200) or 200)
+                payload = response.read(500_000)
+        except Exception as exc:
+            return [], f"bing_rss:{type(exc).__name__}:{exc}"
+        if status != 200:
+            return [], f"bing_rss:http_status:{status}"
+        try:
+            root = ElementTree.fromstring(payload)
+        except ElementTree.ParseError as exc:
+            return [], f"bing_rss:invalid_xml:{exc}"
+        results: list[dict[str, str]] = []
+        for item in root.findall("./channel/item"):
+            title = " ".join((item.findtext("title") or "").split())
+            url = (item.findtext("link") or "").strip()
+            if not title or urlparse(url).scheme not in {"http", "https"}:
+                continue
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": " ".join(
+                        (item.findtext("description") or "").split()
+                    ),
+                    "source": "Bing RSS",
+                    "published_at": "",
+                }
+            )
+            if len(results) >= limit:
+                break
+        return (results, "" if results else "bing_rss:empty_response")
+
+    @staticmethod
+    def _search_duckduckgo(
+        query: str,
+        limit: int,
+        timeout: float,
+    ) -> tuple[list[dict[str, str]], str]:
         request = Request(
             "https://html.duckduckgo.com/html/?" + urlencode({"q": query}),
             headers={"User-Agent": "StudyAgent/1.0 (+general-web-tool)"},
         )
         try:
-            with urlopen(request, timeout=10) as response:
+            with urlopen(request, timeout=timeout) as response:
+                status = int(getattr(response, "status", 200) or 200)
                 payload = response.read(500_000).decode("utf-8", errors="ignore")
-        except Exception:
-            return []
+        except Exception as exc:
+            return [], f"duckduckgo_html:{type(exc).__name__}:{exc}"
+        challenge = any(
+            marker in payload.casefold()
+            for marker in ("anomaly", "challenge", "bots use duckduckgo")
+        )
+        if status != 200 or challenge:
+            reason = "challenge" if challenge else f"http_status:{status}"
+            return [], f"duckduckgo_html:{reason}"
         parser = _DuckDuckGoResultsParser()
         parser.feed(payload)
-        return [
+        results = [
             {**item, "snippet": "", "source": "DuckDuckGo", "published_at": ""}
             for item in parser.results[:limit]
         ]
+        return (results, "" if results else "duckduckgo_html:empty_response")

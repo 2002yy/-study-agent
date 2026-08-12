@@ -29,7 +29,15 @@ def test_chat_tool_trace_is_owned_by_thread_and_turn(tmp_path):
             {
                 "name": "web_search",
                 "arguments": {"query": "durable ownership"},
-                "result": {"status": "ok"},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Durable ownership",
+                            "url": "https://example.test/ownership",
+                        }
+                    ],
+                },
             }
         ],
         source_block="bounded tool evidence",
@@ -46,6 +54,50 @@ def test_chat_tool_trace_is_owned_by_thread_and_turn(tmp_path):
     assert completed.source_block == "bounded tool evidence"
 
 
+@pytest.mark.parametrize(
+    ("result", "expected_status", "expected_provider"),
+    [
+        (
+            {"status": "empty", "results": [], "provider_errors": []},
+            "completed",
+            "empty",
+        ),
+        (
+            {
+                "status": "unavailable",
+                "reason": "providers_failed",
+                "results": [],
+                "provider_errors": ["duckduckgo_html:challenge"],
+            },
+            "failed",
+            "provider_failed",
+        ),
+    ],
+)
+def test_chat_tool_trace_never_marks_empty_or_failed_search_found(
+    tmp_path,
+    result,
+    expected_status,
+    expected_provider,
+):
+    service = WebLookupService(
+        WebLookupRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    )
+    created = service.create("No trustworthy evidence", run_kind="chat_tool_loop")
+
+    recorded = service.record_tool_trace(
+        created.id,
+        calls=[{"name": "web_search", "result": result}],
+        source_block="must not survive",
+    )
+
+    assert recorded.status == expected_status
+    assert recorded.provider_status == expected_provider
+    assert recorded.items == []
+    assert recorded.selected_sources == []
+    assert recorded.source_block == ""
+
+
 def test_chat_command_accepts_only_matching_completed_research_evidence(tmp_path):
     service = WebLookupService(
         WebLookupRepository(RuntimeDatabase(tmp_path / "runtime.db"))
@@ -53,7 +105,20 @@ def test_chat_command_accepts_only_matching_completed_research_evidence(tmp_path
     created = service.create("Recovered evidence", run_kind="chat_tool_loop")
     completed = service.record_tool_trace(
         created.id,
-        calls=[{"name": "web_search", "result": {"status": "ok"}}],
+        calls=[
+            {
+                "name": "web_search",
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Recovered evidence",
+                            "url": "https://example.test/evidence",
+                        }
+                    ],
+                },
+            }
+        ],
         source_block="server-owned evidence",
     )
 
@@ -95,7 +160,20 @@ def test_chat_tool_trace_cancelled_by_owner_turn_cannot_complete(tmp_path):
     requested = service.cancel_owned_by_turn("turn-cancel")
     completed = service.record_tool_trace(
         created.id,
-        calls=[{"name": "web_search", "result": {"status": "ok"}}],
+        calls=[
+            {
+                "name": "web_search",
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Cancelled evidence",
+                            "url": "https://example.test/cancelled",
+                        }
+                    ],
+                },
+            }
+        ],
         source_block="must not commit",
         operation_id=operation_id,
     )

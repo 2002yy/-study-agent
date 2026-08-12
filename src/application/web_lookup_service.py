@@ -17,6 +17,12 @@ from src.web.research_contract import (
 )
 from src.web.research_gateway import ResearchWebGateway
 from src.web.source_assessment import assess_sources, evidence_confidence
+from src.web.tool_evidence import (
+    diagnostic_tool_calls,
+    trusted_tool_calls,
+    tool_call_errors,
+    tool_source_items,
+)
 
 
 class WebLookupGateway(Protocol):
@@ -138,12 +144,10 @@ def _format_research_source_block(
         excerpt = _read_excerpt(record)
         if not excerpt:
             continue
-        item = record.get("item") if isinstance(record.get("item"), dict) else {}
-        assessment = (
-            record.get("assessment")
-            if isinstance(record.get("assessment"), dict)
-            else {}
-        )
+        raw_item = record.get("item")
+        item = raw_item if isinstance(raw_item, dict) else {}
+        raw_assessment = record.get("assessment")
+        assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
         title = str(item.get("title") or assessment.get("title") or f"来源 {index}")
         url = str(assessment.get("url") or item.get("url") or item.get("link") or "")
         read_blocks.append(f"【已读取 {index}】{title}\n{url}\n{excerpt}")
@@ -319,9 +323,32 @@ class WebLookupService:
                 operation_id=operation_id,
                 stage="searching",
             )
+        evidence_calls = trusted_tool_calls(calls)
+        provider_errors = tool_call_errors(calls)
+        items = tool_source_items(evidence_calls)
+        selected_sources = [
+            {
+                "item": item,
+                "assessment": {
+                    "url": item.get("url", ""),
+                    "title": item.get("title", ""),
+                    "worth_reading": True,
+                    "selection_reason": "validated_tool_evidence",
+                },
+            }
+            for item in items
+        ]
         context = {
             **run.research_context,
-            "tool_trace": {"calls": calls},
+            "tool_trace": {
+                "calls": evidence_calls,
+                "diagnostic_calls": (
+                    diagnostic_tool_calls(calls)
+                    if len(evidence_calls) != len(calls)
+                    else []
+                ),
+                "provider_errors": provider_errors,
+            },
             "run_attempt": int(run.research_context.get("run_attempt") or 0) + 1,
         }
         attempts = [
@@ -335,10 +362,11 @@ class WebLookupService:
         ]
         if self.repository.cancel_requested(run_id, operation_id=operation_id):
             return self.repository.finish_cancel(run_id, operation_id=operation_id)
-        if error:
+        if error or (provider_errors and not evidence_calls):
+            failure = error or "; ".join(provider_errors)
             return self.repository.fail(
                 run_id,
-                error,
+                failure,
                 research_context=context,
                 query_attempts=attempts,
                 provider_status="provider_failed",
@@ -347,15 +375,21 @@ class WebLookupService:
             )
         return self.repository.complete(
             run_id,
-            items=[],
-            source_block=source_block,
-            warnings=[],
+            items=items,
+            source_block=source_block if evidence_calls else "",
+            warnings=provider_errors,
             research_context=context,
             query_attempts=attempts,
-            selected_sources=[],
+            selected_sources=selected_sources,
             rejected_sources=[],
-            provider_status="found" if calls else "empty",
-            stop_reason="tool_calls_completed" if calls else "no_tool_calls",
+            provider_status="found" if evidence_calls else "empty",
+            stop_reason=(
+                "tool_evidence_found"
+                if evidence_calls
+                else "providers_returned_no_results"
+                if calls
+                else "no_tool_calls"
+            ),
             operation_id=operation_id,
         )
 

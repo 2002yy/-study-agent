@@ -6,7 +6,7 @@ import pytest
 
 from src.llm_client import run_tool_loop
 from src.tools.web_agent import WebToolAgent
-from src.web.tool_gateway import _DuckDuckGoResultsParser
+from src.web.tool_gateway import GeneralWebGateway, _DuckDuckGoResultsParser
 
 
 def test_tool_loop_executes_function_calls_and_returns_evidence(monkeypatch):
@@ -112,3 +112,93 @@ def test_duckduckgo_parser_keeps_only_public_result_links():
         {"title": "Example result", "url": "https://example.com/a"},
         {"title": "Second", "url": "https://example.org/b"},
     ]
+
+
+def test_web_trace_does_not_disclose_empty_or_failed_calls():
+    trace = WebToolAgent(
+        gateway=object(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: [
+            {
+                "name": "web_search",
+                "arguments": {"query": "blocked"},
+                "result": {
+                    "status": "unavailable",
+                    "reason": "providers_failed",
+                    "results": [],
+                    "provider_errors": ["duckduckgo_html:challenge"],
+                },
+            }
+        ],
+    ).resolve("search blocked")
+
+    assert trace.used is False
+    assert trace.context_block() == ""
+    assert trace.to_dict()["calls"] == []
+    assert "未使用联网来源" in trace.to_dict()["error"]
+    assert trace.to_dict()["provider_errors"]
+
+
+def test_web_trace_rejects_successful_read_for_url_not_discovered_by_search():
+    trace = WebToolAgent(
+        gateway=object(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: [
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://untrusted.example/page"},
+                "result": {
+                    "ok": True,
+                    "url": "https://untrusted.example/page",
+                    "content": "Untrusted page body",
+                },
+            }
+        ],
+    ).resolve("read a guessed page")
+
+    assert trace.used is False
+    assert trace.context_block() == ""
+    assert trace.to_dict()["calls"] == []
+
+
+def test_web_trace_rejects_loopback_search_results():
+    trace = WebToolAgent(
+        gateway=object(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: [
+            {
+                "name": "web_search",
+                "arguments": {"query": "internal"},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Internal service",
+                            "url": "http://127.0.0.1:8080/private",
+                        }
+                    ],
+                },
+            }
+        ],
+    ).resolve("search internal")
+
+    assert trace.used is False
+    assert trace.context_block() == ""
+
+
+def test_duckduckgo_challenge_is_structured_as_provider_failure(monkeypatch):
+    class ChallengeResponse:
+        status = 202
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _limit):
+            return b"anomaly challenge bots use DuckDuckGo"
+
+    monkeypatch.setattr("src.web.tool_gateway.urlopen", lambda *_args, **_kwargs: ChallengeResponse())
+
+    results, error = GeneralWebGateway._search_duckduckgo("python", 5, 1.0)
+
+    assert results == []
+    assert error == "duckduckgo_html:challenge"

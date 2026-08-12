@@ -28,7 +28,12 @@ function runPayload(overrides: Record<string, unknown> = {}) {
     stage: "completed",
     research_context: {},
     query_attempts: [{ status: "found" }],
-    selected_sources: [],
+    selected_sources: [
+      {
+        item: { title: "Python", url: "https://python.org/doc" },
+        assessment: { url: "https://python.org/doc", worth_reading: true },
+      },
+    ],
     rejected_sources: [],
     provider_status: "found",
     stop_reason: "sources_read",
@@ -196,6 +201,30 @@ describe("useWebLookupController", () => {
     expect(result.current.result?.status).toBe("partial");
     expect(result.current.useInChat).toBe(false);
     expect(result.current.canRetry).toBe(true);
+  });
+
+  it("does not use a false-positive found run without durable sources", async () => {
+    apiMocks.createResearchRun.mockResolvedValue(
+      runPayload({ status: "pending", stage: "planned", news_items: [], source_block: "" }),
+    );
+    apiMocks.executeResearchRun.mockResolvedValue(
+      runPayload({ selected_sources: [], source_block: "" }),
+    );
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "Python docs",
+        setOperationError: vi.fn(),
+        setActiveRunId: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.lookup();
+    });
+
+    expect(result.current.result?.provider_status).toBe("found");
+    expect(result.current.useInChat).toBe(false);
   });
 
   it("sends server cancellation before invalidating the browser request", async () => {

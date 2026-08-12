@@ -101,7 +101,14 @@ def default_chat_dependencies() -> ChatDependencies:
 
 
 @pytest.fixture(autouse=True)
-def runtime_test_context(tmp_path):
+def runtime_test_context(tmp_path, monkeypatch):
+    # Local developer .env files may enable a loopback SearXNG instance. Tests
+    # remain hermetic unless a case explicitly opts a provider back in.
+    monkeypatch.delenv("WEB_ENABLE_SEARXNG", raising=False)
+    monkeypatch.delenv("NEWS_ENABLE_SEARXNG", raising=False)
+    monkeypatch.delenv("SEARXNG_ALLOW_LOOPBACK", raising=False)
+    monkeypatch.delenv("SEARXNG_ALLOW_LOCAL", raising=False)
+    monkeypatch.delenv("SEARXNG_ALLOW_PRIVATE_NETWORK", raising=False)
     api_root = tmp_path / "api-runtime"
     repository = RuntimeRepository(RuntimeDatabase(api_root / "runtime.db"))
     group_repository = GroupRepository(RuntimeDatabase(api_root / "runtime.db"))

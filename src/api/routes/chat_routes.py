@@ -138,6 +138,20 @@ async def chat_stream_endpoint(
             )
             yield sse_event("route", prepared.route)
             yield sse_event("rag", prepared.rag)
+            web_tools = prepared.rag.get("web_tools")
+            if (
+                isinstance(web_tools, dict)
+                and web_tools.get("error")
+                and web_tools.get("used") is not True
+            ):
+                notice = "联网搜索失败，本回答未使用联网来源。\n\n"
+                reply_parts.append(notice)
+                yield sse_event("token", {"text": notice})
+            elif isinstance(web_tools, dict) and web_tools.get("used") is True:
+                preview = _web_source_preview(web_tools)
+                if preview:
+                    reply_parts.append(preview)
+                    yield sse_event("token", {"text": preview})
             async for token in _tokens_until_disconnected(stream, http_request):
                 reply_parts.append(token)
                 yield sse_event("token", {"text": token})
@@ -203,6 +217,46 @@ def _research_progress(run: Any) -> dict[str, Any]:
     }
 
 
+def _web_source_preview(web_tools: dict[str, Any]) -> str:
+    """Render an immediate, source-backed result before a slower model stream."""
+
+    sources: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    calls = web_tools.get("calls")
+    if not isinstance(calls, list):
+        return ""
+    for call in calls:
+        if not isinstance(call, dict) or call.get("name") != "web_search":
+            continue
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        items = result.get("results")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = " ".join(str(item.get("title") or "").split())
+            url = str(item.get("url") or item.get("link") or "").strip()
+            if not title or not url.startswith(("https://", "http://")):
+                continue
+            key = url.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append((title, url))
+            if len(sources) >= 3:
+                break
+        if len(sources) >= 3:
+            break
+    if not sources:
+        return ""
+    lines = ["联网搜索已完成，先给你本次使用的来源："]
+    lines.extend(f"- [{title}]({url})" for title, url in sources)
+    return "\n".join(lines) + "\n\n"
+
+
 def _settle_disconnected_preparation(
     prepare_task: asyncio.Task[Any],
     service: ChatService,
@@ -227,7 +281,9 @@ async def _tokens_until_disconnected(
     """Wait for provider tokens while keeping client disconnects observable."""
 
     while True:
-        next_token = asyncio.create_task(anext(stream))
+        next_token: asyncio.Task[str] = asyncio.create_task(
+            _next_stream_token(stream)
+        )
         try:
             while not next_token.done():
                 done, _ = await asyncio.wait({next_token}, timeout=poll_interval)
@@ -247,6 +303,10 @@ async def _tokens_until_disconnected(
                 next_token.cancel()
                 with suppress(asyncio.CancelledError):
                     await next_token
+
+
+async def _next_stream_token(stream: AsyncIterator[str]) -> str:
+    return await anext(stream)
 
 
 @router.post(

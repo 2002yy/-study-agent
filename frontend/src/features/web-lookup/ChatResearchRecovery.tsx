@@ -58,6 +58,26 @@ export function ChatResearchRecovery({
       </div>
     );
   }
+  const progressIsNewer = Boolean(
+    progress &&
+      !["pending", "running"].includes(progress.status) &&
+      (!run || run.run_id !== progress.run_id || run.version < progress.version),
+  );
+  if (progress && progressIsNewer) {
+    const failed = progress.status === "failed";
+    return (
+      <div className={`memory-note ${failed ? "warn" : ""}`} role="status">
+        <div>
+          <strong>{stageLabels[progress.stage] ?? "联网研究已结束"}</strong>
+          <span>
+            {failed
+              ? `${progress.error || "联网搜索失败"}；本回答未使用联网来源。`
+              : progress.stop_reason || "联网研究已结束"}
+          </span>
+        </div>
+      </div>
+    );
+  }
   if (run?.research_context.run_kind !== "chat_tool_loop") return null;
   const recovered = run.status === "completed" && run.provider_status === "found";
   if (!canRetry && !canResume && !isBusy && !(recovered && useInChat)) return null;

@@ -93,6 +93,7 @@ def _service(tmp_path: Path):
                     "name": "web_search",
                     "arguments": {"query": "database index"},
                     "result": {
+                        "status": "ok",
                         "results": [
                             {
                                 "title": "Official docs",

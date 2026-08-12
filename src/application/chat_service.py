@@ -199,6 +199,7 @@ class ChatService:
                 conversation_context=_tool_context(command.chat_history),
             )
             rag["web_tools"] = web_tools.to_dict()
+            web_tool_error = str(rag["web_tools"].get("error") or "")
             rag["web_context"] = _web_context_provenance(
                 command.web_context,
                 command.web_context_run_id,
@@ -222,6 +223,11 @@ class ChatService:
                 context_blocks.append(disclosed.private_context)
             if disclosed.context:
                 context_blocks.append(disclosed.context)
+            if web_tool_error and not web_tools.used:
+                context_blocks.append(
+                    "联网搜索未获得可信来源。必须明确说明本回答未使用联网来源；"
+                    "不得声称已经搜索、查到或依据联网结果。"
+                )
             if continuation_instruction:
                 context_blocks.append(continuation_instruction)
             messages = self.dependencies.build_messages(

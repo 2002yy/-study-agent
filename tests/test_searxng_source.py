@@ -23,7 +23,8 @@ class _FakeResponse:
         return self._payload
 
 
-def test_build_searxng_search_url_rejects_missing_or_unsafe_base_url():
+def test_build_searxng_search_url_rejects_missing_or_unsafe_base_url(monkeypatch):
+    monkeypatch.delenv("SEARXNG_ALLOW_LOOPBACK", raising=False)
     assert build_searxng_search_url("python", "") == ""
     assert build_searxng_search_url("python", "file:///tmp") == ""
     assert build_searxng_search_url("python", "http://localhost:8080") == ""
@@ -43,6 +44,7 @@ def test_search_searxng_disabled_by_default(monkeypatch):
 
     calls: list[str] = []
     monkeypatch.delenv("NEWS_ENABLE_SEARXNG", raising=False)
+    monkeypatch.delenv("WEB_ENABLE_SEARXNG", raising=False)
     monkeypatch.setenv("SEARXNG_BASE_URL", "https://search.example.com")
     monkeypatch.setattr(
         searxng_source,

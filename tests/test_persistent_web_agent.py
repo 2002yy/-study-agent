@@ -3,10 +3,27 @@ from __future__ import annotations
 from concurrent.futures import TimeoutError as FutureTimeout
 from types import SimpleNamespace
 
+import src.tools.persistent_web_agent as persistent_web_agent
 from src.tools.persistent_web_agent import PersistentWebToolAgent
 
 
 class FakeGateway:
+    def search_exact(self, query: str, *, max_results: int) -> dict:
+        return {
+            "status": "ok",
+            "reason": "results_found",
+            "query": query,
+            "results": [
+                {
+                    "title": "Trusted search result",
+                    "url": "https://example.test/source",
+                    "snippet": "source summary",
+                }
+            ][:max_results],
+            "provider_errors": [],
+            "providers_attempted": ["test"],
+        }
+
     def github_pr_review_context(self, repo_url: str, number: int, **kwargs) -> dict:
         return {
             "ok": True,
@@ -143,7 +160,7 @@ def test_persistent_agent_fails_soft_when_total_budget_expires(monkeypatch):
         submit_tool_loop=submit,
     )
 
-    trace = agent.resolve("Research within a bounded time")
+    trace = agent.resolve("Review GitHub PR 42 within a bounded time")
 
     assert captured["timeout"] == 7.0
     assert captured["request_max_retries"] == 0
@@ -154,3 +171,75 @@ def test_persistent_agent_fails_soft_when_total_budget_expires(monkeypatch):
     assert captured["record"]["operation_id"] == "operation-timeout"
     assert captured["record"]["calls"] == []
     assert "7 秒总预算" in captured["record"]["error"]
+
+
+def test_six_consecutive_timeouts_each_settle_without_shared_pool_starvation(monkeypatch):
+    executors: list[object] = []
+
+    class FakeResearchService:
+        next_id = 0
+
+        def create(self, _query: str, **_kwargs):
+            self.next_id += 1
+            return SimpleNamespace(id=f"web_lookup_timeout_{self.next_id}")
+
+        def begin_tool_trace(self, _run_id: str):
+            return "operation-timeout"
+
+        def tool_trace_cancel_requested(self, _run_id: str, _operation_id: str):
+            return False
+
+        def record_tool_trace(self, _run_id: str, **_kwargs):
+            return None
+
+    class TimedOutFuture:
+        def result(self, *, timeout: float):
+            raise FutureTimeout
+
+        def cancel(self):
+            return True
+
+    class PerRequestExecutor:
+        def __init__(self, **_kwargs):
+            self.shutdown_called = False
+            executors.append(self)
+
+        def submit(self, *_args, **_kwargs):
+            return TimedOutFuture()
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool):
+            assert wait is False
+            assert cancel_futures is True
+            self.shutdown_called = True
+
+    monkeypatch.setenv("WEB_TOOL_TOTAL_BUDGET_SECONDS", "5")
+    monkeypatch.setattr(persistent_web_agent, "ThreadPoolExecutor", PerRequestExecutor)
+    agent = PersistentWebToolAgent(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        research_service=FakeResearchService(),  # type: ignore[arg-type]
+    )
+
+    traces = [agent.resolve(f"Review GitHub PR {index + 1}") for index in range(6)]
+
+    assert len(traces) == 6
+    assert len(executors) == 6
+    assert all(executor.shutdown_called for executor in executors)
+    assert all("5 秒总预算" in trace.error for trace in traces)
+    assert traces[-1].run_id == "web_lookup_timeout_6"
+
+
+def test_ordinary_research_bypasses_slow_model_tool_planner():
+    agent = PersistentWebToolAgent(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ordinary research must not invoke the model tool planner")
+        ),
+    )
+
+    trace = agent.resolve("Search the official Python documentation")
+
+    assert trace.used is True
+    assert trace.calls[0]["name"] == "web_search"
+    assert trace.calls[0]["result"]["results"][0]["url"] == (
+        "https://example.test/source"
+    )

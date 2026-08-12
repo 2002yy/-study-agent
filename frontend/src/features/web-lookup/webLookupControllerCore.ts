@@ -19,7 +19,13 @@ type WebLookupControllerOptions = {
 };
 
 function isUsable(response: ResearchLookupResponse): boolean {
-  return response.status === "completed" && response.news_items.length > 0;
+  return (
+    response.status === "completed" &&
+    response.provider_status === "found" &&
+    response.news_items.length > 0 &&
+    response.selected_sources.length > 0 &&
+    Boolean(response.source_block.trim())
+  );
 }
 
 function isRetryable(response: ResearchLookupResponse | null): boolean {

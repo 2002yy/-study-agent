@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import TYPE_CHECKING, Any
@@ -72,11 +73,18 @@ _PR_REVIEW_CONTEXT_TOOL = {
     },
 }
 
-_WEB_TOOL_EXECUTOR = ThreadPoolExecutor(
-    max_workers=4,
-    thread_name_prefix="study-agent-web-tool",
-)
 
+def _requires_planned_tools(user_input: str) -> bool:
+    """Keep the LLM planner for GitHub workflows; use deterministic web search otherwise."""
+
+    lowered = str(user_input or "").casefold()
+    return (
+        "github.com/" in lowered
+        or "pull request" in lowered
+        or "代码仓库" in lowered
+        or "拉取请求" in lowered
+        or re.search(r"\bpr\s*#?\s*\d+\b", lowered) is not None
+    )
 
 class PersistentWebToolAgent(WebToolAgent):
     """Add the composed PR review-context tool without widening the base gateway."""
@@ -90,7 +98,7 @@ class PersistentWebToolAgent(WebToolAgent):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.research_service = research_service
-        self.submit_tool_loop = submit_tool_loop or _WEB_TOOL_EXECUTOR.submit
+        self.submit_tool_loop = submit_tool_loop
 
     def resolve(
         self,
@@ -142,6 +150,33 @@ class PersistentWebToolAgent(WebToolAgent):
             },
         ]
         try:
+            if not _requires_planned_tools(user_input) and self.submit_tool_loop is None:
+                focused_query = (
+                    query_context.canonical_query or query_context.raw_query or user_input
+                )
+                result = self.gateway.search_exact(focused_query, max_results=5)
+                calls = [
+                    {
+                        "name": "web_search",
+                        "arguments": {"query": focused_query, "max_results": 5},
+                        "result": result,
+                    }
+                ]
+                trace_error = persistence_error
+                if run is not None:
+                    preview = WebToolTrace(calls=tuple(calls), run_id=run.id)
+                    trace_error = self._record_trace(
+                        run.id,
+                        calls=calls,
+                        source_block=preview.context_block(),
+                        operation_id=operation_id,
+                    )
+                return WebToolTrace(
+                    calls=tuple(calls),
+                    error=trace_error,
+                    run_id=(run.id if run else ""),
+                )
+
             total_budget = _env_int(
                 "WEB_TOOL_TOTAL_BUDGET_SECONDS",
                 12,
@@ -149,7 +184,18 @@ class PersistentWebToolAgent(WebToolAgent):
                 maximum=18,
             )
             deadline = time.monotonic() + total_budget
-            future: Future[list[dict[str, Any]]] = self.submit_tool_loop(
+            executor = None
+            submit = self.submit_tool_loop
+            if submit is None:
+                # A per-request executor prevents several timed-out provider calls from
+                # starving later research runs in a shared fixed-size pool. Provider
+                # requests remain independently bounded by the same deadline.
+                executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="study-agent-web-tool-request",
+                )
+                submit = executor.submit
+            future: Future[list[dict[str, Any]]] = submit(
                 self.run_loop,
                 messages,
                 tools=[*WEB_TOOLS, _PR_REVIEW_CONTEXT_TOOL],
@@ -184,6 +230,9 @@ class PersistentWebToolAgent(WebToolAgent):
                 raise TimeoutError(
                     f"联网研究超过 {total_budget} 秒总预算，可重试或缩小问题范围"
                 ) from exc
+            finally:
+                if executor is not None:
+                    executor.shutdown(wait=False, cancel_futures=True)
             trace_error = persistence_error
             if run is not None:
                 preview = WebToolTrace(calls=tuple(calls), run_id=run.id)

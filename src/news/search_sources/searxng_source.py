@@ -130,6 +130,25 @@ def _parse_searxng_results(payload: bytes, max_results: int) -> list[SearchSourc
     return results
 
 
+def _unresponsive_engine_error(payload: bytes) -> str:
+    try:
+        data = json.loads(payload.decode("utf-8", errors="ignore"))
+    except Exception:
+        return ""
+    raw = data.get("unresponsive_engines", [])
+    if not isinstance(raw, list) or not raw:
+        return ""
+    messages: list[str] = []
+    for item in raw[:8]:
+        if isinstance(item, list):
+            text = ":".join(str(part) for part in item[:2] if str(part).strip())
+        else:
+            text = str(item).strip()
+        if text:
+            messages.append(text)
+    return "unresponsive_engines:" + ";".join(messages) if messages else ""
+
+
 def search_searxng(
     query: str,
     max_results: int = 10,
@@ -182,4 +201,7 @@ def search_searxng(
         _LAST_SEARXNG_ERROR = f"{type(exc).__name__}: {exc}"
         return []
 
-    return [item.to_news_item() for item in _parse_searxng_results(payload, max_results)]
+    results = _parse_searxng_results(payload, max_results)
+    if not results:
+        _LAST_SEARXNG_ERROR = _unresponsive_engine_error(payload)
+    return [item.to_news_item() for item in results]

@@ -79,6 +79,35 @@ describe("ChatResearchRecovery", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("renders an SSE terminal failure even when durable refresh is stale", () => {
+    const { container } = render(
+      <ChatResearchRecovery
+        run={null}
+        progress={{
+          run_id: "research-terminal",
+          status: "failed",
+          stage: "failed",
+          provider_status: "provider_failed",
+          stop_reason: "chat_tool_loop_failed",
+          error: "duckduckgo_html:challenge",
+          query_attempt_count: 1,
+          selected_source_count: 0,
+          version: 4,
+        }}
+        isBusy={false}
+        canRetry={false}
+        canResume={false}
+        useInChat={false}
+        onRetry={vi.fn()}
+        onResume={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".spin")).toBeNull();
+    expect(container).toHaveTextContent("研究失败");
+    expect(container).toHaveTextContent("本回答未使用联网来源");
+  });
+
   it("keeps partial findings out of chat until the learner explicitly uses them", () => {
     const { container } = render(
       <ChatResearchRecovery

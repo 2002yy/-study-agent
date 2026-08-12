@@ -161,7 +161,15 @@ def test_group_chat_injects_model_selected_web_evidence(tmp_path):
             {
                 "name": "web_search",
                 "arguments": {"query": "Python docs"},
-                "result": {"results": [{"url": "https://docs.python.org"}]},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Python documentation",
+                            "url": "https://docs.python.org",
+                        }
+                    ],
+                },
             },
         )
     )
