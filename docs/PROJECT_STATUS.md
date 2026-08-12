@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 CI 基线：`998bd15`（[CI #31595274774](https://github.com/2002yy/study-agent/actions/runs/31595274774) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
+当前已验证 CI 基线：`488791c`（[CI #31598927240](https://github.com/2002yy/study-agent/actions/runs/31598927240) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -356,7 +356,9 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 - `LearnerModelSnapshot` 在读取时从当前 focus Goal、其最新 ClaimRevision / Understanding 结果、未解决 Hypothesis 数量、同目标 PedagogyEvalRun 汇总和已确认 learner-profile allowlist 派生；
 - 快照有界、不可变且无独立 ID / 时间戳，不持久化 mastery，不暴露原始学习者回答；
-- runtime factory 已接线，但没有新增 API、UI、表或写回路径；
+- runtime factory 与 `GET /sessions/{session_id}/learner-model` 只读 API 已接线；没有新增 UI、表或写回路径；
 - 真实 SQLite 集成测试逐表验证构建前后数据完全一致。
 
-当前阶段：**Learner Model read-only snapshot complete；API/UI 消费与任何长期画像扩展均未开始。**
+联网研究交互延迟同时完成第一轮收口：默认整次工具规划墙钟预算 12 秒（配置硬上限 18 秒），provider planner 禁止自动重试；超时会把 ResearchRun 明确置为 failed 并允许重试。2026-08-12 本机实测超时 run 在 12.03 秒终止；真实命中质量与“20 秒内可用结果”仍需继续人工体验验收。
+
+当前阶段：**Learner Model read-only API complete；UI 消费与任何长期画像扩展均未开始。**
