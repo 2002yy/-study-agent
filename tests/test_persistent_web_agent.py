@@ -133,6 +133,7 @@ def test_persistent_agent_fails_soft_when_total_budget_expires(monkeypatch):
             return True
 
     def submit(_function, _messages, **_kwargs):
+        captured["request_max_retries"] = _kwargs["request_max_retries"]
         return TimedOutFuture()
 
     monkeypatch.setenv("WEB_TOOL_TOTAL_BUDGET_SECONDS", "7")
@@ -145,6 +146,7 @@ def test_persistent_agent_fails_soft_when_total_budget_expires(monkeypatch):
     trace = agent.resolve("Research within a bounded time")
 
     assert captured["timeout"] == 7.0
+    assert captured["request_max_retries"] == 0
     assert captured["cancelled"] is True
     assert trace.run_id == "web_lookup_timeout"
     assert "TimeoutError" in trace.error

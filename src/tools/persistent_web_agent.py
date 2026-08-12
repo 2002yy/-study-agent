@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import TYPE_CHECKING, Any
 
@@ -147,6 +148,7 @@ class PersistentWebToolAgent(WebToolAgent):
                 minimum=5,
                 maximum=18,
             )
+            deadline = time.monotonic() + total_budget
             future: Future[list[dict[str, Any]]] = self.submit_tool_loop(
                 self.run_loop,
                 messages,
@@ -161,13 +163,19 @@ class PersistentWebToolAgent(WebToolAgent):
                     maximum=5,
                 ),
                 should_cancel=(
-                    lambda: self.research_service.tool_trace_cancel_requested(
-                        run.id, operation_id
+                    lambda: time.monotonic() >= deadline
+                    or (
+                        self.research_service.tool_trace_cancel_requested(
+                            run.id, operation_id
+                        )
+                        if self.research_service is not None
+                        and run is not None
+                        and operation_id
+                        else False
                     )
-                    if self.research_service is not None and run is not None and operation_id
-                    else False
                 ),
                 timeout=float(total_budget),
+                request_max_retries=0,
             )
             try:
                 calls = future.result(timeout=float(total_budget))

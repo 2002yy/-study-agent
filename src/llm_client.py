@@ -561,6 +561,7 @@ def run_tool_loop(
     max_rounds: int = 3,
     should_cancel: Callable[[], bool] | None = None,
     timeout: float | None = None,
+    request_max_retries: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run an OpenAI-compatible function-call loop and return tool evidence.
 
@@ -573,6 +574,11 @@ def run_tool_loop(
     if should_cancel is not None and should_cancel():
         raise RuntimeError("tool_loop_cancelled")
     client = get_client(provider_profile=provider_profile)
+    request_client = (
+        client.with_options(max_retries=max(0, request_max_retries))
+        if request_max_retries is not None
+        else client
+    )
     transcript = list(messages)
     evidence: list[dict[str, Any]] = []
     for _ in range(max(1, max_rounds)):
@@ -592,7 +598,7 @@ def run_tool_loop(
         request_kwargs["tools"] = tools
         request_kwargs["tool_choice"] = "auto"
         try:
-            response = client.chat.completions.create(**request_kwargs)
+            response = request_client.chat.completions.create(**request_kwargs)
         except Exception as exc:
             raise RuntimeError(_classify_error(exc)) from exc
         message = response.choices[0].message
