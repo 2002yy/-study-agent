@@ -23,12 +23,14 @@ def test_tool_loop_can_disable_provider_retries(monkeypatch) -> None:
             return self
 
     monkeypatch.setattr("src.llm_client.get_client", lambda **_kwargs: Client())
+    monkeypatch.setattr("src.llm_client.get_model_name", lambda **_kwargs: "test-model")
 
     result = run_tool_loop(
         [{"role": "user", "content": "bounded research"}],
         tools=[{"type": "function", "function": {"name": "web_search"}}],
         execute_tool=lambda _name, _arguments: {},
         request_max_retries=0,
+        timeout=1.0,
     )
 
     assert result == []
