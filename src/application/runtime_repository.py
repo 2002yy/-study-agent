@@ -330,6 +330,18 @@ def get_learning_resume_service():
 
 
 @lru_cache(maxsize=1)
+def get_learner_model_service():
+    from src.application.learner_model import LearnerModelService
+    from src.memory import read_memory_file
+
+    return LearnerModelService(
+        get_learning_truth_repository(),
+        get_pedagogy_eval_repository(),
+        read_confirmed_profile=lambda: read_memory_file("learner_profile.md"),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_web_lookup_service():
     from src.application.web_lookup_service import WebLookupService
 
@@ -358,6 +370,7 @@ def reset_runtime_repository_cache() -> None:
     get_learning_source_evidence_service.cache_clear()
     get_github_snapshot_service.cache_clear()
     get_github_snapshot_repository.cache_clear()
+    get_learner_model_service.cache_clear()
     get_learning_resume_service.cache_clear()
     get_learning_semantic_closure_service.cache_clear()
     get_learning_outcome_commit_service.cache_clear()

@@ -641,3 +641,24 @@ P2-D 不以“表建好了 / API 存在 / 页面出现卡片”作为完成标�
 ## 28. 旧运行时实体
 
 ChatThread / ChatTurn / GroupThread / NewsRun / ToolRun / MemoryTransaction / Operation / RetrievalIndex 等历史领域定义仍有参考价值，但当前 owner 与运行时状态统一以 [`docs/STATE_MODEL.md`](docs/STATE_MODEL.md)、[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 和代码为准。旧 v0.8→v0.9 原文保存在 [`docs/archive/DOMAIN_MODELS_V08_V09.md`](docs/archive/DOMAIN_MODELS_V08_V09.md)。
+
+## 29. LearnerModelSnapshot
+
+`LearnerModelSnapshot` 是按 thread 即时构建的只读 projection，不是新的 durable entity：
+
+```text
+current focus LearningGoal
++ latest ClaimRevision / Understanding result
++ unresolved LearningHypothesis count
++ same-objective PedagogyEvalRun summary
++ confirmed learner-profile allowlist
+→ bounded immutable LearnerModelSnapshot
+```
+
+规则：
+
+- LearningTruth、PedagogyEvalRun 和 learner-profile 各自继续拥有原始真值；
+- 快照不产生 ID、时间戳、mastery 百分比、敏感属性或写回动作；
+- 不暴露 PedagogyEvalRun.learner_input、UnderstandingEvidence.user_response 等原始回答；
+- 当前 v1 只选当前 focus Goal，Claim 状态最多 12 项，评估仅做计数和版本/协议集合；
+- learner-profile 只读取“学习偏好”“常用任务类型”两个已确认区段，pending、角色观察、占位和敏感内容全部排除。

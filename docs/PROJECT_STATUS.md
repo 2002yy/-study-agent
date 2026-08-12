@@ -334,7 +334,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 任何后续实现若改变该顺序或扩大 scope，必须先更新本唯一状态 owner，再执行。
 
-## 9. 后续核心路线审计（2026-08-11）
+## 9. 后续核心路线审计（2026-08-12）
 
 当前代码核验确认，历史计划中的以下项目已经实现，不得重复建设：
 
@@ -344,7 +344,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 - 前端已升级 React 19 并迁移到 Testing Library，`react-test-renderer` 已移除；
 - Streamlit `app.py`、`src/ui` 和依赖已移除。
 
-下一项真实核心缺口是 **Learner Model**。进入实现前必须冻结以下 owner 边界：
+**LearnerModelSnapshot 只读派生第一切片已完成。** owner 边界保持如下：
 
 - LearningTruth 继续唯一拥有 Claim、SourceEvidence 与 UnderstandingEvidence；
 - PedagogyEvalRun 继续只是逐轮评估记录，不直接成为长期画像；
@@ -352,4 +352,11 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 - Learner Model 不创建 mastery 百分比，不推断敏感属性，不形成第二套学习真值；
 - 第一实现切片不得夹带 GraphRAG、临时附件、统计面板或新的角色专属画像。
 
-当前阶段：**Learner Model contract audit / boundary freeze；生产实现尚未开始。**
+已落地范围：
+
+- `LearnerModelSnapshot` 在读取时从当前 focus Goal、其最新 ClaimRevision / Understanding 结果、未解决 Hypothesis 数量、同目标 PedagogyEvalRun 汇总和已确认 learner-profile allowlist 派生；
+- 快照有界、不可变且无独立 ID / 时间戳，不持久化 mastery，不暴露原始学习者回答；
+- runtime factory 已接线，但没有新增 API、UI、表或写回路径；
+- 真实 SQLite 集成测试逐表验证构建前后数据完全一致。
+
+当前阶段：**Learner Model read-only snapshot complete；API/UI 消费与任何长期画像扩展均未开始。**

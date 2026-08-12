@@ -45,6 +45,8 @@ Study Agent 是长期保持“正在学什么、已经确认什么、还不会�
 
 拥有 chat/session、学习设置、memory interaction、LearningClosure、学习恢复与学习 artifact 编排。P2-D 领域对象逐步在这里形成稳定应用语义，但“合同已冻结”不等于“所有 UI/持久化已上线”。
 
+`LearnerModelSnapshot` 是该 runtime 的有界只读 projection：它在读取时组合当前 LearningTruth、与当前目标匹配的 PedagogyEvalRun 汇总，以及 learner-profile 中已确认的 allowlist 内容。它没有独立持久化、写回或 mastery 推断权限。
+
 ### ExtensionRuntime
 
 拥有 group/tool/workflow 等实验 capability。普通模式只有一个 `lab` surface；`group / tools / timeline` 作为 capability ID 存在不代表它们拥有独立 drawer surface。
