@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import TimeoutError as FutureTimeout
 from types import SimpleNamespace
 
 from src.tools.persistent_web_agent import PersistentWebToolAgent
@@ -104,3 +105,50 @@ def test_persistent_agent_owns_and_records_chat_research_run():
     assert captured["record"]["run_id"] == "web_lookup_chat_1"
     assert captured["record"]["calls"] == list(trace.calls)
     assert captured["record"]["operation_id"] == "operation-1"
+
+
+def test_persistent_agent_fails_soft_when_total_budget_expires(monkeypatch):
+    captured: dict = {}
+
+    class FakeResearchService:
+        def create(self, _query: str, **_kwargs):
+            return SimpleNamespace(id="web_lookup_timeout")
+
+        def begin_tool_trace(self, _run_id: str):
+            return "operation-timeout"
+
+        def tool_trace_cancel_requested(self, _run_id: str, _operation_id: str):
+            return False
+
+        def record_tool_trace(self, run_id: str, **kwargs):
+            captured["record"] = {"run_id": run_id, **kwargs}
+
+    class TimedOutFuture:
+        def result(self, *, timeout: float):
+            captured["timeout"] = timeout
+            raise FutureTimeout
+
+        def cancel(self):
+            captured["cancelled"] = True
+            return True
+
+    def submit(_function, _messages, **_kwargs):
+        return TimedOutFuture()
+
+    monkeypatch.setenv("WEB_TOOL_TOTAL_BUDGET_SECONDS", "7")
+    agent = PersistentWebToolAgent(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        research_service=FakeResearchService(),  # type: ignore[arg-type]
+        submit_tool_loop=submit,
+    )
+
+    trace = agent.resolve("Research within a bounded time")
+
+    assert captured["timeout"] == 7.0
+    assert captured["cancelled"] is True
+    assert trace.run_id == "web_lookup_timeout"
+    assert "TimeoutError" in trace.error
+    assert "7 秒总预算" in trace.error
+    assert captured["record"]["operation_id"] == "operation-timeout"
+    assert captured["record"]["calls"] == []
+    assert "7 秒总预算" in captured["record"]["error"]

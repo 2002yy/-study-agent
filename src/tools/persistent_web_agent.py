@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import TYPE_CHECKING, Any
 
 from src.llm_client import ModelProfile
@@ -70,6 +71,11 @@ _PR_REVIEW_CONTEXT_TOOL = {
     },
 }
 
+_WEB_TOOL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="study-agent-web-tool",
+)
+
 
 class PersistentWebToolAgent(WebToolAgent):
     """Add the composed PR review-context tool without widening the base gateway."""
@@ -78,10 +84,12 @@ class PersistentWebToolAgent(WebToolAgent):
         self,
         *args: Any,
         research_service: WebLookupService | None = None,
+        submit_tool_loop: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.research_service = research_service
+        self.submit_tool_loop = submit_tool_loop or _WEB_TOOL_EXECUTOR.submit
 
     def resolve(
         self,
@@ -133,7 +141,14 @@ class PersistentWebToolAgent(WebToolAgent):
             },
         ]
         try:
-            calls = self.run_loop(
+            total_budget = _env_int(
+                "WEB_TOOL_TOTAL_BUDGET_SECONDS",
+                12,
+                minimum=5,
+                maximum=18,
+            )
+            future: Future[list[dict[str, Any]]] = self.submit_tool_loop(
+                self.run_loop,
                 messages,
                 tools=[*WEB_TOOLS, _PR_REVIEW_CONTEXT_TOOL],
                 execute_tool=self._execute,
@@ -141,9 +156,9 @@ class PersistentWebToolAgent(WebToolAgent):
                 task_name="web_tool_planner",
                 max_rounds=_env_int(
                     "WEB_TOOL_MAX_ROUNDS",
-                    5,
+                    3,
                     minimum=1,
-                    maximum=8,
+                    maximum=5,
                 ),
                 should_cancel=(
                     lambda: self.research_service.tool_trace_cancel_requested(
@@ -152,15 +167,15 @@ class PersistentWebToolAgent(WebToolAgent):
                     if self.research_service is not None and run is not None and operation_id
                     else False
                 ),
-                timeout=float(
-                    _env_int(
-                        "WEB_TOOL_REQUEST_TIMEOUT_SECONDS",
-                        45,
-                        minimum=5,
-                        maximum=300,
-                    )
-                ),
+                timeout=float(total_budget),
             )
+            try:
+                calls = future.result(timeout=float(total_budget))
+            except FutureTimeout as exc:
+                future.cancel()
+                raise TimeoutError(
+                    f"联网研究超过 {total_budget} 秒总预算，可重试或缩小问题范围"
+                ) from exc
             trace_error = persistence_error
             if run is not None:
                 preview = WebToolTrace(calls=tuple(calls), run_id=run.id)
