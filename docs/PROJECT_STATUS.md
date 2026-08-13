@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 CI 基线：`34cbc66`（[CI #31688399223](https://github.com/2002yy/study-agent/actions/runs/31688399223) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
+当前已验证 CI 基线：`3d3b2fc`（[CI #31688964496](https://github.com/2002yy/study-agent/actions/runs/31688964496) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -334,7 +334,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 任何后续实现若改变该顺序或扩大 scope，必须先更新本唯一状态 owner，再执行。
 
-## 9. 后续核心路线审计（2026-08-12）
+## 9. 后续核心路线审计（2026-08-13）
 
 当前代码核验确认，历史计划中的以下项目已经实现，不得重复建设：
 
@@ -387,11 +387,55 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 - 真实 provider 复验为 `ready`；`Python 3.12 documentation`、`OpenAI API documentation`、`Godot Engine documentation` 各返回 5 条有效标题/URL，用时 1.95 / 1.31 / 1.69 秒，全部命中首选 SearXNG；相关后端 pytest 55/55 与 ruff 通过。
 - 远程收口：提交 `34cbc66` 的 [CI #31688399223](https://github.com/2002yy/study-agent/actions/runs/31688399223) 完整全绿；远程三浏览器 Golden Journeys（含 WebKit）与 real-stack browser gates 均实际运行通过。
 
-### 9.4 后续执行顺序
+### 9.4 G1-G18 现状差距审计 — AUDIT COMPLETE
 
-1. **可直接做：G 系列现状差距审计。** 只核验仍未实现的核心学习闭环、隐私/外发控制、可访问性与失败恢复，不按历史编号重复建设；审计后再冻结一个验收明确的最小切片。
-2. **需产品决策：Learner Model UI。** 只读 API 已完成；若启动 UI，边界应为解释性摘要和来源可追溯，不引入 mastery 百分比、画像写回或第二套学习真值。
-3. **已延期：Android 实体手机验收。** Android 导出/部署配置完成前不启动，记录表未真实填写前不得标记完成。
-4. **最后考虑：GraphRAG 与长期画像写回。** 两者都不是当前核心可用性缺口，需分别完成收益、隐私和 owner 边界决策后才可规划。
+本轮只审计生产代码、API、状态机与自动化合同；未改产品代码。当前 Codex 没有可调用的 in-app Browser 控制接口，且未获准改用 Playwright CLI 截图，因此视觉/截图层保持 **未复核**，不得把既有截图制品当成本轮视觉验收。当前检出版本的针对性回归为：后端学习闭环、Learner Model、外发策略和会话导航 34/34 通过；前端恢复、会话、设置和学习记忆 25/25 通过。
 
-当前阶段：**文档 owner 已收口；Learner Model read-only API complete；provider 健康诊断与设置页按需检测已完成并通过远程全门禁。Learner Model UI、GraphRAG 与 Android 仍未启动。**
+| G | 当前结论 | 已有事实与仍存真实缺口 |
+|---|---|---|
+| G1 LearningClosureRun | COMPLETE | server-owned durable run、正式状态机、幂等 preview、retry/cancel 与可恢复 UI 已存在。 |
+| G2 结构化总结输入 | COMPLETE | closure 读取 committed learning truth、受预算约束的对话、PedagogyEvalRun 与证据引用；未提交/失败回合不冒充已确认理解。 |
+| G3 summary status | COMPLETE | commit 后 summary status、同版本防重复、继续/归档并新建均已分离，且不自动归档。 |
+| G4 会话导航 | PARTIAL (P2) | 标题、任务/阶段/缺口/状态、重命名、搜索和分组已实现；但 `/sessions` 默认只返回最近 20 条，前端没有分页或服务端搜索，较早会话无法从 UI 搜到。 |
+| G5 去伪精化 | COMPLETE | 主 UI 使用目标、阶段、缺口、下一步和验证状态，不生成 heuristic mastery 百分比。 |
+| G6 恢复卡 | COMPLETE | 新用户入口、durable Resume、研究 partial/interrupted 的继续/重试/放弃均已有正式状态来源。 |
+| G7 UI 聚焦 | COMPLETE | 一级入口已收敛，诊断/来源/设置等进入次级 surface，普通状态不暴露低层 record/provider 参数。 |
+| G8 窄屏可用 | COMPLETE (automation) / MANUAL DEFERRED | 自动化窄屏、三浏览器与 real-stack 门禁已通过；Android 导出/部署未就绪，实体手机记录表仍未填写。 |
+| G9 时效检索 | COMPLETE | 稳定 SearXNG 首选源、结构化 provider 失败、真假 `found`、8/12/20 秒预算和连续超时隔离均已有真实运行与 CI 证据。 |
+| G10 ResearchRun | PARTIAL (P2) | durable run、attempt/source/budget/stop reason、retry/cancel/partial 与证据使用确认已完成；当前明确复用的是同查询 retry/resume，尚无一般 follow-up 继承上一 run 实体/来源的正式合同。 |
+| G11 TaskContract | COMPLETE | task/source/closure 合同在角色、RAG、联网和记忆前确定，并持久化到 route snapshot。 |
+| G12 预回答与取消 | PARTIAL (P1) | 首 token 前状态、ResearchRun/Provider cancel、中断恢复与隔离执行器已落地，取消不会提交 completed 学习真值；但 chat 的 pre-answer preparation 只显式取消 ResearchRun，本地 RAG 检索不接收 cancel signal，RagWriteRun 也没有 cancel endpoint。 |
+| G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
+| G14 导入与来源范围 | PARTIAL (P1) | 长期资料库、server-owned RagRun、来源范围、删除/重建确认已存在；仍缺每文件阶段与单文件重试、当前会话临时附件，以及临时附件的禁联网/禁云端/禁记忆/会话结束删除控制。 |
+| G15 会话转换 | PARTIAL (P1) | chat/research/rag/memory owner 与 durable truth 已分离；但新建/切换门禁只看用户消息、summary 或正在生成，未纳入 `Memory preview`、partial research 与未完成上传。跨 thread 转换会清除 Memory/Closure active handle；ResearchRun 与 RagWrite handle 虽仍保留，也没有统一说明它们将继续、停止还是改属哪个会话。 |
+| G16 外发数据与隐私 | PARTIAL (P1) | web off/ask/auto 与 question-only/recent-chat/allow-local-evidence 已由后端强制执行；仍缺首轮自动外发说明、按轮可核对的查询/历史/本地资料/provider 摘要、EvidenceTrail 外发类型、按会话记忆 ask 选择和附件级外发限制。当前前端 ask 仍通过一次性确认和内部 marker 传递。 |
+| G17 首次使用/可访问性 | PARTIAL (P1) | 渐进式 onboarding、结构化恢复、IME、复制/重试、modal focus trap/Escape/焦点返回和窄屏标签已有测试；但全局 API/操作错误缺少 `alert/status` 语义，也没有统一的重试/设置/详情动作。Enter/Shift+Enter 目前固定而非可配置；视觉、对比度和真实屏幕阅读器本轮未复核。 |
+| G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
+
+审计未发现需要紧急止血的 P0 缺陷；仍有 5 组 P1：G15 离开门禁、G16 外发披露、G12 pre-answer/RAG 取消、G14 临时附件/每文件恢复、G17 全局错误可访问恢复。G4 历史分页和 G10 follow-up 复用属于 P2，不应抢占学习闭环与隐私。
+
+### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
+
+独立 Learner Model 页面或仪表盘 **不启动**。现有 LearningPanel / ResumeContext 已经展示目标、Claim、理解验证、未解决缺口、证据与下一步；再建顶层面板会复制同一学习真值并诱发第二套状态解释。当前 `LearnerModelSnapshot.evaluation` 还通过 `PedagogyEvalRun.objective == LearningGoal.objective` 文本相等聚合，而不是 `goal_id` 关联；目标改名或同名目标会使计数错配，因此这些计数不得作为“当前目标表现”直接展示。
+
+后续若确有用户价值，只允许在现有学习面板中按需加载一个可失败隔离的只读补充区，并同时满足：
+
+1. Claim、验证状态、缺口与下一步复用现有 ResumeContext 展示，不复制或重算；
+2. 只显示用户已确认的学习偏好及其来源说明，不显示 inferred/pending profile；
+3. 不出现 mastery、掌握度百分比、分数、等级、排名或人格/敏感属性推断；
+4. evaluation 在完成 `goal_id` provenance 前不展示；`accepted/rejected` 只能解释为教学评估运行结果，不能解释为学习者能力；
+5. 面板打开时才读取，API 失败不影响主学习闭环；不得新增写回、独立 ID、独立时间线或长期画像 owner。
+
+因此 Learner Model UI 不是下一批。它的条件式只读补充区只有在 G15/G16 核心缺口收口、且评估 provenance 可解释后才重新评审。
+
+### 9.6 后续执行顺序
+
+1. **下一最小切片：G15 统一离开门禁。** 建立一个只读派生的 transition guard，覆盖 chat generation、Memory preview/closure、partial ResearchRun 和 RagWriteRun；新建、切换、归档共用同一判定，并明确每个 owner 是等待、继续后台、停止还是放弃。不得创建新的 artifact owner，也不得假装 RagWrite 已可取消。
+2. **随后：G16 外发披露最小切片。** 复用后端 `external_data_policy` 和现有 EvidenceTrail，只增加可核对的外发类型/范围与首次说明；不引入第二套策略状态。
+3. **再后：G12 取消补全。** 先为 pre-answer local RAG 定义可中断边界，再单独决定 RagWrite 的取消/回滚语义；不能只在前端丢弃响应来冒充服务端已停止。
+4. **随后：G17 全局错误恢复语义。** 为全局错误增加 live-region 语义和按错误能力提供重试/设置/详情，不把所有错误硬塞同一按钮。
+5. **之后再决策 G14。** 临时附件涉及生命周期、隐私与索引 owner，必须单独冻结合同；不得夹带进 G15/G16。
+6. **继续延期 Android 实体手机验收。** Android 导出/部署配置完成前不启动，记录表未真实填写前不得标记完成。
+7. **GraphRAG 与长期画像写回仍不启动。** 两者都不是当前核心可用性缺口。
+
+当前阶段：**G 系列代码/合同差距审计已完成；现有核心学习真值与联网研究主链路保持可用，下一批冻结为 G15 统一离开门禁。Learner Model 独立 UI NO-GO，条件式只读补充区延期；GraphRAG 与 Android 仍未启动。**
