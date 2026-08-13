@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 CI 基线：`3d3b2fc`（[CI #31688964496](https://github.com/2002yy/study-agent/actions/runs/31688964496) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
+当前已验证 CI 基线：`8f6672c`（[CI #31692961915](https://github.com/2002yy/study-agent/actions/runs/31692961915) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
 ## 2. P2-D 已进入 main 的基础
 
