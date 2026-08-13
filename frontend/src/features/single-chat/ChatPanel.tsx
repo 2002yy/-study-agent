@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
@@ -102,6 +103,7 @@ type ChatPanelProps = {
   useResearchInChat: boolean;
   onRetryResearch: () => void;
   onResumeResearch: () => void;
+  firstUseNotice?: ReactNode;
 };
 
 type CopyState = "idle" | "success" | "error";
@@ -137,6 +139,7 @@ export function ChatPanel(props: ChatPanelProps) {
     useResearchInChat,
     onRetryResearch,
     onResumeResearch,
+    firstUseNotice,
   } = props;
 
   const conversationRef = useRef<HTMLElement | null>(null);
@@ -285,17 +288,18 @@ export function ChatPanel(props: ChatPanelProps) {
       <span className="visually-hidden" aria-live="polite" role="status">
         {copyAnnouncement}
       </span>
-      <header className="topbar">
-        <div className="topbar-copy">
-          <h1>学习工作台</h1>
-          <p>围绕目标继续学习；资料、联网和工具只在需要时提供支持。</p>
-          <div className="topbar-meta" aria-label="当前学习状态">
-            <span>任务 {taskLabel}</span>
-            <span>资料 {ragEnabled ? "按需使用" : "未启用"}</span>
-            <span>会话 {sessionId ? "进行中" : "未开始"}</span>
+      <div className="chat-header-stack">
+        <header className="topbar">
+          <div className="topbar-copy">
+            <h1>学习工作台</h1>
+            <p>围绕目标继续学习；资料、联网和工具只在需要时提供支持。</p>
+            <div className="topbar-meta" aria-label="当前学习状态">
+              <span>任务 {taskLabel}</span>
+              <span>资料 {ragEnabled ? "按需使用" : "未启用"}</span>
+              <span>会话 {sessionId ? "进行中" : "未开始"}</span>
+            </div>
           </div>
-        </div>
-        <div className="topbar-actions" aria-label="学习工作台操作">
+          <div className="topbar-actions" aria-label="学习工作台操作">
           {closureLabel ? (
             <button
               aria-label={closureLabel}
@@ -349,8 +353,10 @@ export function ChatPanel(props: ChatPanelProps) {
               <ExtensionLauncher onOpen={openFromMenu} />
             </div>
           </details>
-        </div>
-      </header>
+          </div>
+        </header>
+        {firstUseNotice}
+      </div>
 
       <div className="conversation-shell">
         <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>

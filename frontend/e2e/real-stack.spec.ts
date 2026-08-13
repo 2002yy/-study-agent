@@ -392,6 +392,11 @@ test("learning closure previews, hash-commits and restores before archive", asyn
 
   await resultsDialog.getByRole("button", { name: "归档并新建" }).click();
   await expect(resultsDialog).toBeHidden();
+  const transitionDialog = page.getByRole("dialog", {
+    name: "归档当前会话前确认未完成工作",
+  });
+  await expect(transitionDialog).toContainText("当前会话将进入历史记录");
+  await transitionDialog.getByRole("button", { name: "仍然归档并新建" }).click();
   await expect(page.getByRole("region", { name: "开始新任务" })).toBeVisible();
 
   const sessionsResponse = await jsonFrom<{

@@ -229,6 +229,15 @@ export function WorkspaceView({
           useResearchInChat={webLookupController.useInChat}
           onRetryResearch={() => void webLookupController.retry()}
           onResumeResearch={() => void webLookupController.resume()}
+          firstUseNotice={snapshot.runtimeSettings?.settings ? (
+            <ExternalDataFirstUseNotice
+              webPolicy={String(snapshot.runtimeSettings.settings.web_policy ?? "auto")}
+              cloudContextPolicy={String(
+                snapshot.runtimeSettings.settings.cloud_context_policy ?? "allow_local_evidence",
+              )}
+              onOpenSettings={() => openDrawer("settings")}
+            />
+          ) : null}
         />
       </div>
 
@@ -306,15 +315,6 @@ export function WorkspaceView({
         onOpenSettings={() => openDrawer("settings")}
         onDismissOperationError={() => ui.setOperationError("")}
       />
-      {snapshot.runtimeSettings?.settings ? (
-        <ExternalDataFirstUseNotice
-          webPolicy={String(snapshot.runtimeSettings.settings.web_policy ?? "auto")}
-          cloudContextPolicy={String(
-            snapshot.runtimeSettings.settings.cloud_context_policy ?? "allow_local_evidence",
-          )}
-          onOpenSettings={() => openDrawer("settings")}
-        />
-      ) : null}
       <WorkspaceTransitionDialog
         notice={transitionGuard.notice}
         onCancel={transitionGuard.cancel}

@@ -1654,6 +1654,10 @@ button {
   z-index: 80;
 }
 
+.chat-header-stack {
+  min-width: 0;
+}
+
 .global-notice-content {
   min-width: 0;
   display: grid;
@@ -1737,19 +1741,13 @@ button {
 }
 
 .external-data-first-use {
-  position: fixed;
-  right: 16px;
-  top: 16px;
-  z-index: 70;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  width: min(620px, calc(100vw - 32px));
+  width: 100%;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-  box-shadow: var(--shadow);
 }
 
 .external-data-first-use > svg {
@@ -1854,12 +1852,6 @@ button {
   }
 
   .external-data-first-use {
-    top: auto;
-    right: 12px;
-    bottom: 12px;
-    width: calc(100vw - 24px);
-    max-height: min(56vh, 420px);
-    overflow-y: auto;
     flex-wrap: wrap;
   }
 
