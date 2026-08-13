@@ -113,6 +113,25 @@ export type TurnEvidence = {
   route?: Record<string, unknown>;
 };
 
+export type ExternalDataPolicySnapshot = {
+  web_policy: "off" | "ask" | "auto" | string;
+  cloud_context_policy: "question_only" | "recent_chat" | "allow_local_evidence" | string;
+  task_source_policy: string;
+  web_allowed: boolean;
+  local_retrieval_allowed: boolean;
+  history_allowed: boolean;
+  memory_allowed: boolean;
+  local_evidence_to_model_allowed: boolean;
+  reason: string;
+  web_search_performed?: boolean;
+  history_sent_to_model?: boolean;
+  history_message_count?: number;
+  learning_state_sent_to_model?: boolean;
+  memory_context_sent_to_model?: boolean;
+  local_evidence_sent_to_model?: boolean;
+  local_evidence_chunk_count?: number;
+};
+
 export type DrawerId =
   | "sessions"
   | "memory"
@@ -351,12 +370,14 @@ export type ChatResponse = {
       calls: Array<Record<string, unknown>>;
       error?: string;
       run_id?: string;
+      provider_errors?: string[];
     };
     web_context?: {
       used: boolean;
       run_id?: string;
       source: "research_run" | "manual";
     };
+    external_data_policy?: ExternalDataPolicySnapshot;
   };
   pedagogy?: PedagogySummary;
 };

@@ -17,6 +17,7 @@ import {
   summarizeWebCalls,
 } from "./evidenceHelpers";
 import type { EvidenceRef } from "./evidenceHelpers";
+import { ExternalDataDisclosure } from "./ExternalDataDisclosure";
 import "./evidenceTrail.css";
 
 const STATUS_LABELS: Record<EvidenceRef["status"], string> = {
@@ -139,13 +140,17 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
   );
   const webError = rag?.web_tools?.error;
   const recoveredResearchUsed = Boolean(rag?.web_context?.used && rag.web_context.run_id);
+  const hasExternalDataPolicy = Boolean(
+    rag?.external_data_policy || evidence.route?.external_data_policy,
+  );
   const hasDiagnostics = Boolean(
     evidenceRefs.length ||
       web.searches.length ||
       web.reads.length ||
       citations.length ||
       webError ||
-      recoveredResearchUsed,
+      recoveredResearchUsed ||
+      hasExternalDataPolicy,
   );
 
   const copyEvidence = async (target: CopyTarget, text: string) => {
@@ -261,6 +266,8 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
                   {webError ? (
                     <div className="evidence-error">联网工具错误：{webError}</div>
                   ) : null}
+
+                  <ExternalDataDisclosure evidence={evidence} />
 
                   {recoveredResearchUsed ? (
                     <div

@@ -22,6 +22,7 @@ from src.application.chat_service import (
     _web_context_provenance,
 )
 from src.application.helpers import load_frontend_settings
+from src.context_builder import chat_history_limit, trim_duplicate_current_user_input
 from src.domain.runtime_entities import ChatThread, ChatTurn, new_id, utc_now
 from src.external_data_policy import decide_external_data
 from src.pedagogy.evidence import build_evidence_units
@@ -251,7 +252,6 @@ class ExternalDataPolicyChatService(ChatService):
                 "policy_reason": decision.reason,
             }
             web_tool_error = str(rag["web_tools"].get("error") or "")
-            rag["external_data_policy"] = decision.to_dict()
             continuation_instruction = _continuation_instruction(command)
             context_blocks: list[str] = []
             web_context = "\n\n".join(
@@ -281,6 +281,33 @@ class ExternalDataPolicyChatService(ChatService):
                 units=evidence_units,
                 plan=pedagogy_plan,
             )
+            web_call_rows = web_tools.to_dict().get("calls") or []
+            local_evidence_units = [
+                unit for unit in evidence_units if unit.type == "document_chunk"
+            ]
+            sent_history = (
+                trim_duplicate_current_user_input(
+                    command.chat_history,
+                    command.user_input,
+                )[-chat_history_limit(runtime_modes):]
+                if decision.history_allowed
+                else []
+            )
+            external_data_execution = {
+                **decision.to_dict(),
+                "web_search_performed": any(
+                    isinstance(call, dict) and call.get("name") == "web_search"
+                    for call in web_call_rows
+                ),
+                "history_sent_to_model": bool(sent_history),
+                "history_message_count": len(sent_history),
+                "learning_state_sent_to_model": decision.memory_allowed,
+                "memory_context_sent_to_model": bool(memory_bundle),
+                "local_evidence_sent_to_model": bool(local_evidence_units),
+                "local_evidence_chunk_count": len(local_evidence_units),
+            }
+            route["external_data_policy"] = external_data_execution
+            rag["external_data_policy"] = external_data_execution
             route["evidence_disclosure"] = disclosed.policy
             if disclosed.private_context:
                 context_blocks.append(disclosed.private_context)
@@ -340,7 +367,7 @@ class ExternalDataPolicyChatService(ChatService):
                 "learning_state_after": next_learning_state.to_dict(),
                 "evidence_disclosure": disclosed.policy,
                 "evidence_units": list(disclosed.units),
-                "external_data_policy": decision.to_dict(),
+                "external_data_policy": external_data_execution,
                 "task_contract": task_contract.to_dict(),
             }
             if existing is None:

@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChatMessage, SessionRow } from "../types";
+import type { SessionRow } from "../types";
 import type { SemanticSessionRow } from "../features/sessions/sessionNavigation";
 import type { SessionSummary } from "../features/sessions/sessionSummary";
 import {
   selectActiveLearningSession,
   selectLearningSessionSummary,
-  selectNewSessionConfirmation,
-  SUMMARIZED_NEW_SESSION_CONFIRMATION,
-  UNSUMMARIZED_NEW_SESSION_CONFIRMATION,
 } from "./learningSessionViewModel";
 
 const summary = (
@@ -75,22 +72,4 @@ describe("learning session view selectors", () => {
     ).toBe(server);
   });
 
-  it("preserves the existing new-session confirmation semantics", () => {
-    const assistantOnly = [{ role: "assistant" } as ChatMessage];
-    const withUser = [{ role: "user" } as ChatMessage];
-
-    expect(selectNewSessionConfirmation(assistantOnly, null)).toBeNull();
-    expect(
-      selectNewSessionConfirmation(
-        withUser,
-        summary("thread-a", "summarized"),
-      ),
-    ).toBe(SUMMARIZED_NEW_SESSION_CONFIRMATION);
-    expect(
-      selectNewSessionConfirmation(
-        withUser,
-        summary("thread-a", "needs_update"),
-      ),
-    ).toBe(UNSUMMARIZED_NEW_SESSION_CONFIRMATION);
-  });
 });

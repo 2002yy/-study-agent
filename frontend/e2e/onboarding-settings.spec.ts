@@ -12,6 +12,11 @@ test("new session keeps direct input primary and progressively reveals explicit 
   await page.goto("/");
 
   const start = page.getByRole("region", { name: "开始新任务" });
+  const disclosure = page.getByRole("status", { name: "联网与模型上下文说明" });
+  await expect(disclosure).toBeVisible();
+  await expect(disclosure).toContainText("当前联网策略：关闭联网");
+  await disclosure.getByRole("button", { name: "我知道了" }).click();
+  await expect(disclosure).toHaveCount(0);
   await expect(start.getByRole("heading", { name: "直接输入问题即可开始" })).toBeVisible();
   await expect(start.getByRole("button", { name: /系统学习/ })).toBeVisible();
   await expect(start.getByRole("button", { name: /上传资料/ })).toBeVisible();
@@ -27,6 +32,12 @@ test("new session keeps direct input primary and progressively reveals explicit 
   await composer.fill(FIRST_QUESTION);
   await composer.press("Enter");
   await expect(page.getByText(FIRST_REPLY, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /证据轨迹/ }).last().click();
+  await page.getByRole("button", { name: "显示诊断详情" }).click();
+  const externalData = page.getByLabel("本轮外发数据说明");
+  await expect(externalData).toContainText("联网搜索：未发出搜索请求");
+  await expect(externalData).toContainText("最近对话：未发送给模型");
+  await expect(externalData).toContainText("本地资料：未发送给模型");
 
   expect(fixture.chatAttempts).toBe(1);
   expect(fixture.unexpectedApiPaths).toEqual([]);

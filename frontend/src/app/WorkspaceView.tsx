@@ -8,8 +8,11 @@ import { SourcesPanel } from "../features/rag/SourcesPanel";
 import { UploadLearningPrompt } from "../features/rag/UploadLearningPrompt";
 import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadContract";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { ExternalDataFirstUseNotice } from "../features/settings/ExternalDataFirstUseNotice";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
+import { WorkspaceTransitionDialog } from "../features/sessions/WorkspaceTransitionDialog";
+import { useWorkspaceTransitionGuard } from "../features/sessions/workspaceTransitionGuard";
 import { GlobalNotices } from "../layout/GlobalNotices";
 import type { ApiSnapshot, ChatSettings, DrawerId, RagSettings } from "../types";
 import { ExtensionDrawers } from "./ExtensionDrawers";
@@ -98,6 +101,42 @@ export function WorkspaceView({
   const partialErrors = Object.entries(snapshot.errors ?? {}).filter(
     ([key]) => key !== "health",
   );
+  const transitionGuard = useWorkspaceTransitionGuard({
+    isSending: learningView.isSending,
+    hasUserMessages: chatController.messages.some((message) => message.role === "user"),
+    summaryStatus: learningView.sessionSummary?.status,
+    memoryBusy:
+      memoryController.isPreviewing ||
+      memoryController.isCommitting ||
+      Boolean(
+        memoryController.closureRun &&
+          ["created", "collecting", "generating", "committing"].includes(
+            memoryController.closureRun.status,
+          ),
+    ),
+    memoryPreviewReady: Boolean(
+      (memoryController.run?.status === "previewed" && memoryController.preview?.writable) ||
+        memoryController.closureRun?.status === "preview_ready",
+    ),
+    researchStatus: webLookupController.result?.status,
+    researchBusy: webLookupController.isBusy,
+    ragWriteBusy: uploadController.isUploading,
+  });
+  const closeTransitionSource = () => {
+    if (state.activeDrawer) closeDrawer();
+  };
+  const requestNewSession = () => {
+    closeTransitionSource();
+    transitionGuard.request("new", chatController.startNewSession);
+  };
+  const requestRestoreSession = (sessionId: string) => {
+    closeTransitionSource();
+    transitionGuard.request("switch", () => chatController.restoreSession(sessionId));
+  };
+  const requestArchiveSession = (sessionId: string) => {
+    closeTransitionSource();
+    transitionGuard.request("archive", () => chatController.archiveCurrentSession(sessionId));
+  };
 
   return (
     <AppShell>
@@ -118,9 +157,9 @@ export function WorkspaceView({
         sessions={snapshot.sessions}
         activeSessionId={learningView.sessionId}
         isSending={learningView.isSending}
-        onRestore={chatController.restoreSession}
-        onArchive={chatController.archiveCurrentSession}
-        onNewSession={learningView.requestNewSession}
+        onRestore={requestRestoreSession}
+        onArchive={requestArchiveSession}
+        onNewSession={requestNewSession}
         onSessionChanged={refresh}
       />
       <div className="chat-column">
@@ -133,6 +172,15 @@ export function WorkspaceView({
           visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}
         />
+        {snapshot.runtimeSettings?.settings ? (
+          <ExternalDataFirstUseNotice
+            webPolicy={String(snapshot.runtimeSettings.settings.web_policy ?? "auto")}
+            cloudContextPolicy={String(
+              snapshot.runtimeSettings.settings.cloud_context_policy ?? "allow_local_evidence",
+            )}
+            onOpenSettings={() => openDrawer("settings")}
+          />
+        ) : null}
         <UploadLearningPrompt
           phase={uploadController.flowPhase}
           status={uploadController.status}
@@ -171,7 +219,7 @@ export function WorkspaceView({
           isSearching={ragController.isSearching}
           hasSearchQuery={Boolean(extensionView.activeQuery)}
           onQuickPrompt={ui.setInput}
-          onStartNewTopic={learningView.requestNewSession}
+          onStartNewTopic={requestNewSession}
           lastChat={chatController.lastChat}
           ragEnabled={ui.ragEnabled}
           memoryStatus={snapshot.memoryStatus}
@@ -198,9 +246,9 @@ export function WorkspaceView({
           sessions={snapshot.sessions}
           activeSessionId={learningView.sessionId}
           isSending={learningView.isSending}
-          onRestore={chatController.restoreSession}
-          onArchive={chatController.archiveCurrentSession}
-          onNewSession={learningView.requestNewSession}
+          onRestore={requestRestoreSession}
+          onArchive={requestArchiveSession}
+          onNewSession={requestNewSession}
           onSessionChanged={refresh}
           variant="panel"
         />
@@ -237,10 +285,9 @@ export function WorkspaceView({
           controller={memoryController}
           sessionSummary={learningView.sessionSummary}
           onContinueCurrent={closeDrawer}
-          onArchiveAndNew={async () => {
+          onArchiveAndNew={() => {
             if (!learningView.sessionId) return;
-            await chatController.archiveCurrentSession(learningView.sessionId);
-            closeDrawer();
+            requestArchiveSession(learningView.sessionId);
           }}
         />
       </SlideOver>
@@ -264,7 +311,14 @@ export function WorkspaceView({
         apiError={snapshot.error}
         operationError={ui.operationError}
         partialErrors={partialErrors}
+        onRetryApi={() => void refresh()}
+        onOpenSettings={() => openDrawer("settings")}
         onDismissOperationError={() => ui.setOperationError("")}
+      />
+      <WorkspaceTransitionDialog
+        notice={transitionGuard.notice}
+        onCancel={transitionGuard.cancel}
+        onConfirm={transitionGuard.confirm}
       />
     </AppShell>
   );

@@ -25,7 +25,7 @@ export function SessionNavigator({
   onSessionChanged,
   variant = "sidebar",
 }: SessionNavigatorProps) {
-  const navigator = useSessionNavigator(sessions, activeSessionId, isSending, {
+  const navigator = useSessionNavigator(sessions, activeSessionId, {
     onRestore,
     onArchive,
     onSessionChanged,
@@ -51,7 +51,6 @@ export function SessionNavigator({
           {onNewSession ? (
             <button
               className="ghost-action compact"
-              disabled={isSending}
               onClick={onNewSession}
               type="button"
             >
@@ -73,7 +72,6 @@ export function SessionNavigator({
         </div>
         <button
           className="ghost-action compact"
-          disabled={isSending}
           onClick={onNewSession}
           type="button"
         >

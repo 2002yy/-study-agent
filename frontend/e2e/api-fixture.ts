@@ -20,6 +20,30 @@ const EMPTY_RAG = {
   rewritten_query: "",
 };
 
+function ragWithExternalDataPolicy() {
+  return {
+    ...EMPTY_RAG,
+    external_data_policy: {
+      web_policy: "off",
+      cloud_context_policy: "allow_local_evidence",
+      task_source_policy: "model_only",
+      web_allowed: false,
+      local_retrieval_allowed: false,
+      history_allowed: true,
+      memory_allowed: true,
+      local_evidence_to_model_allowed: true,
+      reason: "task_does_not_allow_web",
+      web_search_performed: false,
+      history_sent_to_model: false,
+      history_message_count: 0,
+      learning_state_sent_to_model: true,
+      memory_context_sent_to_model: false,
+      local_evidence_sent_to_model: false,
+      local_evidence_chunk_count: 0,
+    },
+  };
+}
+
 const RUNTIME_SETTINGS = {
   settings: {
     selected_role: "auto",
@@ -172,7 +196,7 @@ export function makeLearningSession(): { row: SessionRow; detail: SessionDetail 
           assistant_message: "我们已经确认每轮会缩小搜索区间。",
           parent_turn_id: null,
           route_snapshot: route,
-          rag_snapshot: EMPTY_RAG,
+          rag_snapshot: ragWithExternalDataPolicy(),
           pedagogy_snapshot: {
             phase: "verify",
             committed_learning_state: learningState,
@@ -181,7 +205,7 @@ export function makeLearningSession(): { row: SessionRow; detail: SessionDetail 
       ],
       settings: defaultSessionSettings("苏格拉底"),
       route,
-      rag: EMPTY_RAG,
+      rag: ragWithExternalDataPolicy(),
       learning_state: learningState,
       pedagogy: {
         phase: "verify",
@@ -793,7 +817,7 @@ export async function installApiFixture(
           assistant_message: reply,
           parent_turn_id: payload.retry_of_turn_id ?? null,
           route_snapshot: responseRoute,
-          rag_snapshot: EMPTY_RAG,
+          rag_snapshot: ragWithExternalDataPolicy(),
           pedagogy_snapshot: taskIntent === "learn"
             ? { phase: "verify", committed_learning_state: learningState }
             : {},
@@ -832,7 +856,7 @@ export async function installApiFixture(
         turns: nextTurns,
         settings: previousDetail?.settings ?? defaultSessionSettings(),
         route: responseRoute,
-        rag: EMPTY_RAG,
+        rag: ragWithExternalDataPolicy(),
         learning_state: learningState,
         pedagogy: taskIntent === "learn"
           ? { phase: "verify", committed_learning_state: learningState }
@@ -865,7 +889,7 @@ export async function installApiFixture(
           operation_id: `operation-${state.chatAttempts}`,
         }),
         event("route", { route: responseRoute }),
-        event("rag", { rag: EMPTY_RAG }),
+        event("rag", { rag: ragWithExternalDataPolicy() }),
         event("token", { text: reply.slice(0, split) }),
         event("token", { text: reply.slice(split) }),
         event("done", {

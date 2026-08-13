@@ -28,7 +28,6 @@ import type { ApiSnapshot, ChatSettings } from "../types";
 import {
   selectActiveLearningSession,
   selectLearningSessionSummary,
-  selectNewSessionConfirmation,
 } from "./learningSessionViewModel";
 import type { EvidenceLearningPort } from "./useEvidenceRuntime";
 import type { WorkspaceRecovery } from "./WorkspacePersistence";
@@ -225,15 +224,6 @@ export function useLearningSessionRuntime(options: {
     [activeSession, state.sessionSummary, chatController.threadId],
   );
 
-  const requestNewSession = useCallback(() => {
-    const confirmation = selectNewSessionConfirmation(
-      chatController.messages,
-      sessionSummary,
-    );
-    if (confirmation && !window.confirm(confirmation)) return;
-    void chatController.startNewSession();
-  }, [chatController.messages, chatController.startNewSession, sessionSummary]);
-
   const abandonRecovery = useCallback(async () => {
     const interrupted = chatController.streamRecovery;
     if (!interrupted) return;
@@ -380,7 +370,6 @@ export function useLearningSessionRuntime(options: {
       learningResume,
       learningResumeError,
       refreshLearningResume,
-      requestNewSession,
       abandonRecovery,
     }),
     [
@@ -393,7 +382,6 @@ export function useLearningSessionRuntime(options: {
       learningResume,
       learningResumeError,
       refreshLearningResume,
-      requestNewSession,
       abandonRecovery,
     ],
   );

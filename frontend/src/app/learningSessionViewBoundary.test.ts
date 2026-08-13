@@ -13,7 +13,6 @@ describe("learning session view owner boundary", () => {
     for (const token of [
       "selectActiveLearningSession(",
       "selectLearningSessionSummary(",
-      "requestNewSession",
       "abandonRecovery",
       "visitedPhases: state.pedagogyPhases",
     ]) {
@@ -25,7 +24,6 @@ describe("learning session view owner boundary", () => {
     for (const retiredInlineOwner of [
       "snapshot.sessions.find(",
       "state.sessionSummary?.thread_id",
-      "const requestNewSession =",
       "const abandonRecovery =",
       "abandonInterruptedTurn",
     ]) {
@@ -34,7 +32,7 @@ describe("learning session view owner boundary", () => {
 
     expect(viewSource).toContain("learningView.activeSession");
     expect(viewSource).toContain("learningView.sessionSummary");
-    expect(viewSource).toContain("learningView.requestNewSession");
+    expect(viewSource).toContain("useWorkspaceTransitionGuard");
     expect(viewSource).toContain("learningView.abandonRecovery");
     expect(viewSource).toContain("learningView.visitedPhases");
   });

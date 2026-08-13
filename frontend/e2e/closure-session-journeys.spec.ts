@@ -35,6 +35,11 @@ test("learning closure reviews evidence before saving and can archive into a fre
   await expect(resultsDialog.getByText("本次已整理")).toBeVisible();
   await resultsDialog.getByRole("button", { name: "归档并新建" }).click();
   await expect(resultsDialog).toBeHidden();
+  const transitionDialog = page.getByRole("dialog", { name: "归档当前会话前确认未完成工作" });
+  await expect(transitionDialog).toBeVisible();
+  await expect(transitionDialog.getByText("当前会话将进入历史记录")).toBeVisible();
+  await transitionDialog.getByRole("button", { name: "仍然归档并新建" }).click();
+  await expect(transitionDialog).toBeHidden();
   await expect(
     page.getByText("我们已经确认每轮会缩小搜索区间。", { exact: true }),
   ).toHaveCount(0);

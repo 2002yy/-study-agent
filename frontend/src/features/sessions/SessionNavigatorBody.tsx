@@ -33,7 +33,6 @@ function SessionRowView({
   const sessionId = sessionIdFromRow(session);
   const isActive = sessionId === navigator.activeSessionId;
   const isEditing = sessionId === navigator.editingId;
-  const isConfirmingArchive = sessionId === navigator.confirmArchiveId;
 
   return (
     <article
@@ -103,36 +102,14 @@ function SessionRowView({
           </button>
         ) : null}
         {isActive && canArchive ? (
-          isConfirmingArchive ? (
-            <div className="session-sidebar-confirm">
-              <button
-                className="ghost-action compact danger"
-                disabled={isSending}
-                onClick={navigator.confirmArchive}
-                type="button"
-              >
-                确认归档
-              </button>
-              <button
-                className="ghost-action compact"
-                disabled={isSending}
-                onClick={navigator.cancelArchive}
-                type="button"
-              >
-                取消
-              </button>
-            </div>
-          ) : (
-            <button
-              aria-label="归档当前会话"
-              className="icon-button session-sidebar-archive"
-              disabled={isSending}
-              onClick={() => navigator.requestArchive(sessionId)}
-              type="button"
-            >
-              <Archive size={14} />
-            </button>
-          )
+          <button
+            aria-label="归档当前会话"
+            className="icon-button session-sidebar-archive"
+            onClick={() => navigator.requestArchive(sessionId)}
+            type="button"
+          >
+            <Archive size={14} />
+          </button>
         ) : null}
       </div>
     </article>

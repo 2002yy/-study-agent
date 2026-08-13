@@ -58,7 +58,7 @@ describe("SessionNavigator", () => {
     expect(onRestore).toHaveBeenCalledWith("chat-history");
   });
 
-  it("requires confirmation before the active session is archived", () => {
+  it("routes archive through the workspace transition owner", () => {
     const onArchive = vi.fn();
     render(
       <SessionNavigator
@@ -69,8 +69,6 @@ describe("SessionNavigator", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "归档当前会话" }));
-    expect(onArchive).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
     expect(onArchive).toHaveBeenCalledWith("chat-active");
   });
 

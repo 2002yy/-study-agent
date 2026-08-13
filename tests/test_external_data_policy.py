@@ -172,6 +172,14 @@ def test_question_only_blocks_web_history_memory_and_local_evidence(tmp_path):
     assert prepared.rag["result_count"] == 1
     assert prepared.route["external_data_policy"]["web_allowed"] is False
     assert prepared.route["external_data_policy"]["local_evidence_to_model_allowed"] is False
+    execution = prepared.rag["external_data_policy"]
+    assert execution["web_search_performed"] is False
+    assert execution["history_sent_to_model"] is False
+    assert execution["history_message_count"] == 0
+    assert execution["learning_state_sent_to_model"] is False
+    assert execution["memory_context_sent_to_model"] is False
+    assert execution["local_evidence_sent_to_model"] is False
+    assert execution["local_evidence_chunk_count"] == 0
 
 
 def test_recent_chat_keeps_history_but_blocks_memory_and_local_evidence(tmp_path):
@@ -222,6 +230,15 @@ def test_auto_with_local_evidence_allows_full_context(tmp_path):
     assert "LOCAL SECRET EVIDENCE" in message_args["rag_context"]
     assert "Official docs" in message_args["rag_context"]
     assert prepared.route["external_data_policy"]["web_allowed"] is True
+    execution = prepared.rag["external_data_policy"]
+    assert execution == prepared.route["external_data_policy"]
+    assert execution["web_search_performed"] is True
+    assert execution["history_sent_to_model"] is True
+    assert execution["history_message_count"] == 1
+    assert execution["learning_state_sent_to_model"] is True
+    assert execution["memory_context_sent_to_model"] is True
+    assert execution["local_evidence_sent_to_model"] is True
+    assert execution["local_evidence_chunk_count"] == 1
     assert prepared.web_context_used is True
 
 

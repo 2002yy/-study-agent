@@ -22,7 +22,6 @@ type SessionNavigatorInteractionState = {
   groupMode: SessionGroupMode;
   editingId: string | null;
   editingTitle: string;
-  confirmArchiveId: string | null;
   renameError: string;
   isRenaming: boolean;
 };
@@ -32,7 +31,6 @@ const INITIAL_INTERACTION_STATE: SessionNavigatorInteractionState = {
   groupMode: "time",
   editingId: null,
   editingTitle: "",
-  confirmArchiveId: null,
   renameError: "",
   isRenaming: false,
 };
@@ -72,7 +70,6 @@ function subscribeToInteractionState(listener: () => void) {
 export function useSessionNavigator(
   sessions: SessionRow[],
   activeSessionId: string | undefined,
-  isSending: boolean,
   actions: SessionNavigatorActions,
 ) {
   const interaction = useSyncExternalStore(
@@ -117,19 +114,7 @@ export function useSessionNavigator(
   };
 
   const restore = (sessionId: string) => {
-    if (
-      isSending &&
-      !window.confirm("当前回答正在生成，切换会话将停止生成。继续吗？")
-    ) {
-      return;
-    }
     actions.onRestore?.(sessionId);
-  };
-
-  const confirmArchive = () => {
-    if (!interaction.confirmArchiveId) return;
-    actions.onArchive?.(interaction.confirmArchiveId);
-    updateInteractionState({ confirmArchiveId: null });
   };
 
   return {
@@ -147,11 +132,7 @@ export function useSessionNavigator(
     saveRename,
     isRenaming: interaction.isRenaming,
     renameError: interaction.renameError,
-    confirmArchiveId: interaction.confirmArchiveId,
-    requestArchive: (confirmArchiveId: string) =>
-      updateInteractionState({ confirmArchiveId }),
-    confirmArchive,
-    cancelArchive: () => updateInteractionState({ confirmArchiveId: null }),
+    requestArchive: (sessionId: string) => actions.onArchive?.(sessionId),
     restore,
     activeSessionId,
   };
