@@ -176,9 +176,11 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
 
   return (
     <div className="evidence-trail">
-      <span className="visually-hidden" aria-live="polite" role="status">
-        {copyAnnouncement}
-      </span>
+      {copyAnnouncement ? (
+        <span className="visually-hidden" aria-live="polite" role="status">
+          {copyAnnouncement}
+        </span>
+      ) : null}
       <button
         className="evidence-toggle"
         onClick={() => setOpen((value) => !value)}
