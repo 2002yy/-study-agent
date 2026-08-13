@@ -1,8 +1,17 @@
-# Web Search Setup Guide
+# Web Search / Research Setup
 
-This guide explains how to configure the news/web-search pipeline used by Study Agent.
+This is the single runtime configuration guide for both Study Agent search paths:
 
-The safe default is local-first and RSS-first:
+- ordinary chat research (`WebLookupRun`), which must return visible sources or a truthful failure;
+- the durable `NewsRun` workflow used by the Lab/group-news compatibility surface.
+
+Current pass/fail evidence and latency measurements belong in
+[`PROJECT_STATUS.md`](PROJECT_STATUS.md). The NewsRun implementation contract belongs in
+[`NEWS_PIPELINE.md`](NEWS_PIPELINE.md).
+
+The checked-in example keeps optional network providers disabled. The locally validated
+production setup enables a loopback SearXNG instance for ordinary research; DuckDuckGo HTML
+is only the final fallback because challenge pages are common.
 
 ```env
 NEWS_ENABLE_SEARXNG=false
@@ -10,7 +19,42 @@ NEWS_ENABLE_JINA_READER=false
 NEWS_ENABLE_FIRECRAWL_READER=false
 ```
 
-## 1. Current Pipeline
+## 1. Search Paths
+
+### Ordinary research
+
+```text
+User query
+→ local SearXNG (preferred)
+→ Bing Web RSS (fallback)
+→ DuckDuckGo HTML (last fallback)
+→ validate title + public URL
+→ optional relevant page read
+→ ResearchRun truth + visible sources
+```
+
+Provider challenge, timeout, connection and HTTP failures are structured errors. Empty or
+failed calls do not become `found` and do not enter model evidence.
+
+Recommended local configuration:
+
+```env
+WEB_ENABLE_SEARXNG=true
+SEARXNG_BASE_URL=http://127.0.0.1:8080
+SEARXNG_ALLOW_LOOPBACK=true
+WEB_SEARXNG_CATEGORIES=general
+WEB_SEARCH_PROVIDER_TIMEOUT_SECONDS=6
+WEB_SEARCH_TOTAL_TIMEOUT_SECONDS=8
+WEB_ENABLE_BING_RSS=true
+WEB_ENABLE_DUCKDUCKGO=true
+WEB_TOOL_TOTAL_BUDGET_SECONDS=12
+```
+
+The search budget is shared across sequential provider fallbacks. The whole research run must
+reach a terminal state within 12 seconds, and the chat path must show sources or an explicit
+“联网搜索失败，本回答未使用联网来源” response within 20 seconds.
+
+### NewsRun
 
 ```text
 User query
@@ -27,7 +71,7 @@ User query
 → source trace
 ```
 
-## 2. Recommended Configurations
+## 2. NewsRun Configurations
 
 ### A. Most stable default
 
@@ -92,7 +136,7 @@ NEWS_ENABLE_JINA_READER=true
 
 Jina fallback is attempted only after local extraction fails and, if enabled, after Firecrawl fallback fails.
 
-## 3. Quick SearXNG Check
+## 3. SearXNG Runtime Check
 
 Start SearXNG, then open:
 
@@ -100,9 +144,28 @@ Start SearXNG, then open:
 http://127.0.0.1:8080/search?q=python&format=json
 ```
 
-Expected result: JSON containing a `results` array.
+Expected result: JSON containing a non-empty `results` array for an ordinary query.
 
-If you get 403 or HTML, JSON output is disabled on that instance. The app will still work because it falls back to RSS.
+If you get 403 or HTML, JSON output is disabled on that instance. Ordinary research may fall
+back to Bing RSS and DuckDuckGo; NewsRun may fall back to configured RSS. A fallback is not a
+successful SearXNG health check.
+
+Use three representative ordinary queries for release validation. Each query must return at
+least three results with non-empty title and public URL in under 10 seconds. Also test challenge,
+timeout and repeated-timeout fixtures; unit tests alone do not prove the local provider is up.
+
+The API exposes a read-only diagnostic that does not delay the core `/health` readiness check:
+
+```text
+GET http://127.0.0.1:8000/health/providers
+GET http://127.0.0.1:8000/health/providers?probe=false
+```
+
+The live form first checks SearXNG `/healthz`, then performs one search with a five-second cap.
+The response distinguishes `enabled`, `configured`, service `reachable` and
+`search_capable`; a reachable service with slow/unresponsive engines is reported as degraded.
+Fallback switches are reported as unprobed and never promoted to reachable without an actual
+search.
 
 ## 4. Quick Firecrawl-compatible Check
 
@@ -140,6 +203,7 @@ The adapter reads `data.markdown`, `markdown`, `data.content`, or `content` from
 ruff check src/ tests/
 pytest tests/test_url_normalizer.py tests/test_news_redirect_dedup.py tests/test_domain_policy.py -v
 pytest tests/test_reader_backends.py tests/test_searxng_source.py tests/test_firecrawl_reader.py -v
+pytest tests/test_web_query_normalizer.py tests/test_persistent_web_agent.py tests/test_web_lookup_research_contract.py -v
 pytest tests/ -v
 ```
 
@@ -154,7 +218,8 @@ OpenAI API docs
 LiteCDNet remote sensing change detection
 ```
 
-Check the source block for:
+For ordinary research, check that every claimed online result has a visible title and URL, and
+that failure never reports `found`. For NewsRun, check the source block for:
 
 - `来源：SearXNG/...` if SearXNG is enabled and working.
 - `正文已读｜本地 trafilatura` or similar if local extraction works.

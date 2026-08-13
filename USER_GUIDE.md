@@ -36,7 +36,7 @@
 
 P2-D 设计目标是让源码理解可以追溯到 exact commit / file / symbol / line。默认学习界面只应展示结论和主要来源，更多 path/line/commit/CI 按需展开，不把界面变成 IDE。
 
-注意：该领域合同正在 P2-D 分批实现，生产 Claim UI 仍属冻结项。
+该链路已经包含 commit-pinned source evidence、Claim/Hypothesis 收束、理解验证、持久恢复与源码变化后的 revalidation。界面只展示有 durable 依据的学习结论；实验性统计面板、GraphRAG 与长期画像写回不属于当前产品承诺。
 
 ## 5. 理解验证
 

@@ -109,6 +109,26 @@ class HealthResponse(BaseModel):
     rag_index_exists: bool
 
 
+class SearchProviderHealthItem(BaseModel):
+    name: str
+    role: str
+    enabled: bool
+    configured: bool
+    reachable: bool | None
+    search_capable: bool | None
+    status: str
+    detail: str
+    endpoint: str
+
+
+class SearchProviderHealthResponse(BaseModel):
+    status: str
+    preferred_provider: str
+    probed: bool
+    checked_at: str
+    providers: list[SearchProviderHealthItem]
+
+
 class RoleListResponse(BaseModel):
     roles: list[dict]
 

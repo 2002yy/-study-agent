@@ -2,7 +2,7 @@
 
 > **文档类别：稳定技术参考，不是当前进度入口。**  
 > 当前状态、缺口和下一步统一查看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。  
-> 架构 owner 与兼容边界查看 [`ARCHITECTURE_STATUS.md`](ARCHITECTURE_STATUS.md)。
+> 架构 owner 与兼容边界查看 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 本文用于说明当前主架构、核心工程能力和对外项目表达。产品运行时为 React + FastAPI；旧 Streamlit UI 与运行依赖已移除。
 

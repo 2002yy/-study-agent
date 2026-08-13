@@ -1,7 +1,7 @@
 # 学习工作台 UI 重构实现记录（方案 B，已归档）
 
 > **归档状态：2026-07-13**  
-> 本文件原为逐 Task、逐代码片段的实施计划。方案 B 主体已经落地，原始未勾选 checkbox 不再代表当前实现状态。详细历史步骤可从 Git 提交 `233e101f935d41e382762d453a30146022c84723` 查看；当前需求、审计和执行顺序以综合路线图、`docs/ARCHITECTURE_STATUS.md`、`docs/NEXT_PHASE_PLAN.md` 为准。
+> 本文件原为逐 Task、逐代码片段的实施计划。方案 B 主体已经落地，原始未勾选 checkbox 不再代表当前实现状态。详细历史步骤可从 Git 提交 `233e101f935d41e382762d453a30146022c84723` 查看；当前事实、缺口和执行顺序只看 [`../../PROJECT_STATUS.md`](../../PROJECT_STATUS.md)。
 
 ## 1. 原目标
 
@@ -142,4 +142,4 @@
 6. G4/G6 会话语义和恢复卡。
 7. G5/G7/G8/G17 展示、信息架构、窄屏和可访问性收敛。
 
-每次推进须同步更新综合路线图、`docs/ARCHITECTURE_STATUS.md`、`docs/NEXT_PHASE_PLAN.md` 和相关专项计划。
+每次推进只在事实变化后更新 [`../../PROJECT_STATUS.md`](../../PROJECT_STATUS.md)；稳定合同变化再更新对应 canonical doc，不回写本历史计划。

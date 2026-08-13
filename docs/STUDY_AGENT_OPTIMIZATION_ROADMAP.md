@@ -1,5 +1,0 @@
-# STUDY_AGENT_OPTIMIZATION_ROADMAP — 历史兼容入口
-
-> **已归档。** 当前优化主线与执行顺序只看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。
->
-> 历史原文：[`archive/STUDY_AGENT_OPTIMIZATION_ROADMAP.md`](archive/STUDY_AGENT_OPTIMIZATION_ROADMAP.md)

@@ -1,4 +1,8 @@
-# News Pipeline
+# NewsRun Pipeline
+
+> **Durable compatibility workflow, not the ordinary chat-research path and not an independent
+> product surface.** Current status belongs in [`PROJECT_STATUS.md`](PROJECT_STATUS.md); shared
+> provider configuration belongs in [`WEB_SEARCH_SETUP.md`](WEB_SEARCH_SETUP.md).
 
 Multi-source news aggregation pipeline: search providers → resolve → canonicalize → domain policy → dedup → reader backends → digest → discuss → trace.
 
@@ -252,6 +256,16 @@ For programmatic audit, `src/news/pipeline.py` exposes:
 
 `run_news_round()` returns the audit paths as `audit_markdown_path` and `audit_json_path`.
 
+## Concurrency and failure isolation
+
+The older implementation performed provider search, redirect resolution and article reads
+sequentially. The current pipeline runs independent provider work concurrently, pre-deduplicates
+before resolution, and consumes results in deterministic configured order. A provider failure is
+isolated from other providers; final ordering still follows the existing relevance/domain policy.
+
+The built-in Bing fallback uses Web Search RSS (`/search?...&format=rss`). The former Bing News
+endpoint returned HTML during live verification and is not treated as RSS.
+
 ## Setup Guide
 
 Detailed setup instructions are in:
@@ -271,7 +285,7 @@ The entry page (`wechat_panel.py`) provides a 4-phase stepper:
 
 Each phase is a separate button enabling incremental progress visibility.
 
-## Roadmap
+## Historical release markers
 
 - v0.7.0: Redirect resolver + canonical URL dedup
 - v0.7.1: Domain policy scoring/filtering

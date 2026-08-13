@@ -22,17 +22,51 @@ def test_health_endpoint_reports_ok():
     assert isinstance(data["rag_index_exists"], bool)
 
 
+def test_provider_health_endpoint_exposes_bounded_diagnostics(monkeypatch):
+    monkeypatch.setattr(
+        "src.api.routes.health_routes.inspect_web_search_providers",
+        lambda **kwargs: {
+            "status": "degraded",
+            "preferred_provider": "searxng",
+            "probed": kwargs["probe"],
+            "checked_at": "2026-08-13T00:00:00+00:00",
+            "providers": [
+                {
+                    "name": "searxng",
+                    "role": "preferred",
+                    "enabled": True,
+                    "configured": True,
+                    "reachable": False,
+                    "search_capable": False,
+                    "status": "unavailable",
+                    "detail": "connection_refused",
+                    "endpoint": "http://127.0.0.1:8080",
+                }
+            ],
+        },
+    )
+    client = TestClient(app)
+
+    response = client.get("/health/providers?probe=false")
+
+    assert response.status_code == 200
+    assert response.json()["probed"] is False
+    assert response.json()["providers"][0]["reachable"] is False
+
+
 def test_api_token_gate_allows_health_and_blocks_other_routes(monkeypatch):
     monkeypatch.setenv("STUDY_AGENT_API_TOKEN", "local-secret")
     client = TestClient(app)
 
     health = client.get("/health")
+    provider_health = client.get("/health/providers?probe=false")
     blocked = client.get("/tools")
     wrong = client.get("/tools", headers={"Authorization": "Bearer wrong"})
     bearer = client.get("/tools", headers={"Authorization": "Bearer local-secret"})
     header = client.get("/tools", headers={"X-Study-Agent-Token": "local-secret"})
 
     assert health.status_code == 200
+    assert provider_health.status_code == 401
     assert blocked.status_code == 401
     assert blocked.json()["detail"] == "Missing or invalid API token"
     assert wrong.status_code == 401

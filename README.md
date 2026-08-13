@@ -39,9 +39,9 @@ SQLite durable entities
 
 详细 owner 边界见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
-## P2-D：源码学习与验证
+## 已完成的核心学习闭环
 
-2026-08-08 已冻结源码学习的领域语义合同，但**不等于全部已经实现**。核心原则：
+P2-D 源码学习与验证、P2-E 自动化验收均已进入 `main`。核心原则：
 
 - `SourceEvidence` 固定到 exact commit / file / symbol / line，不被 CI 临时状态污染；
 - CI 是独立的 `ValidationObservation`，失败或不可用不自动使源码证据失效；
@@ -99,4 +99,4 @@ SQLite durable entities
 
 ## 当前开发状态
 
-当前处于 **P2-D**。P2-D-1 对应 Draft PR #115，源码 lexical match → innermost symbol mapping 与 exact-SHA CI association 已进入实现，但 CI 尚未绿色，因此不得合并。实时事实以 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) 为准。
+P2-D 与 P2-E 自动化批次已经完成；实体手机验收因 Android 导出/部署配置未就绪而延期。Learner Model 目前只有只读派生 API，没有 UI 或长期画像写回。联网研究已完成真实性、来源展示与 20 秒首个可见答复预算的自动验收。实时基线、证据和下一切片只看 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
