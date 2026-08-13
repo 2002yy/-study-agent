@@ -9,6 +9,7 @@ import {
   enrichNewsRun,
   getNewsRun,
   searchNewsRun,
+  checkSearchProviderHealth,
   loadApiSnapshot,
   lookupNews,
   createToolRun,
@@ -539,5 +540,30 @@ describe("loadApiSnapshot", () => {
     expect(snapshot.health?.status).toBe("ok");
     expect(snapshot.error).toBe("");
     expect(snapshot.errors.workflows).toContain("500");
+  });
+});
+
+describe("checkSearchProviderHealth", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("only probes providers when explicitly requested and forwards cancellation", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
+      status: "ready",
+      preferred_provider: "searxng",
+      probed: true,
+      checked_at: "2026-08-13T00:00:00Z",
+      providers: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const health = await checkSearchProviderHealth({ signal: controller.signal });
+
+    expect(health.status).toBe("ready");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/health/providers?probe=true");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBe(controller.signal);
   });
 });

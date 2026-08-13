@@ -92,3 +92,26 @@ test("ordinary settings hide engineering controls until advanced disclosure", as
     no_horizontal_overflow: noOverflow,
   });
 });
+
+test("provider health is checked on demand and leaves chat interaction unlocked", async ({ page }) => {
+  const fixture = await installApiFixture(page);
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.goto("/");
+
+  await page.getByLabel("打开更多学习工具").click();
+  await page.getByRole("menuitem", { name: /设置/ }).click();
+  const settings = page.getByRole("region", { name: "学习设置" });
+
+  await expect(settings.getByText("仅在点击时检查，不影响应用启动和聊天。")).toBeVisible();
+  await settings.getByRole("button", { name: "检测联网搜索" }).click();
+  await expect(settings.getByText("首选搜索源可用，可以正常联网检索。")).toBeVisible();
+  await expect(settings.getByRole("list", { name: "联网搜索源状态" })).toContainText("SearXNG可用");
+
+  await page.getByRole("button", { name: "关闭设置", exact: true }).click();
+  await expect(page.getByLabel("输入学习问题")).toBeEnabled();
+  expect(fixture.unexpectedApiPaths).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});

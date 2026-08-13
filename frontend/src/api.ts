@@ -31,7 +31,8 @@ import type {
   WechatStateResponse,
   WorkflowRunDetail,
   WorkflowRunSummary,
-  RuntimeSettingsResponse
+  RuntimeSettingsResponse,
+  SearchProviderHealthResponse
 } from "./types";
 import { consumePendingTaskIntentOverride } from "./features/task/taskContract";
 
@@ -256,6 +257,14 @@ export async function loadApiSnapshot(): Promise<ApiSnapshot> {
 
   _lastSnapshot = next;
   return next;
+}
+
+export async function checkSearchProviderHealth(
+  options: { signal?: AbortSignal } = {},
+): Promise<SearchProviderHealthResponse> {
+  return requestJson<SearchProviderHealthResponse>("/health/providers?probe=true", {
+    signal: options.signal,
+  });
 }
 
 export async function saveRuntimeSettings(payload: Partial<RuntimeSettingsResponse["settings"]>): Promise<RuntimeSettingsResponse> {

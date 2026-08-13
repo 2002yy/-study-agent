@@ -1,5 +1,7 @@
-import { BookOpen, CheckCircle2, Database, Loader2, Settings, SlidersHorizontal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BookOpen, CheckCircle2, Database, Loader2, SearchCheck, Settings, SlidersHorizontal } from "lucide-react";
 
+import { checkSearchProviderHealth } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import { StatusDot } from "../../components/StatusDot";
 import { roleLabel, roleOptions } from "../roles/roleCatalog";
@@ -9,6 +11,8 @@ import type {
   ChatSettings,
   RagSettings,
   RoleResponse,
+  SearchProviderHealthItem,
+  SearchProviderHealthResponse,
 } from "../../types";
 import { ExternalDataPolicySettings } from "./ExternalDataPolicySettings";
 
@@ -124,6 +128,43 @@ type SettingsPanelProps = {
   lastChat: ChatResponse | null;
 };
 
+const providerLabels: Record<string, string> = {
+  searxng: "SearXNG",
+  bing_rss: "Bing RSS",
+  duckduckgo_html: "DuckDuckGo",
+};
+
+function providerSummary(health: SearchProviderHealthResponse): string {
+  const preferred = health.providers.find((provider) => provider.role === "preferred");
+  const fallbacks = health.providers
+    .filter((provider) => provider.role !== "preferred" && provider.enabled)
+    .map((provider) => providerLabels[provider.name] ?? provider.name);
+  const fallbackText = fallbacks.length > 0 ? `；可尝试 ${fallbacks.join("、")} 降级` : "";
+
+  if (health.status === "ready") {
+    return "首选搜索源可用，可以正常联网检索。";
+  }
+  if (health.status === "unavailable") {
+    return "联网搜索不可用，提问时会明确返回未使用联网来源。";
+  }
+  if (preferred?.reachable && preferred.search_capable === false) {
+    return `SearXNG 服务在线，但搜索引擎没有返回有效结果${fallbackText}。`;
+  }
+  if (preferred?.enabled && preferred.configured && preferred.reachable === false) {
+    return `SearXNG 当前不可达${fallbackText}。`;
+  }
+  return `首选搜索源未就绪${fallbackText}。`;
+}
+
+function providerStateLabel(provider: SearchProviderHealthItem): string {
+  if (!provider.enabled) return "未启用";
+  if (!provider.configured) return "配置不完整";
+  if (provider.status === "ready") return "可用";
+  if (provider.reachable && provider.search_capable === false) return "服务在线，搜索异常";
+  if (provider.reachable === false) return "不可达";
+  return provider.role === "preferred" ? "待确认" : "已启用（按需降级）";
+}
+
 export function SettingsPanel(props: SettingsPanelProps) {
   const {
     snapshot,
@@ -145,6 +186,34 @@ export function SettingsPanel(props: SettingsPanelProps) {
     refresh,
     lastChat,
   } = props;
+
+  const [providerHealth, setProviderHealth] = useState<SearchProviderHealthResponse | null>(null);
+  const [providerHealthError, setProviderHealthError] = useState("");
+  const [isCheckingProviders, setIsCheckingProviders] = useState(false);
+  const providerCheckController = useRef<AbortController | null>(null);
+
+  useEffect(() => () => providerCheckController.current?.abort(), []);
+
+  const handleProviderCheck = async () => {
+    providerCheckController.current?.abort();
+    const controller = new AbortController();
+    providerCheckController.current = controller;
+    setIsCheckingProviders(true);
+    setProviderHealthError("");
+    try {
+      setProviderHealth(await checkSearchProviderHealth({ signal: controller.signal }));
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setProviderHealth(null);
+        setProviderHealthError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (providerCheckController.current === controller) {
+        providerCheckController.current = null;
+        setIsCheckingProviders(false);
+      }
+    }
+  };
 
   const apiTone = snapshot.health?.status === "ok" ? "good" : snapshot.error ? "bad" : "neutral";
   const updateChatSetting = (key: keyof ChatSettings, value: string) => {
@@ -377,6 +446,43 @@ export function SettingsPanel(props: SettingsPanelProps) {
             {snapshot.health?.status === "ok" ? "服务已连接" : "服务未连接"}
             {lastChat ? " · 当前会话已有回答" : " · 尚未开始对话"}
           </span>
+        </div>
+        <div className="provider-health-card" aria-live="polite">
+          <div className="provider-health-heading">
+            <span>联网搜索</span>
+            {providerHealth ? (
+              <span className={`provider-health-badge ${providerHealth.status}`}>
+                {providerHealth.status === "ready" ? "可用" : providerHealth.status === "degraded" ? "降级" : "不可用"}
+              </span>
+            ) : null}
+          </div>
+          {providerHealth ? (
+            <>
+              <p className="provider-health-summary">{providerSummary(providerHealth)}</p>
+              <ul className="provider-health-list" aria-label="联网搜索源状态">
+                {providerHealth.providers.map((provider) => (
+                  <li key={provider.name}>
+                    <span>{providerLabels[provider.name] ?? provider.name}</span>
+                    <strong>{providerStateLabel(provider)}</strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="provider-health-summary">
+              {providerHealthError ? "检测失败，联网搜索当前不可确认。" : "仅在点击时检查，不影响应用启动和聊天。"}
+            </p>
+          )}
+          {providerHealthError ? <small className="provider-health-error" role="alert">{providerHealthError}</small> : null}
+          <button
+            className="ghost-action compact"
+            disabled={isCheckingProviders}
+            onClick={() => void handleProviderCheck()}
+            type="button"
+          >
+            {isCheckingProviders ? <Loader2 className="spin" size={15} /> : <SearchCheck size={15} />}
+            {isCheckingProviders ? "正在检测…" : "检测联网搜索"}
+          </button>
         </div>
         <button
           className="primary-action secondary"

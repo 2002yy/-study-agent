@@ -474,6 +474,50 @@ export async function installApiFixture(
       });
       return;
     }
+    if (path === "/health/providers") {
+      await fulfillJson(route, {
+        status: "ready",
+        preferred_provider: "searxng",
+        probed: true,
+        checked_at: "2026-08-13T00:00:00Z",
+        providers: [
+          {
+            name: "searxng",
+            role: "preferred",
+            enabled: true,
+            configured: true,
+            reachable: true,
+            search_capable: true,
+            status: "ready",
+            detail: "valid_results_returned",
+            endpoint: "http://127.0.0.1:8080",
+          },
+          {
+            name: "bing_rss",
+            role: "fallback",
+            enabled: true,
+            configured: true,
+            reachable: null,
+            search_capable: null,
+            status: "enabled",
+            detail: "not_probed",
+            endpoint: "",
+          },
+          {
+            name: "duckduckgo_html",
+            role: "last_fallback",
+            enabled: true,
+            configured: true,
+            reachable: null,
+            search_capable: null,
+            status: "enabled",
+            detail: "not_probed_challenge_prone",
+            endpoint: "",
+          },
+        ],
+      });
+      return;
+    }
     if (path === "/rag/status") {
       await fulfillJson(route, {
         index_path: "browser-fixture",

@@ -4,6 +4,26 @@ export type HealthResponse = {
   rag_index_exists: boolean;
 };
 
+export type SearchProviderHealthItem = {
+  name: string;
+  role: "preferred" | "fallback" | "last_fallback";
+  enabled: boolean;
+  configured: boolean;
+  reachable: boolean | null;
+  search_capable: boolean | null;
+  status: string;
+  detail: string;
+  endpoint: string;
+};
+
+export type SearchProviderHealthResponse = {
+  status: "ready" | "degraded" | "unavailable";
+  preferred_provider: string;
+  probed: boolean;
+  checked_at: string;
+  providers: SearchProviderHealthItem[];
+};
+
 export type RagStatusResponse = {
   index_path: string;
   index_exists: boolean;

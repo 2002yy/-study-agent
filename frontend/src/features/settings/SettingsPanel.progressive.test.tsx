@@ -8,6 +8,7 @@ import { SettingsPanel } from "./SettingsPanel";
 
 vi.mock("../../api", () => ({
   saveRuntimeSettings: vi.fn().mockResolvedValue({}),
+  checkSearchProviderHealth: vi.fn(),
 }));
 
 const snapshot = {

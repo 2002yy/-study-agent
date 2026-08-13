@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 CI 基线：`2fac9d4`（[CI #31618437026](https://github.com/2002yy/study-agent/actions/runs/31618437026) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
+当前已验证 CI 基线：`d75d861`（[CI #31685554492](https://github.com/2002yy/study-agent/actions/runs/31685554492) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、三浏览器 Golden Journeys、real-stack browser gates）。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -378,4 +378,20 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 - 本地门禁：ruff 全仓通过；后端收集 1043 个测试，1037 个 tracked 测试按 12 个受控分片全部通过，新增 provider-health 6/6 通过；detect-secrets 0 findings；expanded mypy baseline 122 ≤ 128（本批新增文件 0 error）；前端 Vitest 82 文件、319/319 与 production build 通过。
 - 远程收口：核心提交 `326d0ff` 首次 CI #31684026410 的 pytest/RAG/ruff/package 均通过，但 detect-secrets 正确拦截安全负例中的 Basic Auth 形态测试字符串；最小 allowlist 修复 `d85789a` 后，[CI #31684795857](https://github.com/2002yy/study-agent/actions/runs/31684795857) 完整全绿，pytest、RAG baseline、ruff、package helper、detect-secrets、expanded mypy baseline、前端 test/build、三浏览器 Golden Journeys 与 real-stack browser gates 均实际运行并通过。
 
-当前阶段：**文档 owner 已收口；Learner Model read-only API complete；provider 健康诊断完成本地真实验证。Learner Model UI、GraphRAG 与 Android 仍未启动。**
+### 9.3 设置页按需联网检测 — LOCAL COMPLETE / REMOTE CI PENDING
+
+- 设置页新增“检测联网搜索”，只在用户点击时请求 `GET /health/providers?probe=true`；不进入启动快照、不自动轮询、不写配置，探测按钮也不复用聊天发送锁；
+- 页面区分首选 SearXNG 可用、服务在线但搜索引擎异常、首选源不可达且仅降级源开启、所有来源不可用；请求失败会保留明确错误，不把“已启用”写成“已可用”；
+- 前端 API / 组件测试覆盖首次渲染零探测、ready、degraded、unavailable、请求失败和聊天期间独立检测；Vitest 83 文件、323/323 通过，production build 通过；
+- Playwright 新旅程在 desktop + mobile Chromium 均通过，完整本地矩阵前 49 项（desktop/mobile/narrow Chromium 与 Firefox）通过；本机 Playwright WebKit 2336 进程启动即以 `3236495362` 退出，4 项未运行到产品断言，必须以远程 CI 的 WebKit 门禁作为最终结论，当前不得写成完整矩阵全绿；
+- 真实 provider 复验为 `ready`；`Python 3.12 documentation`、`OpenAI API documentation`、`Godot Engine documentation` 各返回 5 条有效标题/URL，用时 1.95 / 1.31 / 1.69 秒，全部命中首选 SearXNG；相关后端 pytest 55/55 与 ruff 通过。
+
+### 9.4 后续执行顺序
+
+1. **当前批次收口：** 提交设置页按需联网检测，等待远程 pytest、RAG、ruff、detect-secrets、mypy、前端 test/build、三浏览器 Golden Journeys 与 real-stack 全绿；CI 绿色后将 9.3 提升为 COMPLETE 并更新本节 SHA / run 链接。
+2. **可直接做：G 系列现状差距审计。** 只核验仍未实现的核心学习闭环、隐私/外发控制、可访问性与失败恢复，不按历史编号重复建设；审计后再冻结一个验收明确的最小切片。
+3. **需产品决策：Learner Model UI。** 只读 API 已完成；若启动 UI，边界应为解释性摘要和来源可追溯，不引入 mastery 百分比、画像写回或第二套学习真值。
+4. **已延期：Android 实体手机验收。** Android 导出/部署配置完成前不启动，记录表未真实填写前不得标记完成。
+5. **最后考虑：GraphRAG 与长期画像写回。** 两者都不是当前核心可用性缺口，需分别完成收益、隐私和 owner 边界决策后才可规划。
+
+当前阶段：**文档 owner 已收口；Learner Model read-only API complete；provider 健康诊断已可由设置页按需查看，等待本批远程 CI。Learner Model UI、GraphRAG 与 Android 仍未启动。**
