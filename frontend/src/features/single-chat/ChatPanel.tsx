@@ -288,8 +288,7 @@ export function ChatPanel(props: ChatPanelProps) {
       <span className="visually-hidden" aria-live="polite" role="status">
         {copyAnnouncement}
       </span>
-      <div className="chat-header-stack">
-        <header className="topbar">
+      <header className="topbar">
           <div className="topbar-copy">
             <h1>学习工作台</h1>
             <p>围绕目标继续学习；资料、联网和工具只在需要时提供支持。</p>
@@ -354,12 +353,11 @@ export function ChatPanel(props: ChatPanelProps) {
             </div>
           </details>
           </div>
-        </header>
-        {firstUseNotice}
-      </div>
+      </header>
 
       <div className="conversation-shell">
         <section className="conversation" aria-label="学习对话" onScroll={updateScrollState} ref={conversationRef}>
+          {firstUseNotice}
           <RestoreCard
             session={sessionNavigation}
             streamRecovery={streamRecovery}
