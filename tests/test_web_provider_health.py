@@ -13,7 +13,7 @@ def test_provider_health_reports_ready_searxng_without_exposing_credentials(monk
     monkeypatch.setattr("src.web.provider_health.searxng_enabled", lambda: True)
     monkeypatch.setattr(
         "src.web.provider_health.searxng_base_url",
-        lambda: "http://user:secret@127.0.0.1:8080/private",
+        lambda: "http://user:secret@127.0.0.1:8080/private",  # pragma: allowlist secret
     )
     monkeypatch.setattr(
         "src.web.provider_health.build_searxng_search_url",
@@ -106,7 +106,7 @@ def test_provider_health_does_not_raise_or_echo_malformed_endpoint(monkeypatch):
     monkeypatch.setattr("src.web.provider_health.searxng_enabled", lambda: True)
     monkeypatch.setattr(
         "src.web.provider_health.searxng_base_url",
-        lambda: "http://user:secret@127.0.0.1:not-a-port/private",
+        lambda: "http://user:secret@127.0.0.1:not-a-port/private",  # pragma: allowlist secret
     )
     monkeypatch.setattr(
         "src.web.provider_health.build_searxng_search_url", lambda *args, **kwargs: ""
