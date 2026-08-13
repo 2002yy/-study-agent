@@ -46,6 +46,7 @@ describe("GlobalNotices", () => {
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("操作没有完成");
+    expect(screen.getByRole("alert")).toHaveTextContent("上传失败");
     fireEvent.click(screen.getByRole("button", { name: "关闭错误提示" }));
     expect(callbacks.onDismissOperationError).toHaveBeenCalledOnce();
   });

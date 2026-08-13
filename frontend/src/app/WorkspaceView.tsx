@@ -172,15 +172,6 @@ export function WorkspaceView({
           visitedPhases={learningView.visitedPhases}
           memoryStatus={snapshot.memoryStatus}
         />
-        {snapshot.runtimeSettings?.settings ? (
-          <ExternalDataFirstUseNotice
-            webPolicy={String(snapshot.runtimeSettings.settings.web_policy ?? "auto")}
-            cloudContextPolicy={String(
-              snapshot.runtimeSettings.settings.cloud_context_policy ?? "allow_local_evidence",
-            )}
-            onOpenSettings={() => openDrawer("settings")}
-          />
-        ) : null}
         <UploadLearningPrompt
           phase={uploadController.flowPhase}
           status={uploadController.status}
@@ -315,6 +306,15 @@ export function WorkspaceView({
         onOpenSettings={() => openDrawer("settings")}
         onDismissOperationError={() => ui.setOperationError("")}
       />
+      {snapshot.runtimeSettings?.settings ? (
+        <ExternalDataFirstUseNotice
+          webPolicy={String(snapshot.runtimeSettings.settings.web_policy ?? "auto")}
+          cloudContextPolicy={String(
+            snapshot.runtimeSettings.settings.cloud_context_policy ?? "allow_local_evidence",
+          )}
+          onOpenSettings={() => openDrawer("settings")}
+        />
+      ) : null}
       <WorkspaceTransitionDialog
         notice={transitionGuard.notice}
         onCancel={transitionGuard.cancel}

@@ -49,7 +49,7 @@ export function GlobalNotices({
         <AlertTriangle aria-hidden="true" size={16} />
         <div className="global-notice-content">
           <strong>操作没有完成</strong>
-          <NoticeDetails message={operationError} />
+          <div>{operationError}</div>
         </div>
         <div className="global-notice-actions">
           <button className="ghost-action compact" onClick={onOpenSettings} type="button">

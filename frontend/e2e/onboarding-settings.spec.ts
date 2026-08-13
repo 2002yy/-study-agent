@@ -9,10 +9,13 @@ import {
 
 test("new session keeps direct input primary and progressively reveals explicit task overrides", async ({ page }, testInfo) => {
   const fixture = await installApiFixture(page);
+  await page.addInitScript(() => {
+    window.localStorage.removeItem("study-agent:external-data-notice:v1");
+  });
   await page.goto("/");
 
   const start = page.getByRole("region", { name: "开始新任务" });
-  const disclosure = page.getByRole("status", { name: "联网与模型上下文说明" });
+  const disclosure = page.getByRole("complementary", { name: "联网与模型上下文说明" });
   await expect(disclosure).toBeVisible();
   await expect(disclosure).toContainText("当前联网策略：关闭联网");
   await disclosure.getByRole("button", { name: "我知道了" }).click();

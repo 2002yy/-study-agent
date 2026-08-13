@@ -18,7 +18,7 @@ describe("ExternalDataFirstUseNotice", () => {
         onOpenSettings={onOpenSettings}
       />,
     );
-    expect(screen.getByRole("status", { name: "联网与模型上下文说明" })).toBeVisible();
+    expect(screen.getByRole("complementary", { name: "联网与模型上下文说明" })).toBeVisible();
     expect(screen.getByText(/任务需要时自动联网/)).toBeVisible();
     expect(screen.getByText(/相关本地资料片段/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "查看隐私设置" }));
@@ -35,6 +35,6 @@ describe("ExternalDataFirstUseNotice", () => {
         onOpenSettings={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
   });
 });

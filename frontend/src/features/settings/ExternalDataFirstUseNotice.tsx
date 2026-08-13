@@ -1,5 +1,5 @@
 import { ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export const EXTERNAL_DATA_NOTICE_KEY = "study-agent:external-data-notice:v1";
 
@@ -12,11 +12,9 @@ export function ExternalDataFirstUseNotice({
   cloudContextPolicy: string;
   onOpenSettings: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    setOpen(window.localStorage.getItem(EXTERNAL_DATA_NOTICE_KEY) !== "acknowledged");
-  }, []);
+  const [open, setOpen] = useState(
+    () => window.localStorage.getItem(EXTERNAL_DATA_NOTICE_KEY) !== "acknowledged",
+  );
 
   const acknowledge = () => {
     window.localStorage.setItem(EXTERNAL_DATA_NOTICE_KEY, "acknowledged");
@@ -26,10 +24,9 @@ export function ExternalDataFirstUseNotice({
   if (!open) return null;
 
   return (
-      <section
+      <aside
         aria-labelledby="external-data-first-use-title"
         className="external-data-first-use"
-        role="status"
       >
         <ShieldCheck aria-hidden="true" size={22} />
         <div className="external-data-first-use-copy">
@@ -59,6 +56,6 @@ export function ExternalDataFirstUseNotice({
             我知道了
           </button>
         </div>
-      </section>
+      </aside>
   );
 }

@@ -6,6 +6,7 @@ export const CONTINUE_REPLY = "继续学习：请用自己的话解释左右边�
 export const RETRY_REPLY = "请求已恢复。二分查找每轮排除一半候选范围。";
 
 const STORAGE_KEY = "study-agent-react-session";
+const EXTERNAL_DATA_NOTICE_KEY = "study-agent:external-data-notice:v1";
 const EMPTY_RAG = {
   status: "waiting",
   query: "",
@@ -460,6 +461,9 @@ export async function installApiFixture(
     failNextChat?: boolean;
   } = {},
 ): Promise<ApiFixtureState> {
+  await page.addInitScript((noticeKey) => {
+    window.localStorage.setItem(noticeKey, "acknowledged");
+  }, EXTERNAL_DATA_NOTICE_KEY);
   const state: ApiFixtureState = {
     sessions: options.session ? [structuredClone(options.session.row)] : [],
     details: new Map(
