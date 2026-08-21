@@ -38,9 +38,9 @@ test("new session keeps direct input primary and progressively reveals explicit 
   await page.getByRole("button", { name: /证据轨迹/ }).last().click();
   await page.getByRole("button", { name: "显示诊断详情" }).click();
   const externalData = page.getByLabel("本轮外发数据说明");
-  await expect(externalData).toContainText("联网搜索：未发出搜索请求");
-  await expect(externalData).toContainText("最近对话：未发送给模型");
-  await expect(externalData).toContainText("本地资料：未发送给模型");
+  await expect(externalData).toContainText("联网搜索：历史记录粒度不足，实际调用状态未知");
+  await expect(externalData).toContainText("最近对话：历史记录粒度不足，实际发送状态未知");
+  await expect(externalData).toContainText("本地资料：历史记录粒度不足，实际发送状态未知");
 
   expect(fixture.chatAttempts).toBe(1);
   expect(fixture.unexpectedApiPaths).toEqual([]);
