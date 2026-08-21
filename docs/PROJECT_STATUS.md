@@ -408,11 +408,11 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
 | G14 导入与来源范围 | PARTIAL (P1) | 长期资料库、server-owned RagRun、来源范围、删除/重建确认已存在；仍缺每文件阶段与单文件重试、当前会话临时附件，以及临时附件的禁联网/禁云端/禁记忆/会话结束删除控制。 |
 | G15 会话转换 | COMPLETE (automation) / MANUAL VISUAL PENDING | 新建、切换、归档共用一个只读派生 transition guard；覆盖 chat generation、Memory preview/closure、partial ResearchRun 与 RagWrite，逐项说明停止、保留、继续或放弃的真实效果。归档只确认一次；从抽屉触发时先关闭来源抽屉，避免双 `aria-modal`。RagWrite 仍没有服务端取消能力，守卫明确说明其继续到真实终态而不冒充已取消。完整远程浏览器与 real-stack 矩阵已通过。 |
-| G16 外发数据与隐私 | LOCAL STOP-GATE COMPLETE / REMOTE PENDING (P1) | 窄修复分支已在 evaluator 前阻断 `question_only` / `recent_chat` 的外部语义复核；ChatTurn 按调用记录 purpose/provider/categories/count/result；外部 Chroma query/document embedding 在 provider/client 前 fail closed，RagWriteRun 保留本地激活并记录 `blocked_by_policy`；legacy UI 全部执行事实显示 unknown。全量本地 pytest 1051/1051、前端 336/336、构建和 Ruff 通过。分支尚未提交/推送，远程 CI 仍无证据。 |
+| G16 外发数据与隐私 | STOP-GATE COMPLETE / DELIVERED (P1) | evaluator 前已阻断 `question_only` / `recent_chat` 的外部语义复核；ChatTurn 按调用记录 purpose/provider/categories/count/result；外部 Chroma query/document embedding 在 provider/client 前 fail closed，RagWriteRun 保留本地激活并记录 `blocked_by_policy`；legacy UI 全部执行事实显示 unknown。实现 `2662cd3` 与浏览器验收修正 `a3f00de` 已交付 `main`，完整 CI #32499954659 全绿。文档/附件级云处理授权仍属于后续 G14/G16 产品切片。 |
 | G17 首次使用/可访问性 | PARTIAL (P1) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 仍固定；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
-当前未发现传统远程利用或数据破坏型 P0。已确认的 **G16 P1 隐私真实性缺陷** 已在本地窄修复中止血，但没有 commit/push/远程 CI，故交付门仍为 NO-GO。唯一立即路线是先交付并验证该 G16 分支；远程 CI 全绿后进入 G12 pre-answer/RAG 取消，随后是 G14 临时附件/每文件恢复、G16 文档级授权产品面与 G17 人工可访问性验收；G4 历史分页和 G10 follow-up 复用仍属 P2。
+当前未发现传统远程利用或数据破坏型 P0。已确认的 **G16 P1 隐私真实性缺陷** 已完成窄修复、快进交付和完整远程 CI 验证，止血交付门关闭。唯一立即路线现为 G12 pre-answer/RAG cooperative cancellation；随后是 G14 临时附件/每文件恢复、G16 文档级授权产品面与 G17 人工可访问性验收；G4 历史分页和 G10 follow-up 复用仍属 P2。
 
 ### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
 
@@ -435,13 +435,12 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 ### 9.7 后续执行顺序
 
-1. **唯一立即步骤：交付 G16 隐私真值止血。** 本地修复与止血门已完成；下一门是显式路径 commit/push，并取得该分支远程 CI 全绿。未得到远程证据前不得写成已交付。
-2. **随后实施已冻结合同的 G12 可取消本地 RAG。** 使用 ChatTurn + operation owner、cooperative checkpoints、server single writer 和可观测终态，不创建第二套 LocalRagRun。
-3. **再单独冻结 G14 临时附件合同。** 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试；不得复用长期资料库冒充临时生命周期。
-4. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
-5. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
+1. **唯一立即步骤：实施已冻结合同的 G12 可取消本地 RAG。** G16 止血已交付且 CI 全绿；使用 ChatTurn + operation owner、cooperative checkpoints、server single writer 和可观测终态，不创建第二套 LocalRagRun。
+2. **G12 通过自动与人工时序门后，再单独冻结 G14 临时附件合同。** 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试；不得复用长期资料库冒充临时生命周期，也不在取消切片中夹带附件实现。
+3. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
+4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**同步基线 `main` 为 `589169b`，对应 CI #31704003134 全绿；本地分支 `codex/g16-privacy-truth-hotfix` 已完成 G16 窄止血并通过全量本地门，但尚未提交、推送或取得新 CI。G12 Grill 合同已冻结；在 G16 交付 CI 全绿前开始 G12 仍为 NO-GO。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**G16 窄止血实现 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进进入 `main`，完整 CI #32499954659 全绿。G12 Grill 合同已冻结且实施门转为 GO；唯一下一切片是 ChatTurn cooperative cancellation。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -538,9 +537,9 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 - **Grill coverage：COMPLETE。** 目标、边界、非目标、恢复、兼容、隐私、失败语义和验收门已冻结，无剩余产品选择要求实现者自行决定。
 - **G16 local implementation/stop gate：GO。** 窄修复和本地全量证据完整；没有发现禁止数据到达测试 provider、legacy 假 false 或本地索引回归。
-- **G16 delivery：NO-GO / AUDIT REQUIRED。** 当前改动未 commit/push，没有该分支远程 CI；不得把本地通过改写成已交付。
-- **G12 implementation：NO-GO（仅剩 G16 交付门）。** 合同完整；G16 分支远程 CI 全绿后转 GO，不再进行产品选择 Grill。
-- **唯一下一步：**经授权后只 stage 本切片明确路径，commit/push `codex/g16-privacy-truth-hotfix` 并等待完整 CI；若 CI 绿，下一切片立即是 G12 ChatTurn cooperative cancellation，之后才进入 G14。
+- **G16 delivery：GO / COMPLETE。** 实现 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进进入 `main`；完整 CI #32499954659 全绿。
+- **G12 implementation：GO。** 合同完整且唯一前置门已关闭，不再进行产品选择 Grill；实现中若代码反证出现新的 owner、终态或授权矛盾，再带证据回到 Grill。
+- **唯一下一步：**建立窄 G12 ChatTurn cooperative cancellation 切片，先落 reservation/operation CAS、检索 checkpoint 与 durable terminal truth，再接 200 ms UI 确认和慢检索实测上限；通过 G12 门后才进入 G14。
 
 ### 10.8 G16 窄修复实测证据
 
@@ -551,4 +550,4 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - `.venv\Scripts\python.exe -m pytest -q`：**1051 passed**。
 - `npm test`：**88 files / 336 tests passed**；`npm run build`：通过，仅保留既有的 >500 kB bundle warning。
 - `ruff check .`：通过；mypy baseline：current 122 / baseline 128 / new 0；detect-secrets：0 个 finding 文件；`git diff --check`：通过。
-- 未执行 commit、push 或远程 CI；这是当前唯一未闭合证据。
+- 实现提交 `2662cd3a57b4b12f4115e3cddaec4b5f59604e1e` 与 legacy Golden Journey 验收修正 `a3f00de4ae700d8661c05718cafa0d7a29781927` 已快进交付到 `main`；[CI #32499954659](https://github.com/2002yy/study-agent/actions/runs/32499954659) 完整全绿，G16 止血证据闭合。

@@ -31,8 +31,8 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - GraphRAG：延期，不作为当前核心缺口；
 - 推断型长期画像自动写回：延期，只允许用户确认的偏好；
 - Android 实体手机验收：待真实设备与记录，不用自动化冒充；
-- G16 外发真值止血：窄修复已在 `codex/g16-privacy-truth-hotfix` 通过本地止血门；尚未提交、推送或取得该分支远程 CI，不能写成已交付。
-- G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结；唯一前置是先交付 G16 修复并取得远程 CI 全绿，随后按 ChatTurn/operation owner 路线实施，不新增 LocalRagRun。
+- G16 外发真值止血：实现提交 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进交付到 `main`；完整 [CI #32499954659](https://github.com/2002yy/study-agent/actions/runs/32499954659) 全绿，止血交付门关闭。
+- G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结，当前实施门为 GO；按 ChatTurn/operation owner 路线实施 cooperative cancellation，不新增 LocalRagRun。
 
 ## 展示边界
 
