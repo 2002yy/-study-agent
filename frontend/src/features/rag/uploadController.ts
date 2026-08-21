@@ -25,14 +25,24 @@ export type UploadFlowPhase = "idle" | "processing" | "ready" | "failed";
 export function describeRagWriteResult(result: RagIndexResponse): string {
   const base = `已索引 ${result.documents} 个文档、${result.chunks} 个片段`;
   const failedStages = (result.stages ?? []).filter((stage) => stage.status === "failed");
+  const blockedStages = (result.stages ?? []).filter(
+    (stage) => stage.status === "blocked_by_policy",
+  );
   const version = result.index_version ? ` · 索引版本 v${result.index_version}` : "";
+  const blocked = blockedStages.length
+    ? `；${blockedStages.map((stage) => `${stage.name} 阶段已被策略阻止，未向外部 provider ${stage.provider ?? "未知"} 发送资料`).join("；")}`
+    : "";
   return failedStages.length
     ? `${base}${version}；${failedStages.map((stage) => `${stage.name} 阶段失败：${stage.detail ?? "未知错误"}`).join("；")}`
-    : `${base}${version}`;
+    : `${base}${version}${blocked}`;
 }
 
 function hasFailedStage(result: RagIndexResponse): boolean {
   return (result.stages ?? []).some((stage) => stage.status === "failed");
+}
+
+function hasBlockedStage(result: RagIndexResponse): boolean {
+  return (result.stages ?? []).some((stage) => stage.status === "blocked_by_policy");
 }
 
 export function useUploadController(options: UploadControllerOptions) {
@@ -85,7 +95,11 @@ export function useUploadController(options: UploadControllerOptions) {
         setStatus("资料处理没有完整完成，请查看错误后重试。");
       } else {
         setFlowPhase("ready");
-        setStatus(`${files.length} 份资料已准备好`);
+        setStatus(
+          hasBlockedStage(result)
+            ? `${files.length} 份资料已在本地准备好；外部增强已按策略阻止`
+            : `${files.length} 份资料已准备好`,
+        );
       }
       await refreshDocuments();
       await options.onChanged();
@@ -131,7 +145,13 @@ export function useUploadController(options: UploadControllerOptions) {
           setMode(restored.kind);
           setDetail(describeRagWriteResult(result));
           setFlowPhase(hasFailedStage(result) ? "failed" : "ready");
-          setStatus(hasFailedStage(result) ? "资料处理没有完整完成，请查看错误后重试。" : "资料已准备好");
+          setStatus(
+            hasFailedStage(result)
+              ? "资料处理没有完整完成，请查看错误后重试。"
+              : hasBlockedStage(result)
+                ? "资料已在本地准备好；外部增强已按策略阻止"
+                : "资料已准备好",
+          );
         }
       })
       .catch((error) => {

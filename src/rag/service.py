@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from src.rag.backends import get_vector_backend_from_env
+from src.rag.backends import ExternalEmbeddingPolicyError, get_vector_backend_from_env
 from src.rag.index import (
     DEFAULT_RAG_INDEX_PATH,
     _average_chunk_length,
@@ -222,6 +222,20 @@ def _vector_stage(index: RagIndex) -> dict[str, Any]:
             "retrievable_chunks": len(active.chunks),
             "backend": backend.status().to_dict(),
         }
+    except ExternalEmbeddingPolicyError as exc:
+        return {
+            "name": "vector",
+            "status": "blocked_by_policy",
+            "documents": len(index.documents),
+            "chunks": len(index.chunks),
+            "retrievable_documents": len(active.documents),
+            "retrievable_chunks": len(active.chunks),
+            "provider": exc.provider,
+            "purpose": exc.purpose,
+            "audit_version": 1,
+            "data_categories": ["document_chunks"],
+            "detail": str(exc),
+        }
     except Exception as exc:
         return {
             "name": "vector",
@@ -249,7 +263,9 @@ def index_documents(
     )
     index = _with_version(index, _next_index_version(Path(index_path)))
     _transactional_save_index(index, Path(index_path))
-    get_vector_backend_from_env().upsert_index(retrievable_rag_index(index))
+    vector_stage = _vector_stage(index)
+    if vector_stage["status"] == "failed":
+        raise RuntimeError(str(vector_stage.get("detail") or "vector stage failed"))
     return index
 
 
@@ -270,7 +286,7 @@ def index_documents_with_stages(
     active_version = _next_index_version(target) - 1
     index = _with_version(index, target_version or active_version + 1)
     vector_stage = _vector_stage(index)
-    if vector_stage["status"] != "completed":
+    if vector_stage["status"] not in {"completed", "blocked_by_policy"}:
         return RagIndexWriteResult(
             index=index,
             stages=[
@@ -323,7 +339,9 @@ def append_documents_to_index(
         version=existing.version + 1 if target.is_file() else 1,
     )
     _transactional_save_index(merged, target)
-    get_vector_backend_from_env().upsert_index(retrievable_rag_index(merged))
+    vector_stage = _vector_stage(merged)
+    if vector_stage["status"] == "failed":
+        raise RuntimeError(str(vector_stage.get("detail") or "vector stage failed"))
     return merged
 
 
@@ -354,7 +372,7 @@ def append_documents_to_index_with_stages(
         ),
     )
     vector_stage = _vector_stage(merged)
-    if vector_stage["status"] != "completed":
+    if vector_stage["status"] not in {"completed", "blocked_by_policy"}:
         return RagIndexWriteResult(
             index=merged,
             stages=[
@@ -485,7 +503,7 @@ def set_knowledge_document_evidence_status(
     )
     vector_stage = _vector_stage(updated)
     active = retrievable_rag_index(updated)
-    if vector_stage["status"] != "completed":
+    if vector_stage["status"] not in {"completed", "blocked_by_policy"}:
         return {
             "document_id": document_id,
             "evidence_status": normalized_status,
@@ -565,7 +583,7 @@ def delete_knowledge_document(
         chunks=chunks,
     )
     vector_stage = _vector_stage(updated)
-    if vector_stage["status"] != "completed":
+    if vector_stage["status"] not in {"completed", "blocked_by_policy"}:
         return {
             "deleted_document_id": document_id,
             "documents": len(index.documents),

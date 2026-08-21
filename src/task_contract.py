@@ -289,6 +289,7 @@ def _not_applicable_evaluation(
         semantic_result=None,
         confidence=1.0,
         final_decision="not_applicable",
+        semantic_review_status="not_applicable",
         reasons=(f"task_intent:{contract.task_intent}",),
     )
 
@@ -331,6 +332,7 @@ class TaskAwarePedagogyEvaluationService(PedagogyEvaluationService):
         expected_concepts: tuple[str, ...] = (),
         evidence: tuple[str, ...] = (),
         task_contract: TaskContract | None = None,
+        semantic_review_allowed: bool = True,
     ) -> PedagogyEvalRun:
         contract = task_contract or classify_task_contract(
             learner_input,
@@ -342,6 +344,7 @@ class TaskAwarePedagogyEvaluationService(PedagogyEvaluationService):
                 state=state,
                 expected_concepts=expected_concepts,
                 evidence=evidence,
+                semantic_review_allowed=semantic_review_allowed,
             )
         return _not_applicable_evaluation(
             contract=contract,

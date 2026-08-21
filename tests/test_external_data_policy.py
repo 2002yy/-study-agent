@@ -4,13 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from src.application.chat_service import ChatDependencies
 from src.application.policy_chat_service import (
     ExternalDataPolicyChatService,
     PolicyChatCommand,
 )
 from src.external_data_policy import decide_external_data
+from src.domain.runtime_entities import ChatThread
 from src.infrastructure.sqlite.database import RuntimeDatabase
+from src.pedagogy.evaluation import SemanticEvaluation
 from src.repositories.runtime_repository import RuntimeRepository
 from src.task_contract import (
     TaskAwarePedagogyEngine,
@@ -71,7 +75,7 @@ class _FailingSemanticEvaluator:
         raise AssertionError("semantic evaluation must not run for quick answers")
 
 
-def _service(tmp_path: Path):
+def _service(tmp_path: Path, *, semantic_evaluator=None, retrieve_override=None):
     captured: dict[str, Any] = {
         "web_calls": 0,
         "rag_enabled": [],
@@ -80,6 +84,8 @@ def _service(tmp_path: Path):
 
     def retrieve(_query: str, **kwargs):
         captured["rag_enabled"].append(kwargs["enabled"])
+        if retrieve_override is not None:
+            return retrieve_override(_query, **kwargs)
         return _RagResult(enabled=bool(kwargs["enabled"]))
 
     def resolve_web(_query: str, **kwargs):
@@ -121,9 +127,10 @@ def _service(tmp_path: Path):
         build_messages=build_messages,
         pedagogy_engine=TaskAwarePedagogyEngine(),
         pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
-            _FailingSemanticEvaluator()
+            semantic_evaluator or _FailingSemanticEvaluator()
         ),
         build_role_prompt=lambda *_args, **_kwargs: "ROLE",
+        stream_chat=lambda *_args, **_kwargs: iter(("ok",)),
     )
     return ExternalDataPolicyChatService(repository, dependencies), captured
 
@@ -233,6 +240,13 @@ def test_auto_with_local_evidence_allows_full_context(tmp_path):
     execution = prepared.rag["external_data_policy"]
     assert execution == prepared.route["external_data_policy"]
     assert execution["web_search_performed"] is True
+    assert execution["history_sent_to_model"] is False
+    assert execution["learning_state_sent_to_model"] is False
+    assert execution["memory_context_sent_to_model"] is False
+    assert execution["local_evidence_sent_to_model"] is False
+
+    assert list(service.stream(prepared)) == ["ok"]
+    execution = prepared.rag["external_data_policy"]
     assert execution["history_sent_to_model"] is True
     assert execution["history_message_count"] == 1
     assert execution["learning_state_sent_to_model"] is True
@@ -240,6 +254,174 @@ def test_auto_with_local_evidence_allows_full_context(tmp_path):
     assert execution["local_evidence_sent_to_model"] is True
     assert execution["local_evidence_chunk_count"] == 1
     assert prepared.web_context_used is True
+    answer_call = next(
+        call
+        for call in execution["external_calls"]
+        if call["purpose"] == "answer_generation"
+    )
+    assert answer_call["status"] == "attempted"
+    assert answer_call["provider"]
+    stored = service.repository.get_chat_turn(prepared.turn.id)
+    assert stored is not None
+    assert stored.rag_snapshot["external_data_policy"] == execution
+
+
+@pytest.mark.parametrize("cloud_context_policy", ["question_only", "recent_chat"])
+def test_restricted_context_blocks_semantic_evaluation_before_provider_call(
+    tmp_path, cloud_context_policy
+):
+    class RecordingSemanticEvaluator:
+        provider_name = "external-test"
+
+        def __init__(self):
+            self.calls = []
+
+        def evaluate(self, **kwargs):
+            self.calls.append(kwargs)
+            raise AssertionError("restricted semantic review crossed the policy boundary")
+
+    evaluator = RecordingSemanticEvaluator()
+    service, _captured = _service(tmp_path, semantic_evaluator=evaluator)
+    service.repository.create_chat_thread(
+        ChatThread(
+            id="chat-semantic-private",
+            learning_state={
+                "objective": "PRIVATE OBJECTIVE",
+                "protocol": "socratic_rediscovery",
+                "payload": {"expected_concepts": ["PRIVATE EXPECTED CONCEPT"]},
+            },
+        )
+    )
+
+    prepared = service.start_turn(
+        PolicyChatCommand(
+            user_input="所以每轮范围减半，因为剩余规模变成之前的一半。",
+            thread_id="chat-semantic-private",
+            task_intent="learn",
+            cloud_context_policy=cloud_context_policy,
+            web_policy="off",
+        )
+    )
+
+    assert evaluator.calls == []
+    assert prepared.learner_evaluation.final_decision == "needs_semantic_review"
+    assert prepared.learner_evaluation.semantic_review_status == "blocked_by_policy"
+    semantic_call = next(
+        call
+        for call in prepared.rag["external_data_policy"]["external_calls"]
+        if call["purpose"] == "semantic_evaluation"
+    )
+    assert semantic_call == {
+        "call_id": "semantic_evaluation:1",
+        "purpose": "semantic_evaluation",
+        "provider": "external-test",
+        "data_categories": [
+            "learner_input",
+            "learning_objective",
+            "learning_protocol",
+            "expected_concepts",
+            "evidence_refs",
+        ],
+        "data_counts": {
+            "learner_input": 1,
+            "learning_objective": 1,
+            "learning_protocol": 1,
+            "expected_concepts": 1,
+            "evidence_refs": 0,
+        },
+        "status": "blocked_by_policy",
+        "result": "blocked_by_policy",
+    }
+    assert prepared.rag["external_data_policy"]["learning_state_sent_to_model"] is False
+
+
+def test_allowed_context_calls_semantic_provider_and_audits_actual_categories(tmp_path):
+    class RecordingSemanticEvaluator:
+        provider_name = "external-test"
+
+        def __init__(self):
+            self.calls = []
+
+        def evaluate(self, **kwargs):
+            self.calls.append(kwargs)
+            return SemanticEvaluation(
+                reasoning_complete=True,
+                transfer_ready=True,
+                confidence=0.9,
+            )
+
+    evaluator = RecordingSemanticEvaluator()
+    service, _captured = _service(tmp_path, semantic_evaluator=evaluator)
+    service.repository.create_chat_thread(
+        ChatThread(
+            id="chat-semantic-allowed",
+            learning_state={
+                "objective": "PRIVATE OBJECTIVE",
+                "protocol": "socratic_rediscovery",
+                "payload": {"expected_concepts": ["PRIVATE EXPECTED CONCEPT"]},
+            },
+        )
+    )
+
+    prepared = service.start_turn(
+        PolicyChatCommand(
+            user_input="所以每轮范围减半，因为剩余规模变成之前的一半。",
+            thread_id="chat-semantic-allowed",
+            task_intent="learn",
+            cloud_context_policy="allow_local_evidence",
+            web_policy="off",
+        )
+    )
+
+    assert evaluator.calls[0]["objective"] == "PRIVATE OBJECTIVE"
+    semantic_call = next(
+        call
+        for call in prepared.rag["external_data_policy"]["external_calls"]
+        if call["purpose"] == "semantic_evaluation"
+    )
+    assert semantic_call["status"] == "completed"
+    assert semantic_call["result"] == "completed"
+    assert semantic_call["data_counts"]["expected_concepts"] == 1
+    assert prepared.rag["external_data_policy"]["learning_state_sent_to_model"] is True
+
+
+def test_chat_turn_audits_policy_blocked_external_query_embedding(tmp_path, monkeypatch):
+    from src.rag.service import index_documents
+    from src.tools.local_knowledge import retrieve_local_knowledge
+
+    index_path = tmp_path / "rag.json"
+    document = tmp_path / "private.md"
+    document.write_text("private database index evidence", encoding="utf-8")
+    index_documents([document], index_path=index_path, max_chars=200, overlap_chars=0)
+    monkeypatch.setenv("RAG_VECTOR_BACKEND", "chroma")
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
+
+    def retrieve(query: str, **kwargs):
+        return retrieve_local_knowledge(query, index_path=index_path, **kwargs)
+
+    service, _captured = _service(tmp_path, retrieve_override=retrieve)
+    prepared = service.start_turn(
+        PolicyChatCommand(
+            user_input="请根据本地资料解释数据库索引",
+            thread_id="chat-query-embedding-private",
+            task_intent="quick_answer",
+            rag_enabled=True,
+            rag_retrieval_mode="backend_vector",
+            web_policy="off",
+            cloud_context_policy="question_only",
+        )
+    )
+
+    assert prepared.rag["reason"] == "external_embedding_blocked_by_policy"
+    query_call = next(
+        call
+        for call in prepared.rag["external_data_policy"]["external_calls"]
+        if call["purpose"] == "query_embedding"
+    )
+    assert query_call["status"] == "blocked_by_policy"
+    assert query_call["provider"] == "openai:text-embedding-3-small"
+    assert query_call["data_counts"] == {"retrieval_query": 1}
 
 
 def test_recovered_research_context_keeps_run_provenance_in_turn_evidence(tmp_path):

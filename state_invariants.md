@@ -2,7 +2,7 @@
 
 > **硬约束 owner。** 本文件记录“无论如何重构都必须成立”的条件，不记录当前进度。实施状态看 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
 >
-> 2026-08-09：已纳入 P2-D GrillMe 决策 1–49。
+> 2026-08-21：已纳入 P2-D GrillMe 决策 1–49，以及 G12/G16 最终 Grill 决策 1–24。
 
 ## 1. 文档与真值治理
 
@@ -42,6 +42,30 @@ EvidenceRuntime、LearningSessionRuntime、ExtensionRuntime 各自拥有自己�
 
 ### C4 — Session 原子恢复
 恢复 Session 时一次性恢复其消息、设置、route、RAG 与恢复状态，不把 Group/News 等独立 scope 一并清空。
+
+### C5 — Turn 与 operation 共同标识可取消工作
+官方客户端在请求前生成随机 `turn_id + operation_id`。取消、完成、partial settle、continuation 和 archive-after-cancel 必须校验 expected operation；只凭 turn ID 不足以阻止迟到请求误杀同 Turn 的新 operation。
+
+### C6 — ChatTurn 是取消真值 owner
+`cancel_requested → cancelled/interrupted` 持久化在 ChatTurn 的 operation-scoped 字段中。本地只读 RAG 不新建 LocalRagRun；浏览器 abort、网络断开、toast 或本地 operation registry 都不能单独声明 durable 终态。
+
+### C7 — 取消终态不可伪装
+无可见输出的 accepted cancel 为 `cancelled`；已有回答 token 或已显示来源为 `interrupted`。已接受取消的 operation 不得再 completed、调用后续模型或写入 LearningTruth；若 completed 先原子提交，取消只能返回 `already_completed`。
+
+### C8 — 服务端是 partial reply 唯一 writer
+服务端根据已持久化 operation 和已流出内容决定 cancelled/interrupted 并写 partial reply。前端在取消已登记后不得调用另一条 commit-turn fallback，也不得从 browser abort 推断成功。
+
+### C9 — 取消登记与最终终态分离
+Cancel API 只确认请求已持久化；客户端必须读取服务端 turn status 才能显示 cancelled/interrupted/already completed。UI 可在 200 ms 内同步确认“已接收操作”，但不得把它描述为物理工作已结束。
+
+### C10 — 会话转换不丢服务端责任
+取消登记后可以离开、切换或关闭；同会话新问题和归档等待原 operation 终态。`archive_after_cancel` 必须持久化、绑定 operation、可取消、可在重启后恢复，并独立表达归档失败。
+
+### C11 — continuation 与 retry 语义分离
+interrupted continuation 更新同一 Turn、生成新 operation，并复用该 Turn 已持久化且已采用的 RAG snapshot，不重跑 retrieval/web preparation。retry/regenerate 创建 child Turn/new operation 并重新检索；cancelled 重发不得自动采用旧候选。
+
+### C12 — legacy 不伪装可取消
+没有预分配 turn/operation handles 的 legacy 同步客户端可以继续完成原请求，但不得宣称支持中途取消，也不得由服务端猜测其目标 operation。
 
 ## 4. SourceEvidence
 
@@ -212,6 +236,18 @@ GitHub / RAG / Web 都只是 Evidence Provider。先判断 truth domain：implem
 
 ### P6 — Provider failure ≠ negative fact
 provider unavailable、permission denied、rate limit、not found 等必须保留各自语义；“当前无法验证”不能被推导为“事实不存在/Claim 为假”。
+
+### P7 — 外发策略约束每一次 provider 调用
+Cloud-context policy 不只约束最终回答 prompt，也约束教学语义评估、query embedding、document embedding 和未来新增的模型/provider 调用。应用层不得在策略判断前把长期学习状态交给任何 provider。
+
+### P8 — 外发审计记录实际调用而非策略推断
+ChatTurn 记录回答、教学评估和 query embedding 的逐调用 purpose/provider/data categories/count/result；RagWriteRun 记录 document embedding。审计不保存正文、不新建第二套 run，也不能用 `memory_allowed=false` 推导“实际未发送”。
+
+### P9 — 未知外发历史保持未知
+缺少调用级证据的旧 Turn 必须标记 audit version/unknown；不得把旧布尔字段反向解释为语义评估或 embedding 一定未发生。
+
+### P10 — 文档云处理需要文档级授权
+`allow_local_evidence` 只允许相关证据参与回答，不等于允许完整文档进入云 embedding。operator 环境变量、API key 或 provider 可用性都不是用户同意；授权缺失时外部 embedding 必须 fail closed，同时保留可安全完成的本地阶段。
 
 ## 11. Cache / Validation
 

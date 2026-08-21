@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.rag.backends import (
+    ExternalEmbeddingPolicyError,
     LocalVectorBackend,
     get_vector_backend,
     get_vector_backend_from_env,
@@ -22,7 +23,7 @@ from src.rag.index import build_rag_index
 
 
 class _RecordingEmbeddingProvider:
-    name = "recording"
+    name = "local_hash"
     dimensions = 3
 
     def __init__(self) -> None:
@@ -36,6 +37,10 @@ class _RecordingEmbeddingProvider:
     def embed_many(self, texts: list[str]) -> list[tuple[float, ...]]:
         self.embed_many_inputs.append(list(texts))
         return [(0.1, 0.2, 0.3) for _text in texts]
+
+
+class _ExternalRecordingEmbeddingProvider(_RecordingEmbeddingProvider):
+    name = "external-recording"
 
 
 class _FakeCollection:
@@ -297,3 +302,33 @@ def test_chroma_backend_query_reconstructs_search_results(tmp_path):
     assert results[0].score == 0.8
     assert results[0].chunk.source_path == "notes.md"
     assert results[0].chunk.start_line == 1
+
+
+def test_chroma_blocks_unauthorized_document_embedding_before_any_provider_or_store_call(tmp_path):
+    path = tmp_path / "private.md"
+    path.write_text("PRIVATE DOCUMENT CONTENT", encoding="utf-8")
+    index = build_rag_index([path], max_chars=200, overlap_chars=0)
+    fake_client = _FakeClient()
+    provider = _ExternalRecordingEmbeddingProvider()
+    backend = ChromaVectorBackend(client=fake_client, embedding_provider=provider)
+
+    with pytest.raises(ExternalEmbeddingPolicyError, match="document_embedding"):
+        backend.upsert_index(index)
+
+    assert provider.embed_many_inputs == []
+    assert fake_client.collection_names == []
+
+
+def test_chroma_blocks_unauthorized_query_embedding_before_any_provider_or_store_call(tmp_path):
+    path = tmp_path / "private.md"
+    path.write_text("PRIVATE DOCUMENT CONTENT", encoding="utf-8")
+    index = build_rag_index([path], max_chars=200, overlap_chars=0)
+    fake_client = _FakeClient()
+    provider = _ExternalRecordingEmbeddingProvider()
+    backend = ChromaVectorBackend(client=fake_client, embedding_provider=provider)
+
+    with pytest.raises(ExternalEmbeddingPolicyError, match="query_embedding"):
+        backend.query(index, "PRIVATE QUERY")
+
+    assert provider.embed_inputs == []
+    assert fake_client.collection_names == []

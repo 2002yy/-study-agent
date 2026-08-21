@@ -14,6 +14,25 @@ from src.rag.schema import RagIndex, RagSearchResult
 from src.rag.vector import search_rag_index_vector
 
 
+class ExternalEmbeddingPolicyError(RuntimeError):
+    """Raised before an embedding provider receives unauthorized data."""
+
+    def __init__(self, *, provider: str, purpose: str) -> None:
+        self.provider = provider
+        self.purpose = purpose
+        super().__init__(
+            f"external embedding blocked by policy: provider={provider}; purpose={purpose}"
+        )
+
+
+def embedding_provider_is_external(provider_name: str) -> bool:
+    return (provider_name or "").strip().lower() not in {
+        "local",
+        "local_hash",
+        "hash",
+    }
+
+
 @dataclass(frozen=True)
 class VectorBackendStatus:
     name: str

@@ -7,11 +7,21 @@ __pycache__/
 *.pyc
 *.tsbuildinfo
 .venv/
+.venv-*/
 .ruff_cache/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/playwright-real-stack-report/
+frontend/test-results/
 .secrets.out
+
+# local verification output
+detect-secrets-report.json
+mypy.log
+mypy_utf8.log
+rag-quality-baseline.json
 
 # runtime
 config/runtime_state.yaml

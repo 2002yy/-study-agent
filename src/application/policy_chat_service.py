@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, cast
+import os
+from typing import Any, AsyncIterator, Iterator, cast
 
 from src.application.chat_service import (
     ChatCommand,
@@ -33,6 +34,7 @@ from src.task_intent import SourcePolicy, TaskIntent
 from src.tools.web_agent import WebToolTrace
 
 WEB_CONSENT_MARKER = "__STUDY_AGENT_WEB_CONSENT__"
+EXTERNAL_DATA_AUDIT_VERSION = 2
 
 _SOURCE_POLICIES: set[str] = {
     "model_only",
@@ -91,6 +93,120 @@ def _restore_persisted_research_truth(
         )
         return replace(command, research_sources=sources)
     return replace(command, research_sources=None)
+
+
+def _configured_llm_provider() -> str:
+    return os.getenv("LLM_PROVIDER_PROFILE", "openai").strip().lower() or "openai"
+
+
+def _semantic_external_call(run: Any) -> dict[str, Any] | None:
+    status = str(getattr(run, "semantic_review_status", "legacy_unknown"))
+    if status not in {"blocked_by_policy", "attempted_failed", "completed"}:
+        return None
+    categories = list(getattr(run, "semantic_review_data_categories", ()) or ())
+    counts = {
+        "learner_input": 1 if str(getattr(run, "learner_input", "")) else 0,
+        "learning_objective": 1 if str(getattr(run, "objective", "")) else 0,
+        "learning_protocol": 1 if str(getattr(run, "protocol", "")) else 0,
+        "expected_concepts": len(getattr(run, "expected_concepts", ()) or ()),
+        "evidence_refs": len(getattr(run, "evidence", ()) or ()),
+    }
+    return {
+        "call_id": "semantic_evaluation:1",
+        "purpose": "semantic_evaluation",
+        "provider": str(getattr(run, "semantic_review_provider", "") or "unknown"),
+        "data_categories": categories,
+        "data_counts": {key: counts[key] for key in categories},
+        "status": status,
+        "result": status,
+    }
+
+
+def _web_external_calls(web_call_rows: list[Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for row in web_call_rows:
+        if not isinstance(row, dict) or row.get("name") != "web_search":
+            continue
+        raw_result = row.get("result")
+        result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
+        providers = result.get("providers_attempted") or ["unknown"]
+        for provider in providers:
+            raw_status = str(result.get("status") or "completed")
+            status = {
+                "ok": "completed",
+                "empty": "completed_empty",
+                "unavailable": "attempted_failed",
+            }.get(raw_status, raw_status)
+            calls.append(
+                {
+                    "call_id": f"web_search:{len(calls) + 1}",
+                    "purpose": "web_search",
+                    "provider": str(provider).split(":", 1)[0] or "unknown",
+                    "data_categories": ["search_query"],
+                    "data_counts": {"search_query": 1},
+                    "status": status,
+                    "result": status,
+                }
+            )
+    return calls
+
+
+def _embedding_external_call(rag: dict[str, Any]) -> dict[str, Any] | None:
+    raw_debug = rag.get("debug")
+    debug: dict[str, Any] = raw_debug if isinstance(raw_debug, dict) else {}
+    raw_embedding = debug.get("external_embedding")
+    if not isinstance(raw_embedding, dict):
+        return None
+    embedding: dict[str, Any] = raw_embedding
+    return {
+        "call_id": "query_embedding:1",
+        "purpose": str(embedding.get("purpose") or "query_embedding"),
+        "provider": str(embedding.get("provider") or "unknown"),
+        "data_categories": list(embedding.get("data_categories") or []),
+        "data_counts": {"retrieval_query": 1},
+        "status": str(embedding.get("status") or "unknown"),
+        "result": str(embedding.get("status") or "unknown"),
+    }
+
+
+def _sent_categories(calls: list[dict[str, Any]]) -> set[str]:
+    transmitted = {
+        "attempted",
+        "attempted_failed",
+        "completed",
+        "completed_empty",
+        "failed",
+        "interrupted",
+    }
+    return {
+        str(category)
+        for call in calls
+        if str(call.get("status")) in transmitted
+        for category in call.get("data_categories", [])
+    }
+
+
+def _refresh_execution_truth(snapshot: dict[str, Any]) -> dict[str, Any]:
+    calls = [item for item in snapshot.get("external_calls", []) if isinstance(item, dict)]
+    categories = _sent_categories(calls)
+    return {
+        **snapshot,
+        "external_data_audit_version": EXTERNAL_DATA_AUDIT_VERSION,
+        "external_calls": calls,
+        "web_search_performed": any(
+            call.get("purpose") == "web_search"
+            and call.get("status")
+            in {"attempted", "attempted_failed", "completed", "completed_empty", "failed"}
+            for call in calls
+        ),
+        "history_sent_to_model": "recent_chat" in categories,
+        "learning_state_sent_to_model": bool(
+            categories
+            & {"learning_state", "learning_objective", "learning_protocol", "expected_concepts"}
+        ),
+        "memory_context_sent_to_model": "memory_context" in categories,
+        "local_evidence_sent_to_model": "local_evidence" in categories,
+    }
 
 
 class ExternalDataPolicyChatService(ChatService):
@@ -185,6 +301,7 @@ class ExternalDataPolicyChatService(ChatService):
                 expected_concepts=expected_concepts,
                 evidence=evidence_ids,
                 task_contract=task_contract,
+                semantic_review_allowed=decision.memory_allowed,
             )
             learning_state = LearningState.from_dict(
                 {
@@ -295,17 +412,31 @@ class ExternalDataPolicyChatService(ChatService):
             )
             external_data_execution = {
                 **decision.to_dict(),
-                "web_search_performed": any(
-                    isinstance(call, dict) and call.get("name") == "web_search"
-                    for call in web_call_rows
-                ),
-                "history_sent_to_model": bool(sent_history),
                 "history_message_count": len(sent_history),
-                "learning_state_sent_to_model": decision.memory_allowed,
-                "memory_context_sent_to_model": bool(memory_bundle),
-                "local_evidence_sent_to_model": bool(local_evidence_units),
                 "local_evidence_chunk_count": len(local_evidence_units),
+                "answer_data_categories": [
+                    "current_question",
+                    *(["recent_chat"] if sent_history else []),
+                    *(["learning_state"] if decision.memory_allowed else []),
+                    *(["memory_context"] if memory_bundle else []),
+                    *(["local_evidence"] if local_evidence_units else []),
+                    *(["web_results"] if web_context else []),
+                ],
+                "external_calls": [
+                    *(
+                        [semantic_call]
+                        if (semantic_call := _semantic_external_call(learner_evaluation))
+                        else []
+                    ),
+                    *_web_external_calls(web_call_rows),
+                    *(
+                        [embedding_call]
+                        if (embedding_call := _embedding_external_call(rag))
+                        else []
+                    ),
+                ],
             }
+            external_data_execution = _refresh_execution_truth(external_data_execution)
             route["external_data_policy"] = external_data_execution
             rag["external_data_policy"] = external_data_execution
             route["evidence_disclosure"] = disclosed.policy
@@ -428,3 +559,87 @@ class ExternalDataPolicyChatService(ChatService):
             disclosure_policy=disclosed.policy,
             learner_evaluation=learner_evaluation,
         )
+
+    def _record_answer_call(
+        self, prepared: PreparedChatTurn, status: str
+    ) -> None:
+        current = prepared.route.get("external_data_policy")
+        if not isinstance(current, dict):
+            return
+        calls = [
+            dict(item)
+            for item in current.get("external_calls", [])
+            if isinstance(item, dict)
+        ]
+        answer = next(
+            (item for item in calls if item.get("purpose") == "answer_generation"),
+            None,
+        )
+        if answer is None:
+            if status != "attempted":
+                return
+            answer_categories = list(current.get("answer_data_categories") or [])
+            available_counts = {
+                "current_question": 1,
+                "recent_chat": int(current.get("history_message_count") or 0),
+                "learning_state": 1,
+                "memory_context": 1,
+                "local_evidence": int(current.get("local_evidence_chunk_count") or 0),
+                "web_results": 1,
+            }
+            answer = {
+                "call_id": "answer_generation:1",
+                "purpose": "answer_generation",
+                "provider": _configured_llm_provider(),
+                "data_categories": answer_categories,
+                "data_counts": {
+                    key: available_counts[key] for key in answer_categories
+                },
+            }
+            calls.append(answer)
+        answer["status"] = status
+        answer["result"] = status
+        refreshed = _refresh_execution_truth({**current, "external_calls": calls})
+        prepared.route["external_data_policy"] = refreshed
+        prepared.rag["external_data_policy"] = refreshed
+        self.repository.update_chat_turn(
+            prepared.turn.id,
+            assistant_message=prepared.turn.assistant_message,
+            status="streaming",
+            route_snapshot=prepared.route,
+            rag_snapshot=prepared.rag,
+            operation_id=prepared.turn.operation_id,
+            expected_operation_id=prepared.turn.operation_id,
+            enforce_operation_owner=True,
+            expected_status="streaming",
+        )
+
+    def generate(self, prepared: PreparedChatTurn) -> str:
+        self._record_answer_call(prepared, "attempted")
+        return super().generate(prepared)
+
+    def stream(self, prepared: PreparedChatTurn, *, should_cancel=None) -> Iterator[str]:
+        def audited_stream() -> Iterator[str]:
+            self._record_answer_call(prepared, "attempted")
+            yield from super(ExternalDataPolicyChatService, self).stream(
+                prepared, should_cancel=should_cancel
+            )
+
+        return audited_stream()
+
+    async def stream_async(self, prepared: PreparedChatTurn) -> AsyncIterator[str]:
+        self._record_answer_call(prepared, "attempted")
+        async for token in super().stream_async(prepared):
+            yield token
+
+    def complete_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
+        self._record_answer_call(prepared, "completed")
+        return super().complete_turn(prepared, suffix)
+
+    def interrupt_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
+        self._record_answer_call(prepared, "interrupted")
+        return super().interrupt_turn(prepared, suffix)
+
+    def fail_turn(self, prepared: PreparedChatTurn, suffix: str = "") -> ChatTurn:
+        self._record_answer_call(prepared, "failed")
+        return super().fail_turn(prepared, suffix)

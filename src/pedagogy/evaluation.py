@@ -8,6 +8,7 @@ instead of a bare correct/incorrect flag.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Protocol
 from uuid import uuid4
@@ -54,6 +55,9 @@ class LLMSemanticEvaluator:
 
     def __init__(self, complete: Callable[..., str] = chat):
         self.complete = complete
+        self.provider_name = (
+            os.getenv("LLM_PROVIDER_PROFILE", "openai").strip().lower() or "openai"
+        )
 
     def evaluate(
         self,
@@ -117,6 +121,9 @@ class PedagogyEvalRun:
     semantic_result: SemanticEvaluation | None
     confidence: float
     final_decision: str
+    semantic_review_status: str = "not_needed"
+    semantic_review_provider: str = ""
+    semantic_review_data_categories: tuple[str, ...] = field(default_factory=tuple)
     reasons: tuple[str, ...] = field(default_factory=tuple)
     evaluator_version: str = EVALUATOR_VERSION
     prompt_version: str = SEMANTIC_PROMPT_VERSION
@@ -137,6 +144,7 @@ class PedagogyEvaluationService:
         state: LearningState,
         expected_concepts: tuple[str, ...] = (),
         evidence: tuple[str, ...] = (),
+        semantic_review_allowed: bool = True,
     ) -> PedagogyEvalRun:
         deterministic = evaluate_learner_response(learner_input, state=state)
         deterministic_payload = asdict(deterministic)
@@ -151,6 +159,7 @@ class PedagogyEvaluationService:
                 semantic_result=None,
                 confidence=1.0,
                 final_decision="reject",
+                semantic_review_status="not_needed",
                 reasons=(deterministic.reason,),
             )
 
@@ -164,7 +173,38 @@ class PedagogyEvaluationService:
                 semantic_result=None,
                 confidence=0.0,
                 final_decision="needs_semantic_review",
+                semantic_review_status="unavailable",
                 reasons=("semantic_evaluator_unavailable",),
+            )
+
+        provider = str(
+            getattr(
+                self.semantic_evaluator,
+                "provider_name",
+                type(self.semantic_evaluator).__name__,
+            )
+        )
+        semantic_categories = (
+            "learner_input",
+            "learning_objective",
+            "learning_protocol",
+            "expected_concepts",
+            "evidence_refs",
+        )
+        if not semantic_review_allowed:
+            return self._run(
+                learner_input=learner_input,
+                state=state,
+                expected_concepts=expected_concepts,
+                evidence=evidence,
+                deterministic_result=deterministic_payload,
+                semantic_result=None,
+                confidence=0.0,
+                final_decision="needs_semantic_review",
+                semantic_review_status="blocked_by_policy",
+                semantic_review_provider=provider,
+                semantic_review_data_categories=semantic_categories,
+                reasons=("semantic_review_blocked_by_external_data_policy",),
             )
 
         try:
@@ -185,6 +225,9 @@ class PedagogyEvaluationService:
                 semantic_result=None,
                 confidence=0.0,
                 final_decision="needs_semantic_review",
+                semantic_review_status="attempted_failed",
+                semantic_review_provider=provider,
+                semantic_review_data_categories=semantic_categories,
                 reasons=(f"semantic_evaluator_failed:{type(exc).__name__}",),
             )
         evidence_is_grounded = (
@@ -224,6 +267,9 @@ class PedagogyEvaluationService:
             semantic_result=semantic,
             confidence=semantic.confidence,
             final_decision="accept" if accepted else "reject",
+            semantic_review_status="completed",
+            semantic_review_provider=provider,
+            semantic_review_data_categories=semantic_categories,
             reasons=tuple(reasons),
         )
 
@@ -238,6 +284,9 @@ class PedagogyEvaluationService:
         semantic_result: SemanticEvaluation | None,
         confidence: float,
         final_decision: str,
+        semantic_review_status: str = "not_needed",
+        semantic_review_provider: str = "",
+        semantic_review_data_categories: tuple[str, ...] = (),
         reasons: tuple[str, ...],
     ) -> PedagogyEvalRun:
         return PedagogyEvalRun(
@@ -251,6 +300,9 @@ class PedagogyEvaluationService:
             semantic_result=semantic_result,
             confidence=confidence,
             final_decision=final_decision,
+            semantic_review_status=semantic_review_status,
+            semantic_review_provider=semantic_review_provider,
+            semantic_review_data_categories=semantic_review_data_categories,
             reasons=reasons,
         )
 

@@ -1,29 +1,44 @@
-# Interview Notes
+# Study Agent 项目表达与决策索引
+
+> 更新：2026-08-21
+> 本文件只用于项目介绍和决策导航，不拥有当前状态、架构或执行顺序。实时结论以 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 为准。
 
 ## 一句话介绍
 
-Study Agent 是一个本地优先的 AI 学习助手，重点在多 Provider 模型接入、长期记忆、上下文分层、来源追溯和工程稳定性。
+Study Agent 是一个本地优先的个人学习工作台：它把聊天、资料、理解验证和下一步收敛为可恢复、可验证、可追溯的学习状态，而不是长期堆积聊天记录或让多个角色各自维护一套“记忆真相”。
 
-## 技术难点
+## 当前可讲的工程主线
 
-1. **多模型 Provider 抽象** — 统一 OpenAI-compatible client 模式，支持 5+ 供应商切换，参数解析与 API 兼容性适配
-2. **长期记忆写入安全** — safe writer + preview/confirm 机制，防止不可逆的记忆污染
-3. **联网搜索来源追溯** — Feed registry / RSS 多源聚合 → URL safety matrix → 文章正文三层提取 → LLM digest → pipeline trace 全过程来源可回溯
-4. **Streamlit 重渲染性能优化** — 多层缓存策略、按模式批量落盘、主链路 token 预算控制
-5. **CI / Ruff / detect-secrets 工程检查** — 314 pytest tests、Ruff clean、mypy local clean、GitHub Actions workflow、detect-secrets 对未豁免发现硬阻断
+1. **单一学习真值** — SQLite 中的 Goal、Claim、Revision、SourceEvidence、UnderstandingEvidence 和 NextStep 各有明确 owner；Persona、教学评估和长期记忆不能覆盖学习真值。
+2. **证据可追溯** — 源码证据固定到 repository / commit / file / symbol / line；provider 状态、检索分数和 CI 结果不混入证据身份。
+3. **理解不能由 Agent 自证** — 只有显式 semantic closure 才能写入理解证据；跳过验证可以结束 Goal，但不能伪造 confirmed。
+4. **可恢复的长流程** — ResearchRun、LearningClosureRun、RagWriteRun 与 durable ResumeContext 使用服务端状态，而不是只依赖浏览器请求是否仍然存在。
+5. **外发真实性** — 联网搜索、历史消息、学习状态、长期记忆和本地证据是否实际外发由后端记录；失败或空结果不能伪装为已找到来源。
+6. **工程门禁** — pytest、RAG baseline、Ruff、detect-secrets、mypy baseline、前端测试/构建、三浏览器 Golden Journeys 和 real-stack gates 共同保护主链路。
 
-## 可讲亮点
+## 已冻结的 Grill 结论在哪里
 
-- 不是简单 Prompt demo，而是可配置、可测试、可追踪的 AI 应用工程项目
-- 上下文分层（fast / light / deep / archive）解决长对话场景下的 token 成本和记忆衰减
-- SSRF 防护在联网搜索场景中的工程实现
-- feed health / source trace 让联网资料入口可解释、可调试
-- 新闻轮次会保存 JSON + Markdown audit artifact，类似 Codex 任务产物，方便回看每一步证据和告警
-- pip-tools 依赖锁定 + 精确版本管控，保证构建可复现
+P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第二份：
+
+- [`../domain_models.md`](../domain_models.md)：领域对象、关系、生命周期和最小实体集；
+- [`../state_invariants.md`](../state_invariants.md)：学习真值、证据、验证、恢复、工具与持久化硬约束；
+- [`STATE_MODEL.md`](STATE_MODEL.md)：durable / ephemeral / derived / context 边界；
+- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：这些合同当前实现到哪里、证据是什么、下一步是否 GO。
+
+当前产品级决策同样只在状态 owner 维护：
+
+- 独立 Learner Model 页面：`STANDALONE NO-GO`；
+- GraphRAG：延期，不作为当前核心缺口；
+- 推断型长期画像自动写回：延期，只允许用户确认的偏好；
+- Android 实体手机验收：待真实设备与记录，不用自动化冒充；
+- G16 外发真值止血：窄修复已在 `codex/g16-privacy-truth-hotfix` 通过本地止血门；尚未提交、推送或取得该分支远程 CI，不能写成已交付。
+- G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结；唯一前置是先交付 G16 修复并取得远程 CI 全绿，随后按 ChatTurn/operation owner 路线实施，不新增 LocalRagRun。
 
 ## 展示边界
 
-- `mypy` 已接入 CI soft check，当前本地 `python -m mypy --explicit-package-bases src` clean；但 CI 配置仍是非阻断检查。
-- `performance_budget.py` 覆盖主要 chat / WeChat / news LLM 路径，辅助 LLM 调用仍需继续收口。
-- `article_fetcher.py` 负责真实网络读取前的 DNS/IP SSRF 校验；`link_resolver.py` 是网络无关的 URL 预检和跳转记录。
-- `detect-secrets` 已接入 CI，并通过解析扫描 JSON 的 `results` 对未豁免发现硬阻断；测试里的 Basic Auth 形态 URL 样例已显式 allowlist。
+- 不再把已移除的 Streamlit 入口、旧测试数量或旧路线图当作当前事实。
+- `PedagogyEvalRun` 是教学评估记录，不是学习者能力分数，也不是第二套长期画像。
+- `LearnerModelSnapshot` 当前是只读派生 API；没有独立 UI、写回路径或 mastery 百分比。
+- 实体手机、视觉对比度和真实屏幕阅读器验收仍需人工证据。
+- “仅当前问题”约束所有回答、教学评估和 embedding 调用；`allow_local_evidence` 不等于允许全量资料云端 embedding。
+- 最新 SHA、CI、缺口和下一步必须从 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 引用，避免本展示材料漂移。

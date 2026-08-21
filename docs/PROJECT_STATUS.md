@@ -1,7 +1,7 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-13
+> 更新：2026-08-21
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 CI 基线：`f69a305`（[CI #31703041709](https://github.com/2002yy/study-agent/actions/runs/31703041709) 全门禁通过：pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、53 条三浏览器 Golden Journeys、14 条 real-stack browser gates）。
+当前已验证 `main` 基线：`589169b`（[CI #31704003134](https://github.com/2002yy/study-agent/actions/runs/31704003134) 全门禁通过）；G15–G17 核心实现基线 `f69a305` 的 [CI #31703041709](https://github.com/2002yy/study-agent/actions/runs/31703041709) 同样通过 pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、53 条三浏览器 Golden Journeys 和 14 条 real-stack browser gates。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -408,11 +408,11 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
 | G14 导入与来源范围 | PARTIAL (P1) | 长期资料库、server-owned RagRun、来源范围、删除/重建确认已存在；仍缺每文件阶段与单文件重试、当前会话临时附件，以及临时附件的禁联网/禁云端/禁记忆/会话结束删除控制。 |
 | G15 会话转换 | COMPLETE (automation) / MANUAL VISUAL PENDING | 新建、切换、归档共用一个只读派生 transition guard；覆盖 chat generation、Memory preview/closure、partial ResearchRun 与 RagWrite，逐项说明停止、保留、继续或放弃的真实效果。归档只确认一次；从抽屉触发时先关闭来源抽屉，避免双 `aria-modal`。RagWrite 仍没有服务端取消能力，守卫明确说明其继续到真实终态而不冒充已取消。完整远程浏览器与 real-stack 矩阵已通过。 |
-| G16 外发数据与隐私 | PARTIAL (P1) | 后端继续唯一执行 web/context 策略，并在同一 `external_data_policy` 快照追加真实执行事实：是否发出搜索、实际历史消息数、学习状态/长期记忆上下文、本地证据片段数；EvidenceTrail 只读展示查询、provider 与这些类别。首次说明位于可滚动对话流，不使用悬浮遮挡，也不阻塞聊天操作。仍缺按会话记忆 ask 选择和附件级外发限制；旧 turn 无执行字段时明确显示“缺少本轮执行记录”，不反推假事实。 |
+| G16 外发数据与隐私 | LOCAL STOP-GATE COMPLETE / REMOTE PENDING (P1) | 窄修复分支已在 evaluator 前阻断 `question_only` / `recent_chat` 的外部语义复核；ChatTurn 按调用记录 purpose/provider/categories/count/result；外部 Chroma query/document embedding 在 provider/client 前 fail closed，RagWriteRun 保留本地激活并记录 `blocked_by_policy`；legacy UI 全部执行事实显示 unknown。全量本地 pytest 1051/1051、前端 336/336、构建和 Ruff 通过。分支尚未提交/推送，远程 CI 仍无证据。 |
 | G17 首次使用/可访问性 | PARTIAL (P1) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 仍固定；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
-当前未发现需要紧急止血的 P0 缺陷；G15 自动化切片已收口。仍有 4 组 P1：G16 按会话记忆/附件外发控制、G12 pre-answer/RAG 取消、G14 临时附件/每文件恢复、G17 输入键配置与人工可访问性验收。G4 历史分页和 G10 follow-up 复用属于 P2，不应抢占学习闭环与隐私。
+当前未发现传统远程利用或数据破坏型 P0。已确认的 **G16 P1 隐私真实性缺陷** 已在本地窄修复中止血，但没有 commit/push/远程 CI，故交付门仍为 NO-GO。唯一立即路线是先交付并验证该 G16 分支；远程 CI 全绿后进入 G12 pre-answer/RAG 取消，随后是 G14 临时附件/每文件恢复、G16 文档级授权产品面与 G17 人工可访问性验收；G4 历史分页和 G10 follow-up 复用仍属 P2。
 
 ### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
 
@@ -435,10 +435,120 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 ### 9.7 后续执行顺序
 
-1. **下一产品切片：G12 可取消的本地 RAG。** 先定义 pre-answer local RAG 的 cancel signal、终态与不提交边界；RagWrite 取消/回滚另立合同，不能只在前端丢弃响应冒充停止。
-2. **随后单独冻结 G14 临时附件合同。** 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试，再决定实现；不得复用长期资料库冒充临时生命周期。
-3. **G16 剩余隐私控制与 G17 人工可访问性验收。** 按会话记忆 ask 和附件级限制随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
-4. **继续延期 Android 实体手机验收。** Android 导出/部署配置完成前不启动，记录表未真实填写前不得标记完成。
-5. **Learner Model 独立 UI、GraphRAG 与长期画像写回仍不启动。** 它们不是当前核心可用性缺口，也不得创建第二套学习真值。
+1. **唯一立即步骤：交付 G16 隐私真值止血。** 本地修复与止血门已完成；下一门是显式路径 commit/push，并取得该分支远程 CI 全绿。未得到远程证据前不得写成已交付。
+2. **随后实施已冻结合同的 G12 可取消本地 RAG。** 使用 ChatTurn + operation owner、cooperative checkpoints、server single writer 和可观测终态，不创建第二套 LocalRagRun。
+3. **再单独冻结 G14 临时附件合同。** 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试；不得复用长期资料库冒充临时生命周期。
+4. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
+5. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G15 自动化切片、G16 外发真实性说明和 G17 全局错误语义已进入 main，并在 `f69a305` 完整远程 CI 全绿。下一产品切片为 G12 可取消的本地 RAG。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**同步基线 `main` 为 `589169b`，对应 CI #31704003134 全绿；本地分支 `codex/g16-privacy-truth-hotfix` 已完成 G16 窄止血并通过全量本地门，但尚未提交、推送或取得新 CI。G12 Grill 合同已冻结；在 G16 交付 CI 全绿前开始 G12 仍为 NO-GO。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+
+## 10. 2026-08-21 同步、仓库整理与下一切片门禁
+
+### 10.1 同步与整理审计
+
+- 本地 `main` 与 `origin/main` 均为 `589169b0852c23300b01cf51bd6fa98a080e445c`，`main...origin/main = 0/0`；本轮无需合并或改写历史。
+- 该 SHA 对应的远程 [CI #31704003134](https://github.com/2002yy/study-agent/actions/runs/31704003134) 已于 2026-08-13 完成且结论为 `success`。
+- 工作区没有已跟踪文件的既有改动；本地虚拟环境、Playwright 报告与门禁输出保留在磁盘，只通过 `.gitignore` 排除，不把用户产物当作仓库内容删除。
+- 失效 worktree 的实际路径已不存在，可只清理 Git 管理记录；远程历史分支不在本轮授权范围内，不删除。
+- 文档继续保持三层：`PROJECT_STATUS.md` 拥有当前事实和执行门；稳定合同文档拥有语义；`archive/` 和 `superpowers/` 只保留历史时间语义。
+- `INTERVIEW_NOTES.md` 已从陈旧的 Streamlit/旧测试数量介绍改为当前项目表达与 Grill 决策索引，但不成为第二个状态 owner。
+
+### 10.2 G12 已确认的实现事实
+
+- chat 流与 provider 生成阶段已有 browser abort / `should_cancel` 链路；ResearchRun 另有服务端 owner、取消请求和 durable `cancelled` 终态。
+- chat pre-answer preparation 仍会同步取得本地 RAG context；当前 local RAG retrieval 没有接收 cancel signal，也没有独立 durable run 可表达取消终态。
+- RagWriteRun 是资料写入/索引生命周期，不等于本次 chat 的只读 local RAG retrieval；它没有 cancel endpoint，必须另立事务和回滚合同。
+- 因此仅在前端丢弃响应，不能证明本地检索已停止，也不能标记服务端工作为 `cancelled`。
+
+### 10.3 已锁定边界
+
+本切片只讨论 **chat pre-answer 的只读本地 RAG 检索取消**。明确非目标：
+
+- 不顺带实现 RagWriteRun 取消或索引事务回滚；
+- 不实现 G14 临时附件、每文件重试或附件外发策略；
+- 不实现 G16 按会话记忆 ask、G10 follow-up run 继承、GraphRAG 或长期画像写回；
+- 不因客户端断开而删除已存在的长期资料、SourceEvidence、LearningTruth 或历史 ChatTurn；
+- 不用“前端不再显示结果”冒充服务端检索已停止。
+
+### 10.4 G12 / G16 最终 Grill 决策（1–24）
+
+Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决定已经锁定：
+
+1. **停止范围：**停止当前 ChatTurn 拥有的全部未完成工作，包括 ResearchRun、本地 RAG 和模型生成；不删除长期资料，不回滚与该 turn 无关且已完成的操作。
+2. **单一状态 owner：**在耗时准备前持久化 ChatTurn；`cancel_requested → cancelled/interrupted` 写入 ChatTurn，不新增 LocalRagRun 作为第二真值。检索函数只接收该 turn/operation 的 cooperative cancellation check。
+3. **未采用检索：**只保留取消阶段、query-plan 摘要、计时和结果数量；未采用 local chunks 不进入模型、LearningTruth、引用或自动重试复用。
+4. **响应时间：**UI 必须在点击后 200 ms 内同步显示“停止请求正在提交/已登记”；这不是服务端物理终止 SLA。每个检索阶段设置检查点，注入慢检索并记录从登记到真实终态的实测上限。
+5. **终态区分：**没有任何可见输出为 `cancelled`；已有回答 token 或联网来源预览为 `interrupted`，保留可见部分与本轮已采用资料。
+6. **单调 fence：**已接受取消的 operation 永远不能再提交 `completed`、调用后续模型或写学习真值；若 completed 已先原子提交，取消返回 `already_completed`。
+7. **统一接口：**`/chat` 与 `/chat/stream` 使用同一 turn cancellation semantics。前端不并行拼装 ResearchRun、浏览器 abort 和 ChatTurn 三份终态。
+8. **恢复语义：**cancelled 重发创建新 operation 并全新检索；interrupted continue 使用同一 turn 的已持久化 RAG snapshot、不得重跑检索；regenerate/retry 创建新 operation/child turn 并全新检索。新 operation 不继承旧取消标记。
+9. **协作式取消：**不承诺强杀线程/进程。当前同步 provider 调用可自然返回后丢弃，但 fence 必须阻止任何后续副作用。
+10. **会话转换：**取消登记后可立即切换、新建或关闭；归档与同会话新问题必须等待该 operation 终态。
+11. **最小持久化：**ChatTurn 记录 operation-scoped cancel timestamps、stage、reason 和 operation identity；延迟可派生，不保存未采用正文。任何“已接受取消仍可 completed/调用模型/写真值”均为 kill criterion。
+12. **明确 UI：**状态放在 turn bubble，不只用 toast；使用 `status`/`alert`、文本而非颜色，覆盖窄屏。浏览器 abort 本身不能显示“已停止”。固定文案区分提交中、停止中、慢收尾、cancelled、interrupted、already completed、请求失败、等待归档和归档失败。
+13. **覆盖复审修正：**服务端是 partial reply 唯一 writer；前端在已接受取消后不得再 `commitTurn`。生产 `ExternalDataPolicyChatService` 与基础 ChatService 必须共享 reservation/checkpoint/settlement shell，真实栈测试必须走生产 policy service。`cancelled` 加入 session detail、export、恢复与 consumer regression matrix；closure 仍只消费 completed。
+14. **兼容边界：**官方客户端必须预分配 handle 并可取消；未提供 handle 的 legacy 同步 `/chat` 请求中途不可取消，不伪装兼容。
+15. **持久归档队列：**`archive_after_cancel` 绑定 operation 并由服务端持久化；刷新、关闭、重启后仍执行。支持取消待归档；停止成功但归档失败要保留会话并显示独立错误。
+16. **优先级改写：**先完成窄 G16 隐私真值止血，再开始 G12。
+17. **限制策略下的教学评估：**`question_only` / `recent_chat` 不允许外部语义评估接收长期学习状态；先用本地 deterministic evaluation，明确记为受策略限制而未语义复核，不能伪装 pass/fail。
+18. **逐调用外发真值：**不新增外发 run；在 owner snapshot 中记录小型 `external_calls` 清单，包含 purpose、provider、实际数据类别/数量和结果，不存正文。UI 分开显示回答生成、教学评估、embedding 等用途。
+19. **历史记录：**增加执行记录版本；旧 turn 缺少语义评估调用证据时显示“历史记录粒度不足，学习评估外发状态未知”，不反向改写为 false。
+20. **身份与终态观测：**官方客户端预分配 cryptographically random `turn_id + operation_id`；取消用 `(turn_id, expected_operation_id)` CAS。Cancel POST 只确认请求登记，客户端通过 turn-status endpoint/poll 等待 durable 终态；迟到旧请求不能误杀同 turn 的 continuation。
+21. **文档 embedding 授权：**在建立文档级云处理授权前，任何可能离机的 embedding provider 都不得处理用户文档正文；operator 环境变量不等于用户同意。
+22. **外部 query 最小化：**未来即使明确允许外部 embedding，`question_only` / `recent_chat` 下也只可发送当前原始问题；包含学习目标/缺口的 `private_query` 只允许本地使用。
+23. **fail-closed 体验：**隐私策略阻止远程 embedding 时，本地解析、关键词索引和本地向量阶段仍可完成；远程阶段记录 `blocked_by_policy`。UI 不静默降级后继续显示“增强语义”。
+24. **复用现有 owner：**聊天回答/教学评估/query embedding 的外发事实归 ChatTurn；文档正文 embedding 归现有 RagWriteRun stage，不创建新审计实体。
+
+### 10.5 明确拒绝的替代方案
+
+- 拒绝把浏览器 `AbortController`、连接断开或 UI 不再显示结果当作服务端 cancelled。
+- 拒绝只用 turn ID 取消；同一 turn 可 continuation，迟到请求会误杀新 operation。
+- 拒绝让前端和服务端同时提交 partial reply，或由前端猜测 durable 终态。
+- 拒绝新增 LocalRagRun、外发审计 run 或另一套取消状态机。
+- 拒绝在 cancelled retry 中自动复用未采用 chunks；拒绝 continuation 重新执行 route/RAG/web preparation。
+- 拒绝把 `allow_local_evidence` 扩张解释为“允许把整个资料库上传给 embedding provider”。
+- 拒绝把 operator 配置、API key 或 provider 可用性解释成用户隐私授权。
+- 拒绝对旧审计记录进行无法证明的 backfill；未知必须显示为未知。
+- 拒绝承诺无法由 cooperative checkpoint 保证的固定服务端终止毫秒数。
+
+### 10.6 完成门与验收矩阵
+
+**G16 止血门：**
+
+- 主动学习状态 + `question_only` / `recent_chat` 的真实 production policy path 中，semantic evaluator 不收到 objective、protocol、expected concepts、历史 evidence 或长期记忆；执行记录与捕获调用参数一致。
+- 回答模型、教学评估、query embedding、document embedding 分用途记录 actual data categories；旧记录显示 unknown，不显示假 false。
+- `Chroma + external embedding` 配置下，未授权文档正文不离机；RagWriteRun 记录 `blocked_by_policy`，本地可完成阶段不被伪装成失败或增强语义成功。
+- 任一限制策略仍能把禁止数据送入任何模型/provider，或 EvidenceTrail 与实际调用不一致：**NO-GO**。
+
+**G12 自动门：**
+
+- 覆盖 cancel before reservation、reservation race、每个检索/facet/backend checkpoint、检索后模型前、首 token 前、首 token 后、completion race、continuation/retry、disconnect、restart recovery、archive queue/failure/cancel。
+- 同步 `/chat` 与异步 `/chat/stream` 共享状态语义；基础服务和 production policy service 都通过，real-stack 必须走后者。
+- 证明 accepted cancel 的旧 operation 无法 complete、无法调用后续模型、无法写 LearningTruth/引用；前端不调用 partial commit fallback。
+- `cancelled` consumer regression 覆盖 session detail、历史恢复、export、closure、LearningState 和窄屏 UI。
+
+**G12 人工与时序门：**
+
+- 点击后 200 ms 内 turn bubble 明确确认 UI 已接收操作；慢检索场景记录 cancel 登记到每个 checkpoint/最终终态的实际最大值。
+- desktop、narrow landscape、mobile viewport 验证状态文本、aria live semantics、离开会话、等待归档、取消归档和归档失败。
+- 不以 mock sleep 的固定断言或浏览器请求被 abort 代替真实服务端终态记录。
+
+### 10.7 GO / NO-GO 与唯一下一步
+
+- **Grill coverage：COMPLETE。** 目标、边界、非目标、恢复、兼容、隐私、失败语义和验收门已冻结，无剩余产品选择要求实现者自行决定。
+- **G16 local implementation/stop gate：GO。** 窄修复和本地全量证据完整；没有发现禁止数据到达测试 provider、legacy 假 false 或本地索引回归。
+- **G16 delivery：NO-GO / AUDIT REQUIRED。** 当前改动未 commit/push，没有该分支远程 CI；不得把本地通过改写成已交付。
+- **G12 implementation：NO-GO（仅剩 G16 交付门）。** 合同完整；G16 分支远程 CI 全绿后转 GO，不再进行产品选择 Grill。
+- **唯一下一步：**经授权后只 stage 本切片明确路径，commit/push `codex/g16-privacy-truth-hotfix` 并等待完整 CI；若 CI 绿，下一切片立即是 G12 ChatTurn cooperative cancellation，之后才进入 G14。
+
+### 10.8 G16 窄修复实测证据
+
+- production policy 路径使用 active LearningState + explicit learn task 覆盖 `question_only`、`recent_chat`、`allow_local_evidence`：前两者 evaluator 调用数为 0，结果为 `needs_semantic_review / blocked_by_policy`；允许策略仍实际调用并记录 provider/categories/count/result。
+- Chroma 外部 provider 的 document/query 测试在取 collection/client 与调用 embed/embed_many 前抛出 policy error；捕获的 provider 输入与 collection 调用均为空。Chroma + local embedding 的 upsert/query 正常控制仍通过。
+- RagWriteRun 在外部 document embedding 被阻止时仍 `completed + activated=true`，vector stage 为 `blocked_by_policy`，本地索引可读取；真实 vector failure 仍保持 partial success 且不激活。
+- ChatTurn `external_data_audit_version=2` 逐调用记录 answer generation、semantic evaluation、query embedding；旧 audit version 的 web/history/local evidence/learning state/memory 均显示“历史记录粒度不足，实际状态未知”。记录只含类别与数量，不含正文/query。
+- `.venv\Scripts\python.exe -m pytest -q`：**1051 passed**。
+- `npm test`：**88 files / 336 tests passed**；`npm run build`：通过，仅保留既有的 >500 kB bundle warning。
+- `ruff check .`：通过；mypy baseline：current 122 / baseline 128 / new 0；detect-secrets：0 个 finding 文件；`git diff --check`：通过。
+- 未执行 commit、push 或远程 CI；这是当前唯一未闭合证据。

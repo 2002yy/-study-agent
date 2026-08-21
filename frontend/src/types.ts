@@ -48,6 +48,10 @@ export type RagIndexResponse = {
     chunks?: number;
     detail?: string;
     backend?: Record<string, unknown>;
+    provider?: string;
+    purpose?: string;
+    audit_version?: number;
+    data_categories?: string[];
     index_path?: string;
   }>;
   index_version?: number;
@@ -123,6 +127,8 @@ export type ExternalDataPolicySnapshot = {
   memory_allowed: boolean;
   local_evidence_to_model_allowed: boolean;
   reason: string;
+  external_data_audit_version?: number;
+  external_calls?: ExternalDataCallAudit[];
   web_search_performed?: boolean;
   history_sent_to_model?: boolean;
   history_message_count?: number;
@@ -130,6 +136,16 @@ export type ExternalDataPolicySnapshot = {
   memory_context_sent_to_model?: boolean;
   local_evidence_sent_to_model?: boolean;
   local_evidence_chunk_count?: number;
+};
+
+export type ExternalDataCallAudit = {
+  call_id: string;
+  purpose: string;
+  provider: string;
+  data_categories: string[];
+  data_counts?: Record<string, number>;
+  status: string;
+  result?: string;
 };
 
 export type DrawerId =

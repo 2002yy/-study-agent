@@ -8,6 +8,7 @@ from typing import Any, Literal
 from src.rag import build_rag_context, format_rag_sources
 from src.rag.index import DEFAULT_RAG_INDEX_PATH, load_rag_index
 from src.rag.schema import RagSearchResult
+from src.rag.backends import ExternalEmbeddingPolicyError
 from src.rag.service import retrievable_rag_index
 from src.rag.source_coverage import search_documents_with_adaptive_source_coverage
 from src.rag.sufficiency import assess_evidence_sufficiency
@@ -317,6 +318,22 @@ def retrieve_local_knowledge(
             debug=debug,
             attempts=tuple(attempts),
             rewritten_query=rewritten_query,
+        )
+    except ExternalEmbeddingPolicyError as exc:
+        return LocalKnowledgeResult(
+            status="error",
+            query=query,
+            retrieval_mode=retrieval_mode,
+            reason="external_embedding_blocked_by_policy",
+            debug={
+                "external_embedding": {
+                    "status": "blocked_by_policy",
+                    "provider": exc.provider,
+                    "purpose": exc.purpose,
+                    "data_categories": ["retrieval_query"],
+                }
+            },
+            attempts=tuple(attempts),
         )
     except Exception as exc:
         return LocalKnowledgeResult(

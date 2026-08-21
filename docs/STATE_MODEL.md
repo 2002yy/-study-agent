@@ -2,7 +2,7 @@
 
 > 本文定义“什么状态由谁拥有、是否持久化、能否覆盖”。当前进度看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。
 >
-> 2026-08-09：已纳入 P2-D GrillMe 决策 1–49 与 v1 implementation cut。
+> 2026-08-21：已纳入 P2-D GrillMe 决策 1–49、G12/G16 最终 Grill 决策 1–24 与 v1 implementation cut。
 
 ## 1. 状态分类
 
@@ -271,3 +271,33 @@ chat / retrieval
 P2-D v1 使用规范化关系表，目标 schema 见 [`../domain_models.md`](../domain_models.md)。禁止用通用 JSON blob 把新学习真值继续塞回 `chat_threads.learning_state`。
 
 当前 `RuntimeDatabase` 的顺序迁移/ledger/rollback 机制继续作为 schema owner；新 P2-D 表必须通过同一受控迁移链或明确的单一 component migration owner 引入，不能另起第二套数据库初始化规则。
+
+## 18. ChatTurn operation / cancellation state
+
+ChatTurn 是 chat 取消与中断的唯一 durable owner；客户端 operation registry 和 HTTP 连接状态只是交互/传输状态。
+
+```text
+client preallocates turn_id + operation_id
+→ server reserves ChatTurn before expensive preparation
+→ cancel_requested(operation_id)
+→ checkpoint settles cancelled | interrupted
+→ same-operation completion is fenced forever
+```
+
+- cancel timestamps、stage、reason 必须与目标 operation 绑定；旧 operation 的 cancel 字段不能污染 continuation 的新 operation；
+- 无可见输出为 cancelled；已有可见回答或来源为 interrupted；completed 先提交时只能观测 already_completed；
+- Cancel POST 表达“请求已登记”，turn-status read 表达最终事实；
+- 未采用 local RAG chunks 保持 ephemeral，不创建 LocalRagRun，不进入模型、证据、LearningTruth 或 retry reuse；
+- continuation 复用同 Turn 已采用 snapshot，retry/regenerate 产生 child Turn/new retrieval；
+- `archive_after_cancel` 是 server-owned durable intent，不是 React callback/ref。
+
+## 19. External-call audit state
+
+外发授权和外发事实分开保存：policy decision 表达“允许什么”，`external_calls` 表达“实际发生了什么”。
+
+| 调用 owner | 调用用途 | 最小记录 |
+|---|---|---|
+| ChatTurn | answer generation、pedagogy evaluation、query embedding | purpose、provider、data categories/counts、result、audit version |
+| RagWriteRun stage | document embedding | provider、document/chunk counts、result/`blocked_by_policy`、audit version |
+
+调用审计不保存 prompt、query 或文档正文。旧 Turn 没有足够调用级证据时，派生 UI 必须显示 unknown；不得从策略布尔值推导 false。`question_only` / `recent_chat` 下，外部教学评估不得读取长期学习状态；外部 query embedding 最多使用当前原始问题，private query 只在本地使用。未建立文档级云处理授权前，document embedding 只能本地执行。

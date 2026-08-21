@@ -10,7 +10,7 @@ from src.api import app
 from src.application.rag_run_service import RagRunService
 from src.infrastructure.sqlite.database import RuntimeDatabase
 from src.repositories.rag_repository import RagRepository
-from src.rag.backends import VectorBackendStatus
+from src.rag.backends import ExternalEmbeddingPolicyError, VectorBackendStatus
 from src.rag.index import load_rag_index
 
 
@@ -26,6 +26,16 @@ class _FailingVectorBackend:
 
     def upsert_index(self, _index):
         raise RuntimeError("simulated dense index failure")
+
+
+class _PolicyBlockedVectorBackend:
+    name = "external"
+
+    def upsert_index(self, _index):
+        raise ExternalEmbeddingPolicyError(
+            provider="external-test",
+            purpose="document_embedding",
+        )
 
 
 def test_query_upload_and_rebuild_have_independent_durable_runs(tmp_path):
@@ -165,6 +175,37 @@ def test_required_vector_failure_does_not_activate_candidate(
     assert state["active_version"] == initial.index_version
     assert state["staging_version"] is None
     assert state["status"] == "failed"
+
+
+def test_policy_blocked_external_embedding_keeps_local_index_and_audits_stage(
+    tmp_path, monkeypatch
+):
+    repository = RagRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    service = RagRunService(repository)
+    index_path = tmp_path / "rag.json"
+    document = tmp_path / "private.md"
+    document.write_text("private local evidence", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.rag.service.get_vector_backend_from_env",
+        lambda: _PolicyBlockedVectorBackend(),
+    )
+
+    run = service.index(
+        [document],
+        mode="rebuild",
+        index_path=index_path,
+        max_chars=200,
+        overlap_chars=0,
+    )
+
+    vector = next(stage for stage in run.result["stages"] if stage["name"] == "vector")
+    assert run.status == "completed"
+    assert run.result["activated"] is True
+    assert vector["status"] == "blocked_by_policy"
+    assert vector["audit_version"] == 1
+    assert vector["provider"] == "external-test"
+    assert vector["data_categories"] == ["document_chunks"]
+    assert load_rag_index(index_path).documents[0].source_path == str(document)
 
 
 def test_vector_failure_does_not_claim_document_deletion(tmp_path, monkeypatch):

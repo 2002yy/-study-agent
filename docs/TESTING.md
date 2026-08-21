@@ -210,3 +210,51 @@ P2-D v1 只验证当前学习 surface，不新建管理后台：
 - archive 文档不得被当作 current owner；
 - 实现状态与设计合同必须区分，禁止把“frozen design”写成“already shipped”；
 - P2-D-2 / D-3 / D-4 的 scope、non-goal、验收只在 `PROJECT_STATUS.md` 维护当前执行状态，稳定合同回写 canonical docs。
+
+## 12. G12 ChatTurn cancellation 必测
+
+### 12.1 Owner / race / terminal state
+
+- 官方客户端在发送前生成随机 `turn_id + operation_id`，服务端在耗时 preparation 前 reserve ChatTurn；
+- cancel-before-reservation 的短 race 进行有界等待，不用瞬时 404 丢失用户意图；
+- cancel endpoint 使用 `(turn_id, expected_operation_id)` CAS；迟到旧 cancel 不能影响 continuation 的新 operation；
+- cancel request 与 completed 竞争只有一个原子赢家：accepted cancel 后永不 completed；completed 先提交则返回 already_completed；
+- cancel POST 只确认登记，turn-status read/poll 最终观测 cancelled/interrupted/already completed；
+- disconnect、refresh、server restart 后 durable 状态一致，不由前端重建第二真值。
+
+### 12.2 Checkpoint / side-effect fence
+
+- base search、每个 facet/adaptive search、lexical/vector/backend、rerank、候选合并、Evidence build、model call、final commit 前后都有检查点；
+- cancellation exception 不被 retrieval broad exception 吞掉；
+- accepted cancel 后禁止调用下一 provider、禁止写引用/LearningTruth/committed learning state、禁止 complete；
+- 同步 provider 不可强杀时允许自然返回，但结果必须丢弃；
+- production `ExternalDataPolicyChatService` 与基础 ChatService 共享 lifecycle shell，real-stack 测试必须走 production service；
+- 前端在 accepted cancel 后不调用 `commitTurn`，server 是 partial reply 唯一 writer。
+
+### 12.3 Recovery / consumers / archive
+
+- 无可见输出 → cancelled；已有 token 或 source preview → interrupted；
+- interrupted continue 复用同 Turn adopted RAG snapshot 且不重跑 retrieval/web；retry/regenerate/new send 使用新 operation/new retrieval；
+- cancelled 出现在 session detail/export 中但不提供 continue；closure/learning commit 仍只消费 completed；
+- `archive_after_cancel` 持久化并绑定 operation，覆盖 refresh/close/restart、取消待归档、归档失败保留会话；
+- sync `/chat` 与 async `/chat/stream` 状态语义一致；无 handles 的 legacy sync 路径明确不可中途取消。
+
+### 12.4 UI / timing evidence
+
+- 点击停止后 200 ms 内在 turn bubble 同步显示请求提交/登记状态；不能由浏览器 abort 显示“已停止”；
+- 注入慢检索，记录登记到每个 checkpoint 和 durable 终态的实测最大值；不把 mock sleep 或固定毫秒断言冒充服务端停止上限；
+- desktop、narrow landscape、mobile viewport 覆盖停止中、慢收尾、cancelled、interrupted、already completed、请求失败、等待归档、取消归档和归档失败；
+- 状态使用文本与正确 live-region semantics，不只靠 toast 或颜色。
+
+## 13. G16 External-data truth 必测
+
+- 使用 active LearningState + explicit learn task，分别运行 `question_only`、`recent_chat`、`allow_local_evidence`；不能只用会跳过 semantic evaluator 的 quick-answer 用例；
+- 限制策略下捕获 semantic evaluator 参数，断言 objective/protocol/expected concepts/evidence/long-term memory 未发送；结果记录 policy-blocked semantic review，而非假 pass/fail；
+- `external_calls` 分用途覆盖 answer generation、pedagogy evaluation、query embedding，记录与捕获 provider 参数一致且不保存正文；
+- 旧 audit version 没有调用级证据时 UI 显示 unknown；不得从 `memory_allowed=false` 推导“学习状态未发送”；
+- `Chroma + external embedding` 测试捕获 query/chunk inputs：限制策略下 private query 不外发，未有文档级授权时 document chunks 不外发；
+- RagWriteRun 保留可安全完成的 local stages，并把 remote embedding 记录为 `blocked_by_policy`；设置 UI 不得继续声称增强语义成功；
+- EvidenceTrail 分开显示回答、教学评估、query/document embedding 的 provider 与数据类别，不泄露正文；
+- 任一禁止数据实际到达 provider、或执行记录与实际调用不一致，整批结论为 NO-GO。
+
+2026-08-21 本地止血门实测：pytest 1051/1051；前端 88 files、336/336；production build、`ruff check .`、mypy baseline（122/128，new 0）和 detect-secrets（0 finding files）通过。覆盖 active learn 的 `question_only` / `recent_chat` 零 evaluator 调用、允许策略正常调用、external Chroma query/chunk 零 provider 输入、RagWriteRun `blocked_by_policy + local activated`、ChatTurn 逐调用审计和 legacy 全 unknown。该证据尚无对应 commit/push/远程 CI，只能判定 local stop gate GO，不能判定已交付。

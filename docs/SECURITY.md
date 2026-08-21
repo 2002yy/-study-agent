@@ -63,3 +63,21 @@ The intentional Basic Auth-shaped URL fixture in `tests/test_url_normalizer.py` 
 | **Backup** | Automatic timestamped backup before overwrite |
 | **File locking** | Retry on `PermissionError` (up to 8 attempts) |
 | **Cleanup** | `try/finally` guarantees temp file cleanup |
+
+## Model Context and External-Call Truth
+
+Cloud-context policy applies to every model/provider boundary, not only the final answer prompt:
+
+- answer generation;
+- pedagogy semantic evaluation;
+- query embedding;
+- document embedding;
+- future provider calls that receive user or learning data.
+
+`question_only` and `recent_chat` do not authorize sending durable learning objectives, protocol, confirmed points, expected concepts, prior evidence, long-term memory, or private retrieval plans to a semantic evaluator. When policy blocks semantic review, the system may run deterministic local evaluation and must record that semantic review was policy-blocked; it cannot report pass/fail as if review occurred.
+
+Policy decisions and execution facts are separate. A false policy flag is not evidence that no call occurred. ChatTurn records call-level purpose/provider/data categories/count/result for answer, pedagogy and query embedding; RagWriteRun records document embedding. Records do not persist prompt, query, or document bodies. Legacy records without call-level evidence display unknown rather than a fabricated false.
+
+External document embedding requires explicit document-level cloud-processing authorization. `allow_local_evidence`, an operator environment variable, a configured API key, or provider availability is insufficient consent. Without authorization, external embedding fails closed while safe local parsing/index stages may continue and report `blocked_by_policy` for the blocked stage.
+
+Current hotfix behavior is intentionally stricter than a future consent UI: no production caller can authorize external query or document embedding yet. Chroma with a non-local embedding provider is blocked before collection/client access and before provider input. Adding a document-level consent flow is a separate G14/G16 product slice; it must not be introduced as an environment-variable bypass.

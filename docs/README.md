@@ -1,6 +1,6 @@
 # Study Agent 文档索引与治理
 
-> 更新：2026-08-13
+> 更新：2026-08-21
 >
 > **唯一进度入口：[`PROJECT_STATUS.md`](PROJECT_STATUS.md)。** 当前事实、证据、缺口和执行顺序只在该文件维护。
 
@@ -88,6 +88,20 @@ docs/WEB_SEARCH_SETUP.md
 → docs/PROJECT_STATUS.md（当前实测证据）
 → docs/NEWS_PIPELINE.md（仅 NewsRun 专项）
 ```
+
+核对 Grill 结论与实现授权：
+
+```text
+docs/PROJECT_STATUS.md（当前决策、GO/NO-GO、下一切片）
+→ domain_models.md（已冻结领域语义）
+→ state_invariants.md（不可突破的硬边界）
+→ docs/STATE_MODEL.md（状态 owner 与持久化边界）
+→ docs/RAG.md（检索取消与 embedding 边界）
+→ docs/SECURITY.md（逐调用外发与授权边界）
+→ docs/TESTING.md（完成门与失败矩阵）
+```
+
+Grill 的逐题对话不是长期事实源。访谈完成后，只把最终决定、明确拒绝的替代方案、约束和验收门写回以上 owner；未决问题保留为 `AUDIT REQUIRED / NO-GO`，不得由实现者自行补齐。
 
 ## 6. 永久治理规则
 

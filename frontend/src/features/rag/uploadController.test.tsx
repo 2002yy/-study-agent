@@ -77,4 +77,39 @@ describe("useUploadController", () => {
     expect(apiMocks.deleteKnowledgeDocument).toHaveBeenCalledWith("hash");
     expect(apiMocks.loadKnowledgeDocuments).toHaveBeenCalled();
   });
+
+  it("keeps local readiness explicit when external embedding is blocked", async () => {
+    apiMocks.createRagWriteRun.mockResolvedValue({
+      ...writeRun,
+      result: {
+        ...writeRun.result,
+        stages: [
+          { name: "local", status: "completed" },
+          {
+            name: "vector",
+            status: "blocked_by_policy",
+            provider: "openai:text-embedding-3-small",
+          },
+          { name: "activation", status: "completed" },
+        ],
+      },
+    });
+    const { result } = renderHook(() =>
+      useUploadController({
+        setActiveRunId: vi.fn(),
+        setOperationError: vi.fn(),
+        onChanged: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.upload([new File(["doc"], "doc.md")]);
+    });
+
+    expect(result.current.flowPhase).toBe("ready");
+    expect(result.current.status).toContain("外部增强已按策略阻止");
+    expect(result.current.detail).toContain(
+      "未向外部 provider openai:text-embedding-3-small 发送资料",
+    );
+  });
 });

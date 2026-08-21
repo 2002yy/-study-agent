@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.rag.backends import VectorBackendStatus
+from src.rag.backends import (
+    ExternalEmbeddingPolicyError,
+    VectorBackendStatus,
+    embedding_provider_is_external,
+)
 from src.rag.embeddings import EmbeddingProvider, LocalHashEmbeddingProvider
 from src.rag.schema import EVIDENCE_STATUS_ACTIVE, RagChunk, RagIndex, RagSearchResult
 
@@ -71,6 +75,11 @@ class ChromaVectorBackend:
         )
 
     def upsert_index(self, index: RagIndex) -> None:
+        if embedding_provider_is_external(self.embedding_provider.name):
+            raise ExternalEmbeddingPolicyError(
+                provider=self.embedding_provider.name,
+                purpose="document_embedding",
+            )
         collection = self._collection()
         ids = [chunk.chunk_id for chunk in index.chunks]
         existing = collection.get(include=[])
@@ -97,6 +106,11 @@ class ChromaVectorBackend:
         top_k: int = 5,
         min_score: float = 0.05,
     ) -> list[RagSearchResult]:
+        if embedding_provider_is_external(self.embedding_provider.name):
+            raise ExternalEmbeddingPolicyError(
+                provider=self.embedding_provider.name,
+                purpose="query_embedding",
+            )
         _ = index
         if top_k <= 0:
             return []

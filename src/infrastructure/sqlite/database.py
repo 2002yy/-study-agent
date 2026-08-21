@@ -10,7 +10,7 @@ from typing import Callable
 from src.infrastructure.sqlite.learning_semantic_schema import LEARNING_SEMANTIC_MIGRATION_V18
 from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -436,6 +436,17 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
     ),
     (17, LEARNING_TRUTH_MIGRATION_V17),
     (18, LEARNING_SEMANTIC_MIGRATION_V18),
+    (
+        19,
+        """
+        ALTER TABLE pedagogy_eval_runs
+            ADD COLUMN semantic_review_status TEXT NOT NULL DEFAULT 'legacy_unknown';
+        ALTER TABLE pedagogy_eval_runs
+            ADD COLUMN semantic_review_provider TEXT NOT NULL DEFAULT '';
+        ALTER TABLE pedagogy_eval_runs
+            ADD COLUMN semantic_review_data_categories TEXT NOT NULL DEFAULT '[]';
+        """,
+    ),
 )
 
 

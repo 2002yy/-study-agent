@@ -42,6 +42,25 @@ def test_ambiguous_claim_requires_semantic_review_when_provider_is_absent():
     )
     assert run.final_decision == "needs_semantic_review"
     assert run.confidence == 0.0
+    assert run.semantic_review_status == "unavailable"
+
+
+def test_policy_blocked_semantic_review_does_not_call_provider():
+    semantic = FakeSemanticEvaluator(SemanticEvaluation(reasoning_complete=True))
+    run = PedagogyEvaluationService(semantic).evaluate_learner(
+        learner_input="所以每次范围减半，因为剩余规模变成之前的一半。",
+        state=LearningState(
+            objective="PRIVATE OBJECTIVE",
+            protocol="socratic_rediscovery",
+        ),
+        expected_concepts=("PRIVATE CONCEPT",),
+        semantic_review_allowed=False,
+    )
+
+    assert semantic.calls == 0
+    assert run.final_decision == "needs_semantic_review"
+    assert run.semantic_review_status == "blocked_by_policy"
+    assert run.semantic_result is None
 
 
 def test_semantic_result_must_be_confident_complete_and_evidence_grounded():

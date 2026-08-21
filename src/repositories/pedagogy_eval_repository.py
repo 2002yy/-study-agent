@@ -30,8 +30,9 @@ class PedagogyEvalRepository:
                 id, thread_id, turn_id, learner_input, objective, protocol,
                 expected_concepts, evidence, deterministic_result, semantic_result,
                 confidence, final_decision, reasons, evaluator_version,
-                prompt_version, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                prompt_version, schema_version, semantic_review_status,
+                semantic_review_provider, semantic_review_data_categories, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run.id,
@@ -50,6 +51,9 @@ class PedagogyEvalRepository:
                 run.evaluator_version,
                 run.prompt_version,
                 run.schema_version,
+                run.semantic_review_status,
+                run.semantic_review_provider,
+                _dump(run.semantic_review_data_categories),
                 created_at,
             ),
         )
@@ -104,6 +108,11 @@ def _from_row(row: sqlite3.Row) -> PedagogyEvalRun:
         semantic_result=semantic,
         confidence=float(row["confidence"]),
         final_decision=row["final_decision"],
+        semantic_review_status=row["semantic_review_status"],
+        semantic_review_provider=row["semantic_review_provider"],
+        semantic_review_data_categories=tuple(
+            json.loads(row["semantic_review_data_categories"])
+        ),
         reasons=tuple(json.loads(row["reasons"])),
         evaluator_version=row["evaluator_version"],
         prompt_version=row["prompt_version"],
