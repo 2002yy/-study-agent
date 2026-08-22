@@ -29,6 +29,7 @@ import {
 } from "../single-chat/chatHistory";
 import { evidenceFromResponse, evidenceFromSessionTurns, pedagogySummaryFromSnapshot } from "../evidence/evidenceHelpers";
 import { phaseTrail } from "../pedagogy/pedagogyLabels";
+import { turnStatusCopy } from "./turnStatusCopy";
 
 const WEB_CONSENT_MARKER = "__STUDY_AGENT_WEB_CONSENT__";
 
@@ -242,10 +243,17 @@ export function useChatController(options: ControllerOptions) {
     activeOperationIdRef.current = activeOperationId;
     cancelledSettledRef.current = false;
     cancelMarkRef.current = (status: string, partial?: string) => {
+      const notice = turnStatusCopy(status) ?? status;
       setMessages((current) =>
         current.map((message, index) => {
           if (index === userIndex) {
-            return { ...message, transient: true, turnId: activeTurnId || message.turnId, turnStatus: status };
+            return {
+              ...message,
+              transient: true,
+              turnId: activeTurnId || message.turnId,
+              turnStatus: status,
+              cancelNotice: notice,
+            };
           }
           if (index === assistantIndex) {
             return {
@@ -254,6 +262,7 @@ export function useChatController(options: ControllerOptions) {
               transient: true,
               turnId: activeTurnId || message.turnId,
               turnStatus: partial ? "interrupted" : status,
+              cancelNotice: notice,
             };
           }
           return message;

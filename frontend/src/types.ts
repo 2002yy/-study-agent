@@ -162,6 +162,9 @@ export type ChatMessage = {
   transient?: boolean;
   turnId?: string;
   turnStatus?: string;
+  // G12: cancellation lifecycle copy, written only by the cooperative cancel
+  // flow. Never rendered for plain aborts/disconnects or restored history.
+  cancelNotice?: string;
   parentTurnId?: string | null;
   evidence?: TurnEvidence;
 };

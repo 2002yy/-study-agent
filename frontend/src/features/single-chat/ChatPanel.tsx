@@ -35,7 +35,6 @@ import { EvidenceTrail } from "../evidence/EvidenceTrail";
 import { ExtensionLauncher } from "../extensions/ExtensionLauncher";
 import { RAG_UPLOAD_HELP_TEXT } from "../rag/uploadContract";
 import { roleLabel } from "../roles/roleCatalog";
-import { turnStatusCopy, turnStatusTone } from "../chat/turnStatusCopy";
 import type { SemanticSessionRow } from "../sessions/sessionNavigation";
 import {
   TURN_TASK_INTENT_OPTIONS,
@@ -374,8 +373,7 @@ export function ChatPanel(props: ChatPanelProps) {
             const avatarRole = message.avatarRole ?? (message.role === "user" ? "user" : "auto");
             const label = message.role === "user" ? "你" : roleLabel(avatarRole);
             const currentCopyState = messageCopy?.index === index ? messageCopy.state : "idle";
-            const statusNotice = turnStatusCopy(message.turnStatus);
-            const statusTone = turnStatusTone(message.turnStatus);
+            const cancelNotice = message.cancelNotice ?? null;
             return (
               <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
                 <RoleAvatar fallback={message.role === "user" ? "user" : "assistant"} roleId={avatarRole} />
@@ -392,13 +390,9 @@ export function ChatPanel(props: ChatPanelProps) {
                       {currentCopyState === "success" ? "已复制" : currentCopyState === "error" ? "复制失败" : "复制"}
                     </button>
                   ) : null}
-                  {statusNotice ? (
-                    <p
-                      aria-live={statusTone === "error" ? "assertive" : "polite"}
-                      className={`turn-status-line tone-${statusTone ?? "pending"}`}
-                      role={statusTone === "error" ? "alert" : "status"}
-                    >
-                      {statusNotice}
+                  {cancelNotice ? (
+                    <p aria-live="polite" className="turn-status-line tone-pending" role="status">
+                      {cancelNotice}
                     </p>
                   ) : null}
                   <MarkdownMessage content={message.content} />
