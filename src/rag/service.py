@@ -686,7 +686,13 @@ def search_documents_with_debug(
     rerank_top_n: int | None = None,
     rerank_latency_budget_ms: int | None = None,
     rerank_cost_budget: float | None = None,
+    should_cancel: Any = None,
 ) -> RagSearchDiagnostics:
+    if should_cancel is not None:
+        from src.rag.cancellation import RetrievalCancelled
+
+        if should_cancel():
+            raise RetrievalCancelled(stage="search_entry")
     active = retrievable_rag_index(index)
     started = time.perf_counter()
     results, post_filter, reranker_stage = _search_documents_with_stats(
@@ -703,6 +709,11 @@ def search_documents_with_debug(
         rerank_latency_budget_ms=rerank_latency_budget_ms,
         rerank_cost_budget=rerank_cost_budget,
     )
+    if should_cancel is not None:
+        from src.rag.cancellation import RetrievalCancelled
+
+        if should_cancel():
+            raise RetrievalCancelled(stage="post_search")
     elapsed_ms = (time.perf_counter() - started) * 1000
     debug = build_rag_debug(
         active,

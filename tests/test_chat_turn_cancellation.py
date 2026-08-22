@@ -642,3 +642,110 @@ def test_concurrent_cancel_during_slow_retrieval(tmp_path):
     turn = repository.get_chat_turn("turn_slow")
     assert turn.status == "cancelled"
     assert turn.cancel_stage in {"web_tools", "retrieval"}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: retrieval-layer cancellation propagation (RAG checkpoints)
+# ---------------------------------------------------------------------------
+
+
+def test_retrieval_layer_raises_retrieval_cancelled(tmp_path):
+    """should_cancel=True inside the retrieval chain raises RetrievalCancelled,
+    which must propagate out of retrieve_local_knowledge (never swallowed)."""
+    import time
+    from pathlib import Path
+
+    from src.rag.cancellation import RetrievalCancelled
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+
+    def poll_true() -> bool:
+        return True
+
+    from src.tools.local_knowledge import retrieve_local_knowledge
+
+    with pytest.raises(RetrievalCancelled):
+        retrieve_local_knowledge(
+            "explain the rag architecture in detail",
+            enabled=True,
+            force=True,
+            index_path=tmp_path / "missing-index.json",
+            should_cancel=poll_true,
+        )
+
+
+def test_slow_retrieval_cancel_settles_with_derivable_latency(tmp_path):
+    """Decision 4/11: a cancel accepted during retrieval settles durably and
+    the request-to-terminal latency is derivable from persisted timestamps."""
+    import time as _time
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    release = threading.Event()
+
+    def slow_retrieve(*args, **kwargs):
+        # Simulate a slow inner stage; the cancel lands while blocked.
+        release.wait(timeout=5.0)
+        from src.rag.cancellation import RetrievalCancelled
+
+        raise RetrievalCancelled(stage="inner_search")
+
+    deps = replace(_dependencies(), retrieve_local_knowledge=slow_retrieve)
+    service = ChatService(repository, deps)
+    command = ChatCommand(
+        user_input="q", thread_id="chat_lat", operation_id="op_lat", turn_id="turn_lat"
+    )
+    errors: list[Exception] = []
+
+    def run_prepare():
+        try:
+            service.start_turn(command)
+        except (TurnCancelled, Exception) as exc:
+            from src.rag.cancellation import RetrievalCancelled
+
+            if not isinstance(exc, (TurnCancelled, RetrievalCancelled)):
+                errors.append(exc)
+
+    worker = threading.Thread(target=run_prepare)
+    worker.start()
+    for _ in range(100):
+        if repository.get_chat_turn("turn_lat") is not None:
+            break
+        threading.Event().wait(timeout=0.05)
+    outcome, turn = repository.request_turn_cancel(
+        "turn_lat", expected_operation_id="op_lat"
+    )
+    assert outcome == "accepted"
+    requested_at = turn.cancel_requested_at
+    release.set()
+    worker.join(timeout=10)
+    assert errors == []
+    settled = repository.get_chat_turn("turn_lat")
+    assert settled.status == "cancelled"
+    assert settled.updated_at >= requested_at
+
+
+def test_retrieval_poll_observes_mid_search_cancel(tmp_path):
+    """The should_cancel callable passed into the retrieval chain polls the
+    repository; a cancel registered mid-search stops the next checkpoint."""
+    from src.rag.cancellation import RetrievalCancelled
+
+    class FlakyIndex:
+        pass
+
+    calls = {"n": 0}
+
+    def poll_after_first() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    from src.tools.local_knowledge import retrieve_local_knowledge
+
+    with pytest.raises(RetrievalCancelled):
+        retrieve_local_knowledge(
+            "explain the rag architecture in detail",
+            enabled=True,
+            force=True,
+            index_path="definitely-missing.json",
+            should_cancel=poll_after_first,
+        )
+    assert calls["n"] >= 2

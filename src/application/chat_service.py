@@ -17,6 +17,7 @@ from src.pedagogy.engine import PedagogyEngine
 from src.pedagogy.evaluation import PedagogyEvalRun, PedagogyEvaluationService
 from src.pedagogy.evidence import EvidenceDisclosurePolicy, build_evidence_units
 from src.pedagogy.types import LearningState, PedagogyTurnPlan
+from src.rag.cancellation import RetrievalCancelled
 from src.rag.query_plan import build_retrieval_query_plan
 from src.repositories.runtime_repository import RuntimeRepository
 from src.role_manager import build_role_prompt
@@ -111,6 +112,15 @@ class PreparedChatTurn:
     learning_state_before: LearningState
     disclosure_policy: str
     learner_evaluation: PedagogyEvalRun
+
+
+def _poll_cancel(repository: RuntimeRepository, turn_id: str, operation_id: str):
+    """Build a bool-returning cancel poll for retrieval layers."""
+
+    def poll() -> bool:
+        return repository.turn_cancel_requested(turn_id, operation_id)
+
+    return poll
 
 
 class ChatService:
@@ -304,6 +314,7 @@ class ChatService:
                 top_k=command.rag_chat_top_k or command.rag_top_k,
                 retrieval_mode=command.rag_retrieval_mode,
                 min_score=command.rag_min_score,
+                should_cancel=_poll_cancel(self.repository, turn_id, operation_id),
             )
             rag = rag_result.to_dict()
             rag["query_plan"] = retrieval_plan.to_dict()
@@ -409,11 +420,11 @@ class ChatService:
             )
             if streaming is None:
                 raise RuntimeError(f"Chat turn was not created: {turn_id}")
-        except TurnCancelled as exc:
+        except (TurnCancelled, RetrievalCancelled) as exc:
             self._settle_cancelled_preparation(
-                turn_id=exc.turn_id,
-                operation_id=exc.operation_id,
-                stage=exc.stage,
+                turn_id=turn_id,
+                operation_id=operation_id,
+                stage=getattr(exc, "stage", "retrieval"),
                 assistant_message=base_reply,
             )
             raise

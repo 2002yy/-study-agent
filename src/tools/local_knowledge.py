@@ -201,6 +201,7 @@ def retrieve_local_knowledge(
     context_max_chars: int = 3000,
     allow_rewrite: bool = True,
     weak_score_threshold: float = 0.05,
+    should_cancel: Any = None,
 ) -> LocalKnowledgeResult:
     if not enabled:
         return LocalKnowledgeResult(
@@ -209,6 +210,14 @@ def retrieve_local_knowledge(
             retrieval_mode=retrieval_mode,
             reason="disabled",
         )
+
+    def _check(stage: str) -> None:
+        if should_cancel is not None and should_cancel():
+            from src.rag.cancellation import RetrievalCancelled
+
+            raise RetrievalCancelled(stage=stage)
+
+    _check("retrieval_entry")
 
     should_retrieve, reason = should_retrieve_local_knowledge(query)
     if not force and not should_retrieve:
@@ -219,6 +228,7 @@ def retrieve_local_knowledge(
             reason=reason,
         )
 
+    _check("before_index_load")
     try:
         index = load_rag_index(index_path)
     except FileNotFoundError:
@@ -241,12 +251,14 @@ def retrieve_local_knowledge(
     debug: dict[str, Any] = {}
     selected_query = query
     try:
+        _check("before_search")
         diagnostics = search_documents_with_adaptive_source_coverage(
             active_index,
             query,
             top_k=top_k,
             min_score=min_score,
             retrieval_mode=retrieval_mode,
+            should_cancel=should_cancel,
         )
         results = diagnostics.results
         attempts.append(_attempt_from_results(query, results))
@@ -256,12 +268,14 @@ def retrieve_local_knowledge(
         if allow_rewrite and _is_weak_result(results, weak_score_threshold):
             candidate = rewrite_local_knowledge_query(query)
             if candidate and candidate != query.strip():
+                _check("before_rewrite")
                 rewritten_diagnostics = search_documents_with_adaptive_source_coverage(
                     active_index,
                     candidate,
                     top_k=top_k,
                     min_score=min_score,
                     retrieval_mode=retrieval_mode,
+                    should_cancel=should_cancel,
                 )
                 rewritten_results = rewritten_diagnostics.results
                 attempts.append(_attempt_from_results(candidate, rewritten_results))
@@ -336,6 +350,12 @@ def retrieve_local_knowledge(
             attempts=tuple(attempts),
         )
     except Exception as exc:
+        from src.rag.cancellation import RetrievalCancelled
+
+        if isinstance(exc, RetrievalCancelled):
+            # Cooperative cancellation must propagate to the chat service; it
+            # must never be swallowed into an error result.
+            raise
         return LocalKnowledgeResult(
             status="error",
             query=query,

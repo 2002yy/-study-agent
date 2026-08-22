@@ -19,6 +19,7 @@ from src.application.chat_service import (
     TurnCancelled,
     _continuation_instruction,
     _normalized_turn_truth,
+    _poll_cancel,
     _preferred_partial_reply,
     _previous_assistant_role,
     _session_settings,
@@ -31,6 +32,7 @@ from src.domain.runtime_entities import ChatThread, ChatTurn, new_id, utc_now
 from src.external_data_policy import decide_external_data
 from src.pedagogy.evidence import build_evidence_units
 from src.pedagogy.types import LearningState
+from src.rag.cancellation import RetrievalCancelled
 from src.rag.query_plan import build_retrieval_query_plan
 from src.task_contract import resolve_turn_task_contract
 from src.task_intent import SourcePolicy, TaskIntent
@@ -381,6 +383,7 @@ class ExternalDataPolicyChatService(ChatService):
                 top_k=command.rag_chat_top_k or command.rag_top_k,
                 retrieval_mode=command.rag_retrieval_mode,
                 min_score=command.rag_min_score,
+                should_cancel=_poll_cancel(self.repository, turn_id, operation_id),
             )
             rag = rag_result.to_dict()
             rag["query_plan"] = retrieval_plan.to_dict()
@@ -571,11 +574,11 @@ class ExternalDataPolicyChatService(ChatService):
             )
             if streaming is None:
                 raise RuntimeError(f"Chat turn was not created: {turn_id}")
-        except TurnCancelled as exc:
+        except (TurnCancelled, RetrievalCancelled) as exc:
             self._settle_cancelled_preparation(
-                turn_id=exc.turn_id,
-                operation_id=exc.operation_id,
-                stage=exc.stage,
+                turn_id=turn_id,
+                operation_id=operation_id,
+                stage=getattr(exc, "stage", "retrieval"),
                 assistant_message=base_reply,
             )
             raise

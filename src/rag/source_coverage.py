@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from src.rag.schema import RagIndex, RagSearchResult
 from src.rag.service import RagSearchDiagnostics, search_documents_with_debug
@@ -210,7 +211,13 @@ def search_documents_with_adaptive_source_coverage(
     configured_max_chunks_per_source: int = 0,
     adaptive: bool = True,
     reranker: str | None = None,
+    should_cancel: Any = None,
 ) -> RagSearchDiagnostics:
+    if should_cancel is not None:
+        from src.rag.cancellation import RetrievalCancelled
+
+        if should_cancel():
+            raise RetrievalCancelled(stage="coverage_entry")
     plan = plan_source_coverage(
         query,
         top_k=top_k,
@@ -227,6 +234,7 @@ def search_documents_with_adaptive_source_coverage(
             configured_max_chunks_per_source if not plan.enabled else 0
         ),
         reranker=reranker,
+        should_cancel=should_cancel,
     )
     if not plan.enabled:
         base.debug["source_coverage"] = plan.to_dict()
@@ -240,6 +248,11 @@ def search_documents_with_adaptive_source_coverage(
     for facet in facets:
         if len(selected) >= top_k:
             break
+        if should_cancel is not None:
+            from src.rag.cancellation import RetrievalCancelled
+
+            if should_cancel():
+                raise RetrievalCancelled(stage="coverage_facet")
         diagnostics = search_documents_with_debug(
             index,
             facet,
@@ -248,6 +261,7 @@ def search_documents_with_adaptive_source_coverage(
             retrieval_mode=retrieval_mode,
             max_chunks_per_source=1,
             reranker=reranker,
+            should_cancel=should_cancel,
         )
         champion = diagnostics.results[0] if diagnostics.results else None
         row: dict[str, object] = {
