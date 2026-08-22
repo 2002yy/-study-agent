@@ -198,7 +198,10 @@ def test_frontend_chat_state_is_owned_by_workspace_provider():
     assert "sendChatStream(" not in app_text
     assert "commitTurn(" not in app_text
     assert "sendChatStream(" in controller_text
-    assert "commitTurn(" in controller_text
+    # G12 decision 13: the server is the only writer of partial replies, so
+    # the frontend must not call commitTurn anywhere at all.
+    assert "commitTurn(" not in controller_text
+    assert "cancelChatTurn(" in controller_text
 
 
 def test_runtime_version_is_synced():

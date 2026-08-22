@@ -133,6 +133,11 @@ export function hasPartialRecoveryReply(reply: string | null | undefined): boole
 export function tailInterruptedTurn<T extends RestoredTurn>(turns: T[] | undefined): T | undefined {
   const latest = turns?.length ? turns[turns.length - 1] : undefined;
   if (latest?.status === "interrupted") return latest;
+  // G12: a cancelled turn produced no visible output, so recovery is a fresh
+  // retry (new operation + full retrieval), never a continuation.
+  if (latest?.status === "cancelled") {
+    return { ...latest, assistant_message: "" } as T;
+  }
   if (latest?.status !== "failed") return undefined;
 
   const assistantMessage = hasPartialRecoveryReply(latest.assistant_message)

@@ -652,12 +652,8 @@ def test_concurrent_cancel_during_slow_retrieval(tmp_path):
 def test_retrieval_layer_raises_retrieval_cancelled(tmp_path):
     """should_cancel=True inside the retrieval chain raises RetrievalCancelled,
     which must propagate out of retrieve_local_knowledge (never swallowed)."""
-    import time
-    from pathlib import Path
 
     from src.rag.cancellation import RetrievalCancelled
-
-    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
 
     def poll_true() -> bool:
         return True
@@ -677,7 +673,6 @@ def test_retrieval_layer_raises_retrieval_cancelled(tmp_path):
 def test_slow_retrieval_cancel_settles_with_derivable_latency(tmp_path):
     """Decision 4/11: a cancel accepted during retrieval settles durably and
     the request-to-terminal latency is derivable from persisted timestamps."""
-    import time as _time
 
     repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
     release = threading.Event()
@@ -749,3 +744,100 @@ def test_retrieval_poll_observes_mid_search_cancel(tmp_path):
             should_cancel=poll_after_first,
         )
     assert calls["n"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# Consumer regression: cancelled turns never leak into downstream truth
+# (G12 decision 13 + acceptance matrix 10.6)
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_turn_excluded_from_closure_completed_set(tmp_path):
+    service, repository = _service(tmp_path)
+    prepared = service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_cl", operation_id="op_cl")
+    )
+    repository.request_turn_cancel(
+        prepared.turn.id, expected_operation_id=prepared.turn.operation_id
+    )
+    repository.finish_turn_cancel(
+        prepared.turn.id,
+        operation_id=prepared.turn.operation_id,
+        stage="retrieval",
+        reason="user_cancelled",
+        assistant_message="",
+    )
+    all_turns = repository.list_chat_turns("chat_cl")
+    completed = [t for t in all_turns if t.status == "completed"]
+    assert completed == []
+    assert all_turns[0].status == "cancelled"
+
+
+def test_cancelled_thread_learning_state_unchanged(tmp_path):
+    service, repository = _service(tmp_path)
+    prepared = service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_ls", operation_id="op_ls")
+    )
+    thread_before = repository.get_chat_thread(prepared.thread.id)
+    before = thread_before.learning_state if thread_before else {}
+    repository.request_turn_cancel(
+        prepared.turn.id, expected_operation_id=prepared.turn.operation_id
+    )
+    settled = repository.finish_turn_cancel(
+        prepared.turn.id,
+        operation_id=prepared.turn.operation_id,
+        stage="generation",
+        reason="user_cancelled",
+        assistant_message="",
+    )
+    assert settled is not None and settled.status == "cancelled"
+    after = repository.get_chat_thread(prepared.thread.id).learning_state
+    assert after == before
+
+
+def test_retry_after_cancel_creates_fresh_operation_and_retrieval(tmp_path):
+    calls = {"n": 0}
+
+    def counting_retrieve(*args, **kwargs):
+        calls["n"] += 1
+        return FakeRagResult()
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    deps = replace(_dependencies(), retrieve_local_knowledge=counting_retrieve)
+    service = ChatService(repository, deps)
+    command = ChatCommand(
+        user_input="q", thread_id="chat_rt", operation_id="op_r1", turn_id="turn_rt"
+    )
+    prepared = service.start_turn(command)
+    repository.request_turn_cancel(prepared.turn.id, expected_operation_id="op_r1")
+    repository.finish_turn_cancel(
+        prepared.turn.id,
+        operation_id="op_r1",
+        stage="web_tools",
+        reason="user_cancelled",
+        assistant_message="",
+    )
+    # Cancelled turns are terminal and cannot be continued in place.
+    with pytest.raises(ValueError):
+        service.start_turn(
+            ChatCommand(
+                user_input="q",
+                thread_id="chat_rt",
+                continuation_of_turn_id="turn_rt",
+            )
+        )
+    # A retry creates a brand-new child turn with its own operation and a
+    # completely fresh retrieval pass (decision 8).
+    calls["n"] = 0
+    retried = service.start_turn(
+        ChatCommand(
+            user_input="q",
+            thread_id="chat_rt",
+            retry_of_turn_id="turn_rt",
+            operation_id="op_r2",
+        )
+    )
+    assert retried.turn.id != "turn_rt"
+    assert retried.turn.operation_id == "op_r2"
+    assert retried.turn.cancel_requested_at is None
+    assert calls["n"] == 1

@@ -717,7 +717,7 @@ class ChatService:
                 raise ValueError(
                     f"Chat turn {command.retry_of_turn_id} belongs to a different thread"
                 )
-            if retry_parent.status not in {"interrupted", "failed"}:
+            if retry_parent.status not in {"interrupted", "failed", "cancelled"}:
                 raise ValueError(
                     f"Chat turn cannot be retried from status {retry_parent.status}: {retry_parent.id}"
                 )

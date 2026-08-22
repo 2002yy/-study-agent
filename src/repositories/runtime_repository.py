@@ -738,7 +738,7 @@ class RuntimeRepository:
                     UPDATE chat_turns
                     SET status = 'superseded', updated_at = ?
                     WHERE id = ? AND thread_id = ?
-                      AND status IN ('interrupted', 'failed')
+                      AND status IN ('interrupted', 'failed', 'cancelled')
                     """,
                     (updated_at, supersede_parent_turn_id, current.thread_id),
                 )
@@ -839,7 +839,7 @@ class RuntimeRepository:
                     UPDATE chat_turns
                     SET status = 'superseded', updated_at = ?
                     WHERE id = ? AND thread_id = ?
-                      AND status IN ('interrupted', 'failed')
+                      AND status IN ('interrupted', 'failed', 'cancelled')
                     """,
                     (now, supersede_parent_turn_id, current.thread_id),
                 )

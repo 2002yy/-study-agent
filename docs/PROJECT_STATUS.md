@@ -551,3 +551,32 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - `npm test`：**88 files / 336 tests passed**；`npm run build`：通过，仅保留既有的 >500 kB bundle warning。
 - `ruff check .`：通过；mypy baseline：current 122 / baseline 128 / new 0；detect-secrets：0 个 finding 文件；`git diff --check`：通过。
 - 实现提交 `2662cd3a57b4b12f4115e3cddaec4b5f59604e1e` 与 legacy Golden Journey 验收修正 `a3f00de4ae700d8661c05718cafa0d7a29781927` 已快进交付到 `main`；[CI #32499954659](https://github.com/2002yy/study-agent/actions/runs/32499954659) 完整全绿，G16 止血证据闭合。
+
+### 10.9 G12 交付证据 — ChatTurn cooperative cancellation（2026-08-22）
+
+按已冻结合同（10.4 决策 1–24、10.6 验收矩阵）交付窄切片：chat pre-answer 本地 RAG 检索与生成的协作式取消。实现提交 `db0404b`（后端核心）、`cb613d5`（检索层贯穿）、`be199cb`（前端 UX），分支 `codex/g16-privacy-truth-hotfix`。
+
+**合同落实对照：**
+
+- **决策 2（耗时准备前持久化）**：`start_turn` 在 `acquire_chat_operation` 之后立即落 pending 裸行（含客户端 turn_id + operation_id 与 retry 父链）；route/pedagogy/RAG/web 全部准备在 reservation 之后进行。
+- **决策 2/5/6（单一 owner + 终态区分 + 单调 fence）**：schema v20 为 `chat_turns` 增加 `cancel_requested_at / cancel_stage / cancel_reason`；`finish_turn_cancel` 以 `(turn_id, operation_id)` CAS 落 `cancelled`（无可见输出）或 `interrupted`（保留 partial），同事务释放 thread operation；accepted cancel 后所有 worker 写路径（streaming 推进、audit 回写、complete、前端 commit fallback）被 `cancel_requested_at IS NULL` fence 拒绝；completed 先原子提交时取消返回 `already_completed`。
+- **决策 4/9（checkpoint + 协作式）**：preparation 设 route → pedagogy_evaluate → retrieval → web_tools 四个 checkpoint；generate 前后各设 fence（模型调用自然返回后输出丢弃，不承诺强杀）；检索层新增 `RetrievalCancelled`，在 retrieval entry / before index load / before search / before rewrite / coverage entry / coverage facet / search entry / post-search 八处检查并穿透 broad except。
+- **决策 7/20（统一接口 + 身份 CAS）**：`/chat` 与 `/chat/stream` 共享同一取消语义；官方客户端预分配 cryptographically random `operation_id`；`POST /chat/turns/{id}/cancel` 只确认登记（pre-reservation 有界等待 2s，沿用 WebLookup 先例）；`GET /chat/turns/{id}/status` 提供 durable 终态轮询。
+- **决策 8（恢复语义）**：continuation 经 `reassign_chat_turn_operation` 转移 operation 并清除旧取消标记（不继承）；cancelled turn 不可 continuation，retry 创建新 child turn + 新 operation + 全新检索；supersede CAS 接受 cancelled。
+- **决策 11（最小持久化）**：只存 cancel timestamps/stage/reason；延迟可由 requested_at 与 updated_at 派生；未采用正文不入库。
+- **决策 12（明确 UI）**：状态行置于 turn bubble 内（非仅 toast），`role=status`、文本区分 提交中/停止中/慢收尾/cancelled/interrupted/already completed/请求失败，窄屏样式降级可读；浏览器 abort 不再显示"已停止"。
+- **决策 13（服务端唯一 writer）**：前端 `commitTurn` 调用整体移除并由 packaging guard + boundary test 双重禁止；基础 ChatService 与 ExternalDataPolicyChatService 共享 reservation/checkpoint/settlement shell（helper 复用，policy 仅覆写 policy 门与 audit）。
+- **决策 14（兼容边界）**：未提供 handle 的 legacy 同步请求不可中途取消，前端退回 abort-only，服务端断连 settlement 兜底，不伪装兼容。
+- **崩溃恢复**：`recover_stale_chat_operations` 对已登记取消的 stale turn 落 `cancelled`/`interrupted`（按是否有 partial），stage=`recovery`。
+
+**自动化证据：**
+
+- `.venv\Scripts\python.exe -m pytest -q`：**1078 passed**（基线 1051 + 新增 27 个 G12 测试：repository 取消原语 6、fence/race 3、start_turn checkpoint 2、reservation 2、continuation 清标记 1、stale recovery 2、双 service 共享语义 2、并发慢检索 1、检索层贯穿 3、consumer regression 3、API/路由经既有 stream cancellation 测试回归）。
+- `npm test`（frontend）：**88 files / 337 tests passed**（新增 cancelled SSE settle 测试；stop 行为测试改写为 cancel+poll 语义；boundary/packaging guard 更新为"commitTurn 全面禁止 + cancelChatTurn 必须在 controller"）。
+- `npm run build`：通过（仅保留既有 >500 kB bundle warning）；`tsc -b` 通过。
+- `ruff check .`：通过；mypy baseline：current 122 / new 0。
+
+**遗留边界（后续切片，不在本门内）：**
+
+- `archive_after_cancel` 持久归档队列（决策 10/15 的会话切换等待与归档失败 UI）尚未实现——当前取消后 thread operation 已释放，会话切换/新建不被阻塞，但"归档失败独立错误"文案依赖该队列落地。
+- 慢检索实测上限的人工时序记录（desktop/narrow/mobile viewport 验证）属人工门，待真实设备验收批次执行。
