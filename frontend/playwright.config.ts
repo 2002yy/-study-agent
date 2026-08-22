@@ -4,6 +4,8 @@ const REAL_STACK_TESTS = [
   "**/real-stack.spec.ts",
   "**/real-stack-recovery.spec.ts",
   "**/real-stack-research.spec.ts",
+  // Boots its own real-stack webServer via playwright.g12-acceptance.config.ts.
+  "**/g12-acceptance.spec.ts",
 ];
 const STANDARD_FIXTURE_IGNORES = [
   ...REAL_STACK_TESTS,

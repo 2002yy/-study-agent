@@ -440,7 +440,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 3. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G12 可取消本地 RAG 已交付 `main`（`8a2f91a`，[CI #32573043290](https://github.com/2002yy/study-agent/actions/runs/32573043290) 全绿，含归档队列与恢复卡修正）；G12 自动门闭合，剩余人工与时序门。下一切片为 G14 临时附件合同冻结（需先 Grill）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**G12 全门闭合——自动门 + 人工与时序门的浏览器自动化证据齐备（docs/G12_ACCEPTANCE.md：三 viewport ACK 113/127/130ms <200ms；慢检索 3s 注入下登记→终态 2963–2994ms ≈0 协作开销；归档队列/取消待归档/离开会话全过；main CI #32573043290 及后续全绿）。下一切片为 G14 临时附件合同冻结（需先 Grill）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -588,3 +588,14 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **归档队列落地（决策 10/15）**：schema v21 增加 `chat_threads.archive_after_cancel_operation_id`（绑定 operation，stale marker 无法误触发）；POST archive 在已接受取消时持久化排队而非失败；DELETE `/sessions/{id}/archive-queue` 支持取消待归档；exactly-once 消费（pop CAS + readiness 检查）；启动扫描（get_session_service 首次构造）+ stream finally + turn-status 轮询三处触发执行；前端 queued 响应允许立即切换/新建会话，归档失败保留会话并显示独立错误。
 - **交付基线**：`main` = `8a2f91ae6b1fb048b5415702ec71ca2393679479`，本地与远程一致；[CI #32573043290](https://github.com/2002yy/study-agent/actions/runs/32573043290) 全绿（pytest、RAG K1、ruff、detect-secrets、mypy baseline、前端测试/构建、Golden Journeys 与 real-stack browser gates）。
 - **门状态：G12 自动门 CLOSED。剩余人工与时序门**（10.6）：点击后 200 ms 实测记录、慢检索登记→终态实测上限、desktop/narrow/mobile viewport 人工验证——待真实设备验收批次执行。
+
+### 10.11 G12 人工与时序门闭合（2026-08-22，浏览器自动化真实栈证据）
+
+执行方式：Playwright 真实 Chrome 对本地真实栈（专用测试 server + 真实 SQLite），全程读取服务端 durable 终态，无 mock sleep、无以浏览器 abort 冒充服务端终态。完整数据与方法见 [`G12_ACCEPTANCE.md`](G12_ACCEPTANCE.md)。
+
+- **200ms UI 确认（决策 4）**：desktop 113ms / narrow landscape 127ms / mobile 130ms，全部 <200ms；多轮稳态复核无离群。
+- **慢检索登记→终态实测（决策 4/9）**：注入 3s 慢检索后，登记→durable cancelled 实测 2963–2994ms（checkpoint=web_tools）——协作开销 ≈0，终态无可见输出、operation 锁同事务释放。
+- **三 viewport 文案与 aria（决策 12）**：bubble 内状态行 `role=status` + `aria-live=polite`，固定文案集命中，截图/视频存证于 `frontend/test-results/g12-artifacts/`。
+- **离开会话 / 等待归档 / 取消归档（决策 10/15）**：取消 pending 时 composer 即时可用、新会话可建；archive 排队持久化并在 settle 后自动执行（三 viewport）；DELETE archive-queue 清 marker 后 settle 不再归档。
+- **资产**：`playwright.g12-acceptance.config.ts` + `e2e/g12-acceptance.spec.ts`（六旅程 A–F）+ 测试 server 注入端点；复现入口 `npm run test:e2e:g12`。
+- **仍属人工批次**：真实屏幕阅读器体验、实体手机、视觉对比度评审——沿用既有边界，归 G17 人工验收。

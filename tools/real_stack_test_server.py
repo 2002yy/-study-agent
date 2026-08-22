@@ -11,6 +11,7 @@ import asyncio
 import gc
 import os
 import shutil
+import time
 from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
@@ -170,6 +171,8 @@ FAIL_ONCE_QUESTION = "请触发一次可重试的确定性失败"
 RETRY_REPLY = "重试成功：这次回答只提交一次，并保留失败父回合作为可审计记录。"
 
 _failure_attempts: dict[str, int] = {}
+# G12 acceptance gate: injectable slow retrieval (decision 4).
+_retrieval_delay: dict[str, float] = {"seconds": 0.0}
 
 
 def _test_runtime_modes() -> RuntimeModes:
@@ -324,6 +327,10 @@ def _real_stack_retrieve(
     retrieval_mode: str = "hybrid",
     **_kwargs: Any,
 ):
+    # G12 decision 4 gate: inject a slow retrieval so the acceptance journey
+    # can measure cancel-registration → durable-terminal latency.
+    if _retrieval_delay["seconds"] > 0:
+        time.sleep(_retrieval_delay["seconds"])
     return retrieve_local_knowledge(
         query,
         enabled=enabled,
@@ -426,6 +433,7 @@ def reset_real_stack_state() -> dict[str, Any]:
     """Reset all durable test state between isolated browser journeys."""
 
     _failure_attempts.clear()
+    _retrieval_delay["seconds"] = 0.0
     _real_stack_chat_service.cache_clear()
     _real_stack_closure_service.cache_clear()
     reset_runtime_repository_cache()
@@ -438,6 +446,15 @@ def reset_real_stack_state() -> dict[str, Any]:
         "rag_index_path": str(RAG_INDEX_PATH),
         "memory_dir": str(MEMORY_DIR),
     }
+
+
+@app.post("/__e2e__/retrieval-delay")
+def set_retrieval_delay(payload: dict[str, Any]) -> dict[str, Any]:
+    """Inject a slow local retrieval for the G12 cancel-latency gate."""
+
+    seconds = float(payload.get("seconds", 0))
+    _retrieval_delay["seconds"] = max(0.0, min(seconds, 30.0))
+    return {"seconds": _retrieval_delay["seconds"]}
 
 
 @app.get("/__e2e__/state/{session_id}")
@@ -454,3 +471,25 @@ def read_real_stack_state(session_id: str) -> dict[str, Any]:
         "turns": [asdict(turn) for turn in repository.list_chat_turns(session_id)],
         "summary": get_session_service().summary_payload(session_id),
     }
+
+
+@app.get("/__e2e__/latest-thread")
+def read_latest_thread() -> dict[str, Any]:
+    """Latest chat thread that actually has turns — G12 acceptance helper.
+
+    The cooperative-cancel journey can settle a turn before the browser ever
+    receives the session SSE event, so tests cannot rely on localStorage to
+    discover the session id. Empty threads (e.g. freshly created sessions)
+    are skipped so the cancelled journey remains observable.
+    """
+
+    repository = get_runtime_repository()
+    for thread in repository.list_chat_threads(limit=20):
+        turns = repository.list_chat_turns(thread.id)
+        if turns:
+            return {
+                "session_id": thread.id,
+                "thread": asdict(thread),
+                "turns": [asdict(turn) for turn in turns],
+            }
+    raise HTTPException(status_code=404, detail="No chat threads with turns yet")
