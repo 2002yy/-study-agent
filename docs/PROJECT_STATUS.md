@@ -440,7 +440,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 3. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G16 窄止血实现 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进进入 `main`，完整 CI #32499954659 全绿。G12 Grill 合同已冻结且实施门转为 GO；唯一下一切片是 ChatTurn cooperative cancellation。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**G12 可取消本地 RAG 已交付 `main`（`8a2f91a`，[CI #32573043290](https://github.com/2002yy/study-agent/actions/runs/32573043290) 全绿，含归档队列与恢复卡修正）；G12 自动门闭合，剩余人工与时序门。下一切片为 G14 临时附件合同冻结（需先 Grill）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -580,3 +580,11 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 - `archive_after_cancel` 持久归档队列（决策 10/15 的会话切换等待与归档失败 UI）尚未实现——当前取消后 thread operation 已释放，会话切换/新建不被阻塞，但"归档失败独立错误"文案依赖该队列落地。
 - 慢检索实测上限的人工时序记录（desktop/narrow/mobile viewport 验证）属人工门，待真实设备验收批次执行。
+
+### 10.10 G12 交付收口与归档队列（2026-08-22）
+
+- **修复迭代**：turn 状态行初版按 `message.turnStatus` 渲染，导致历史 completed 消息永久显示取消文案（Playwright strict-mode 冲突 + 违反决策 12"浏览器 abort 不显示已停止"）。改为独立 `ChatMessage.cancelNotice` 字段，仅协作取消流程写入；恢复历史与普通断线永不渲染。
+- **恢复卡保持**：onCancelled 不再清空 streamRecovery——取消 settle 后的 retry 正是决策 8 的新 operation 全新检索路径。
+- **归档队列落地（决策 10/15）**：schema v21 增加 `chat_threads.archive_after_cancel_operation_id`（绑定 operation，stale marker 无法误触发）；POST archive 在已接受取消时持久化排队而非失败；DELETE `/sessions/{id}/archive-queue` 支持取消待归档；exactly-once 消费（pop CAS + readiness 检查）；启动扫描（get_session_service 首次构造）+ stream finally + turn-status 轮询三处触发执行；前端 queued 响应允许立即切换/新建会话，归档失败保留会话并显示独立错误。
+- **交付基线**：`main` = `8a2f91ae6b1fb048b5415702ec71ca2393679479`，本地与远程一致；[CI #32573043290](https://github.com/2002yy/study-agent/actions/runs/32573043290) 全绿（pytest、RAG K1、ruff、detect-secrets、mypy baseline、前端测试/构建、Golden Journeys 与 real-stack browser gates）。
+- **门状态：G12 自动门 CLOSED。剩余人工与时序门**（10.6）：点击后 200 ms 实测记录、慢检索登记→终态实测上限、desktop/narrow/mobile viewport 人工验证——待真实设备验收批次执行。
