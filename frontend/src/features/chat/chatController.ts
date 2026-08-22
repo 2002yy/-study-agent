@@ -362,7 +362,19 @@ export function useChatController(options: ControllerOptions) {
             const partial = typeof data.partial === "string" ? data.partial : "";
             cancelledSettledRef.current = true;
             stopCancelPolling();
-            setStreamRecovery(null);
+            const fullPartial =
+              extraOpts.partialReply && !extraOpts.partialReply.includes(streamedReply)
+                ? extraOpts.partialReply + streamedReply
+                : streamedReply || partial;
+            // The recovery card stays available after a cooperative stop:
+            // retry creates a fresh operation with full retrieval (decision 8).
+            setStreamRecovery({
+              question,
+              reply: fullPartial,
+              reason: "已停止生成",
+              sessionId: activeSessionId || undefined,
+              turnId: activeTurnId || null,
+            });
             cancelMarkRef.current?.(partial ? "interrupted" : "cancelled", partial || undefined);
           },
           onToken: (token) => {
