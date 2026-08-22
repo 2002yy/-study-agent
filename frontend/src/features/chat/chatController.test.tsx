@@ -12,6 +12,8 @@ import { useChatController } from "./chatController";
 const apiMocks = vi.hoisted(() => ({
   archiveSession: vi.fn(),
   cancelChatResearchRuns: vi.fn(),
+  cancelChatTurn: vi.fn(),
+  getChatTurnStatus: vi.fn(),
   commitTurn: vi.fn(),
   createNewSession: vi.fn(),
   loadSessionDetail: vi.fn(),
@@ -90,14 +92,24 @@ describe("useChatController stop behavior", () => {
     operationRegistry.cancelAll();
     vi.clearAllMocks();
     apiMocks.cancelChatResearchRuns.mockResolvedValue([]);
+    apiMocks.cancelChatTurn.mockResolvedValue({
+      turn_id: "turn-stop",
+      outcome: "accepted",
+      status: "streaming",
+      cancel_requested_at: "2026-08-21T00:00:00+00:00",
+    });
+    apiMocks.getChatTurnStatus.mockResolvedValue({
+      turn_id: "turn-stop",
+      status: "interrupted",
+      assistant_message: "partial token",
+    });
   });
 
-  it("preserves partial output, commits it, exposes recovery, and clears busy", async () => {
-    apiMocks.commitTurn.mockResolvedValue({ committed: true });
+  it("registers a cooperative cancel, polls the durable state, and never commits partials", async () => {
     apiMocks.cancelChatResearchRuns.mockResolvedValue([{ id: "research-stop" }]);
     apiMocks.sendChatStream.mockImplementation(
       async (_question, _history, _options, callbacks, requestOptions) =>
-        new Promise((_resolve, reject) => {
+        new Promise((resolve, reject) => {
           callbacks.onSession("chat-stop", {
             turnId: "turn-stop",
             operationId: "op-stop",
@@ -116,8 +128,28 @@ describe("useChatController stop behavior", () => {
             version: 1,
           });
           callbacks.onToken("partial token");
-          requestOptions.signal.addEventListener("abort", () => {
-            reject(new DOMException("stopped", "AbortError"));
+          // The cooperative cancel closes the stream from the server side:
+          // the cancelled SSE event arrives, then the request ends normally.
+          apiMocks.cancelChatTurn.mockImplementation(async () => {
+            callbacks.onCancelled({
+              turn_id: "turn-stop",
+              operation_id: "op-stop",
+              stage: "generation",
+              partial: "partial token",
+            });
+            resolve({
+              reply: "partial token",
+              session_id: "chat-stop",
+              turn_id: "turn-stop",
+              route: { role: "nahida" },
+              rag: {},
+            });
+            return {
+              turn_id: "turn-stop",
+              outcome: "accepted",
+              status: "streaming",
+              cancel_requested_at: "2026-08-21T00:00:00+00:00",
+            };
           });
         }),
     );
@@ -139,31 +171,28 @@ describe("useChatController stop behavior", () => {
       await sendPromise;
     });
 
-    expect(result.current.isSending).toBe(false);
-    expect(result.current.streamRecovery).toEqual({
-      question: "question",
-      reply: "partial token",
-      reason: "已停止生成",
-      sessionId: "chat-stop",
-      turnId: "turn-stop",
-    });
-    const lastMessage = result.current.messages[result.current.messages.length - 1];
-    expect(lastMessage).toMatchObject({
-      role: "assistant",
-      transient: true,
-      turnId: "turn-stop",
-      turnStatus: "interrupted",
-    });
-    expect(lastMessage?.content).toContain("partial token");
-    expect(apiMocks.commitTurn).toHaveBeenCalledWith(
-      "chat-stop",
-      expect.objectContaining({
-        userInput: "question",
-        agentReply: "partial token",
-        turnId: "turn-stop",
-        operationId: "op-stop",
-      }),
+    // G12 decision 20: the POST carries the client's expected operation id
+    // and only confirms registration.
+    expect(apiMocks.cancelChatTurn).toHaveBeenCalledWith(
+      "turn-stop",
+      expect.any(String),
     );
+    // eslint-disable-next-line no-console
+    console.log(
+      "DEBUG cancel impl used:",
+      apiMocks.cancelChatTurn.getMockImplementation() ? "custom" : "default",
+    );
+    // The cancelled SSE event delivered the durable terminal state; the UI
+    // must reflect it (cancelled with no output, interrupted with partial).
+    await vi.waitFor(() => {
+      const lastMessage =
+        result.current.messages[result.current.messages.length - 1];
+      expect(lastMessage?.turnStatus).toBe("interrupted");
+      expect(lastMessage?.content).toContain("partial token");
+    });
+    // Decision 13: the frontend never commits partials.
+    expect(apiMocks.commitTurn).not.toHaveBeenCalled();
+    expect(result.current.isSending).toBe(false);
     expect(apiMocks.cancelChatResearchRuns).toHaveBeenCalledWith("turn-stop");
     await vi.waitFor(() => {
       expect(onResearchRunDiscovered).toHaveBeenCalledWith("research-rag");

@@ -87,10 +87,13 @@ type ChatRequestOptions = {
   retryOfTurnId?: string;
   partialReply?: string;
   turnId?: string;
+  operationId?: string;
 };
 
 type ChatStreamHandlers = {
-  onSession?: (sessionId: string, meta?: { turnId?: string; operationId?: string }) => void;
+  onSession?: (sessionId: string, meta?: { turnId?: string; operationId?: string
+  }) => void;
+  onCancelled?: (data: Record<string, unknown>) => void;
   onRoute?: (route: Record<string, unknown>) => void;
   onRag?: (rag: ChatResponse["rag"]) => void;
   onResearch?: (progress: ChatResearchProgress) => void;
@@ -144,7 +147,8 @@ function buildChatPayload(userInput: string, history: ChatMessage[], options: Ch
     continuation_of_turn_id: options.continuationOfTurnId ?? null,
     retry_of_turn_id: options.retryOfTurnId ?? null,
     partial_reply: options.partialReply ?? "",
-    turn_id: options.turnId ?? null
+    turn_id: options.turnId ?? null,
+    operation_id: options.operationId ?? null
   };
 }
 
@@ -721,6 +725,55 @@ export async function cancelChatResearchRuns(turnId: string): Promise<WebLookupR
   return response.runs;
 }
 
+export type ChatTurnCancelOutcome =
+  | "accepted"
+  | "already_completed"
+  | "already_terminal"
+  | "not_found"
+  | "operation_mismatch";
+
+export type ChatTurnCancelResponse = {
+  turn_id: string;
+  outcome: ChatTurnCancelOutcome;
+  status?: string | null;
+  cancel_requested_at?: string | null;
+};
+
+export type ChatTurnStatusResponse = {
+  turn_id: string;
+  status: string;
+  operation_id?: string | null;
+  cancel_requested_at?: string | null;
+  cancel_stage?: string | null;
+  cancel_reason?: string | null;
+  assistant_message?: string;
+};
+
+export async function cancelChatTurn(
+  turnId: string,
+  expectedOperationId: string,
+  reason = "user_cancelled"
+): Promise<ChatTurnCancelResponse> {
+  return requestJson<ChatTurnCancelResponse>(
+    `/chat/turns/${encodeURIComponent(turnId)}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expected_operation_id: expectedOperationId,
+        reason
+      })
+    }
+  );
+}
+
+export async function getChatTurnStatus(turnId: string): Promise<ChatTurnStatusResponse> {
+  return requestJson<ChatTurnStatusResponse>(
+    `/chat/turns/${encodeURIComponent(turnId)}/status`,
+    { method: "GET" }
+  );
+}
+
 export async function sendChatStream(
   userInput: string,
   history: ChatMessage[],
@@ -812,6 +865,10 @@ export async function sendChatStream(
         turnId = message.data.turn_id;
       }
       handlers.onDone?.(message.data);
+      return;
+    }
+    if (message.event === "cancelled") {
+      handlers.onCancelled?.(message.data);
       return;
     }
     if (message.event === "error") {

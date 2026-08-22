@@ -60,3 +60,37 @@
     white-space: nowrap;
   }
 }
+
+/* G12 decision 12: cancellation lifecycle copy lives inside the turn bubble,
+   is announced via role=status/alert, and stays legible without color. */
+.message-body .turn-status-line {
+  margin: 4px 0 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  border: 1px solid currentColor;
+}
+
+.message-body .turn-status-line.tone-pending {
+  color: #5b4a00;
+  background: rgba(255, 196, 0, 0.12);
+}
+
+.message-body .turn-status-line.tone-done {
+  color: #245c36;
+  background: rgba(46, 160, 67, 0.12);
+}
+
+.message-body .turn-status-line.tone-error {
+  color: #8a1f1f;
+  background: rgba(218, 54, 51, 0.12);
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .message-body .turn-status-line {
+    font-size: 0.82rem;
+    padding: 5px 8px;
+  }
+}

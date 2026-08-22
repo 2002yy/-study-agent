@@ -20,7 +20,8 @@ describe("chat controller ownership boundary", () => {
   it("keeps chat orchestration commands out of App", () => {
     for (const command of [
       "sendChatStream",
-      "commitTurn",
+      "cancelChatTurn",
+      "getChatTurnStatus",
       "loadSessionDetail",
       "archiveSession",
       "createNewSession",
@@ -29,6 +30,12 @@ describe("chat controller ownership boundary", () => {
       expect(appSource).not.toMatch(invocation);
       expect(controllerSource).toMatch(invocation);
     }
+  });
+
+  it("never commits partial turns from the frontend (G12 decision 13)", () => {
+    // The server is the only writer of partial replies.
+    expect(appSource).not.toMatch(/\bcommitTurn\s*\(/);
+    expect(controllerSource).not.toMatch(/\bcommitTurn\s*\(/);
   });
 
   it("keeps sending state and operation ownership in the controller", () => {

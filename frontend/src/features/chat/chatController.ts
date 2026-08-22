@@ -2,8 +2,9 @@ import { useCallback, useRef, useState, type Dispatch, type SetStateAction } fro
 import {
   archiveSession,
   cancelChatResearchRuns,
-  commitTurn,
+  cancelChatTurn,
   createNewSession,
+  getChatTurnStatus,
   loadSessionDetail,
   sendChatStream,
 } from "../../api";
@@ -84,6 +85,14 @@ export function useChatController(options: ControllerOptions) {
   const [isSending, setIsSending] = useState(false);
   const [researchProgress, setResearchProgress] = useState<ChatResearchProgress | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
+  const activeOperationIdRef = useRef<string>("");
+  // G12 decision 13: the server is the only writer of partial replies. The
+  // controller only reflects durable turn states; commitTurn is gone.
+  const cancelledSettledRef = useRef(false);
+  const cancelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelMarkRef = useRef<
+    ((status: string, partial?: string) => void) | null
+  >(null);
 
   const cancelActiveResearch = useCallback((turnId: string) => {
     void cancelChatResearchRuns(turnId)
@@ -96,6 +105,51 @@ export function useChatController(options: ControllerOptions) {
       })
       .catch(() => undefined);
   }, [options.onResearchRunDiscovered]);
+
+  const stopCancelPolling = useCallback(() => {
+    if (cancelPollRef.current !== null) {
+      clearInterval(cancelPollRef.current);
+      cancelPollRef.current = null;
+    }
+  }, []);
+
+  // G12 decision 20: the client learns the durable terminal state by polling
+  // the turn-status endpoint; the Cancel POST only confirms registration.
+  const startCancelPolling = useCallback(
+    (turnId: string) => {
+      stopCancelPolling();
+      let ticks = 0;
+      cancelPollRef.current = setInterval(() => {
+        ticks += 1;
+        void getChatTurnStatus(turnId)
+          .then((status) => {
+            const terminal = [
+              "cancelled",
+              "interrupted",
+              "completed",
+              "failed",
+              "abandoned",
+              "superseded",
+            ];
+            if (status.cancel_requested_at && !terminal.includes(status.status)) {
+              if (ticks === 8) {
+                cancelMarkRef.current?.("cancelling-slow");
+              }
+              return;
+            }
+            cancelledSettledRef.current = true;
+            stopCancelPolling();
+            if (status.status === "interrupted") {
+              cancelMarkRef.current?.("interrupted", status.assistant_message || undefined);
+            } else {
+              cancelMarkRef.current?.(status.status);
+            }
+          })
+          .catch(() => undefined);
+      }, 500);
+    },
+    [stopCancelPolling]
+  );
 
   const setMessages: Dispatch<SetStateAction<ChatMessage[]>> = useCallback(
     (value) => dispatch({ type: "SET_CHAT_MESSAGES", value }),
@@ -180,7 +234,32 @@ export function useChatController(options: ControllerOptions) {
     let activeTurnId =
       extraOpts.turnId ?? `turn_${globalThis.crypto.randomUUID()}`;
     activeTurnIdRef.current = activeTurnId;
-    let activeOperationId = "";
+    // G12 decision 20: the official client pre-allocates the operation handle
+    // so cancellation can target (turn_id, expected_operation_id) even before
+    // the server assigns its own operation id.
+    const clientOperationId = extraOpts.turnId ? undefined : `op_${globalThis.crypto.randomUUID()}`;
+    let activeOperationId = clientOperationId ?? "";
+    activeOperationIdRef.current = activeOperationId;
+    cancelledSettledRef.current = false;
+    cancelMarkRef.current = (status: string, partial?: string) => {
+      setMessages((current) =>
+        current.map((message, index) => {
+          if (index === userIndex) {
+            return { ...message, transient: true, turnId: activeTurnId || message.turnId, turnStatus: status };
+          }
+          if (index === assistantIndex) {
+            return {
+              ...message,
+              content: partial !== undefined && partial !== "" ? partial : message.content,
+              transient: true,
+              turnId: activeTurnId || message.turnId,
+              turnStatus: partial ? "interrupted" : status,
+            };
+          }
+          return message;
+        })
+      );
+    };
     const shouldConsumeWebLookup = options.useWebLookup && Boolean(options.webLookupSource);
     let turnWebContext = shouldConsumeWebLookup ? options.webLookupSource : "";
     if (
@@ -212,6 +291,7 @@ export function useChatController(options: ControllerOptions) {
           retryOfTurnId: extraOpts.retryOfTurnId,
           partialReply: extraOpts.partialReply ?? "",
           turnId: activeTurnId,
+          operationId: clientOperationId
         },
         {
           onSession: (sessionId, meta) => {
@@ -267,6 +347,14 @@ export function useChatController(options: ControllerOptions) {
               progress.run_id,
               ["completed", "partial", "failed", "cancelled"].includes(progress.status),
             );
+          },
+          onCancelled: (data) => {
+            if (!isCurrent()) return;
+            const partial = typeof data.partial === "string" ? data.partial : "";
+            cancelledSettledRef.current = true;
+            stopCancelPolling();
+            setStreamRecovery(null);
+            cancelMarkRef.current?.(partial ? "interrupted" : "cancelled", partial || undefined);
           },
           onToken: (token) => {
             if (!isCurrent()) return;
@@ -360,40 +448,10 @@ export function useChatController(options: ControllerOptions) {
         turnId: activeTurnId || null,
       });
       if (!isAbort) options.setOperationError(`聊天请求失败：${message}`);
-      if (fullPartial && activeSessionId && activeOperationId) {
-        try {
-          await commitTurn(activeSessionId, {
-            userInput: question,
-            agentReply: fullPartial,
-            role: String(streamedRoute.role ?? state.lastChat?.route?.role ?? "auto"),
-            mode:
-              typeof streamedRoute.mode === "string"
-                ? String(streamedRoute.mode)
-                : typeof state.lastChat?.route?.mode === "string"
-                  ? String(state.lastChat.route.mode)
-                  : "auto",
-            model:
-              typeof streamedRoute.model_profile === "string"
-                ? String(streamedRoute.model_profile)
-                : typeof state.lastChat?.route?.model_profile === "string"
-                  ? String(state.lastChat.route.model_profile)
-                  : "auto",
-            memoryEnabled: options.ragEnabled,
-            routeInfo: Object.keys(streamedRoute).length
-              ? streamedRoute
-              : (state.lastChat?.route ?? {}),
-            ragInfo: streamedRag ?? state.lastChat?.rag ?? {},
-            conversationInstruction: options.conversationInstruction,
-            turnId: activeTurnId || undefined,
-            operationId: activeOperationId,
-          });
-        } catch (commitError) {
-          const commitMessage =
-            commitError instanceof Error ? commitError.message : "未知错误";
-          options.setOperationError((current) =>
-            [current, `部分回答保存失败：${commitMessage}`].filter(Boolean).join("\n")
-          );
-        }
+      if (cancelledSettledRef.current) {
+        // G12: a settled cancellation already wrote the durable terminal
+        // state and the UI reflects it; do not overwrite with interrupted.
+        return;
       }
       setMessages((current) =>
         current.map((item, index) =>
@@ -417,9 +475,12 @@ export function useChatController(options: ControllerOptions) {
         )
       );
     } finally {
+      stopCancelPolling();
       if (activeTurnIdRef.current === activeTurnId) {
         activeTurnIdRef.current = null;
+        activeOperationIdRef.current = "";
       }
+      cancelMarkRef.current = null;
       const ownsSettlement = isOwned();
       operationRegistry.complete(operationId);
       if (ownsSettlement) setIsSending(false);
@@ -692,10 +753,46 @@ export function useChatController(options: ControllerOptions) {
     send,
     stop: () => {
       const activeTurnId = activeTurnIdRef.current;
+      const operationId = activeOperationIdRef.current;
       if (activeTurnId) {
         cancelActiveResearch(activeTurnId);
       }
-      operationRegistry.abort("chat");
+      if (!activeTurnId || !operationId) {
+        // Legacy request without a pre-allocated handle: cooperative turn
+        // cancellation cannot target it. Abort the stream only; the server's
+        // disconnect settlement owns the durable state.
+        operationRegistry.abort("chat");
+        return;
+      }
+      // Decision 4: synchronous UI acknowledgement within 200 ms.
+      cancelMarkRef.current?.("cancelling");
+      void cancelChatTurn(activeTurnId, operationId)
+        .then((result) => {
+          if (result.outcome === "already_completed") {
+            cancelledSettledRef.current = true;
+            cancelMarkRef.current?.("completed");
+            operationRegistry.abort("chat");
+            return;
+          }
+          if (result.outcome === "accepted" || result.outcome === "already_terminal") {
+            // The cancelled SSE event may already have delivered the durable
+            // terminal state; never overwrite a settled turn (decision 13).
+            if (!cancelledSettledRef.current) {
+              // Decision 12: fixed copy distinguishes 停止中 from 慢收尾.
+              cancelMarkRef.current?.("cancelling");
+              startCancelPolling(activeTurnId);
+            }
+            return;
+          }
+          // not_found / operation_mismatch: fall back to aborting the stream;
+          // server-side disconnect settlement still closes the turn out.
+          options.setOperationError("停止请求失败：无法定位进行中的回答");
+          operationRegistry.abort("chat");
+        })
+        .catch(() => {
+          options.setOperationError("停止请求失败：取消请求未送达");
+          operationRegistry.abort("chat");
+        });
     },
     retry,
     continueInterrupted,
