@@ -164,7 +164,7 @@ def test_v17_to_v18_adds_navigation_relations_without_synthesizing_truth(tmp_pat
             "SELECT COUNT(*) FROM learning_goal_claim_revisions"
         ).fetchone()[0]
 
-    assert version == str(SCHEMA_VERSION) == "19"
+    assert version == str(SCHEMA_VERSION) == "20"
     assert "learning_goal_contexts" in tables
     assert "learning_goal_claim_revisions" in tables
     assert context_count == 0

@@ -95,7 +95,7 @@ def test_runtime_initializes_normalized_learning_truth_tables(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(source_evidence)")
         }
 
-    assert version == str(SCHEMA_VERSION) == "19"
+    assert version == str(SCHEMA_VERSION) == "20"
     assert {
         "learning_topics",
         "learning_goals",
@@ -147,7 +147,7 @@ def test_v16_upgrade_preserves_existing_runtime_data(tmp_path):
         claim_count = connection.execute("SELECT COUNT(*) FROM learning_claims").fetchone()[0]
         evidence_count = connection.execute("SELECT COUNT(*) FROM source_evidence").fetchone()[0]
 
-    assert version == str(SCHEMA_VERSION) == "19"
+    assert version == str(SCHEMA_VERSION) == "20"
     assert "legacy-only" in state
     assert claim_count == 0
     assert evidence_count == 0

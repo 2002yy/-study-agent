@@ -6,6 +6,7 @@ interruption, retry and atomic completion reuse the established lifecycle.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import os
@@ -15,7 +16,9 @@ from src.application.chat_service import (
     ChatCommand,
     ChatService,
     PreparedChatTurn,
+    TurnCancelled,
     _continuation_instruction,
+    _normalized_turn_truth,
     _preferred_partial_reply,
     _previous_assistant_role,
     _session_settings,
@@ -256,7 +259,7 @@ class ExternalDataPolicyChatService(ChatService):
             explicit_override=command.task_intent,
             persisted_route=(persisted_turn.route_snapshot if persisted_turn else None),
         )
-        operation_id = new_id("op")
+        operation_id = command.operation_id or new_id("op")
         thread = self.repository.acquire_chat_operation(
             thread.id,
             operation_id,
@@ -266,7 +269,36 @@ class ExternalDataPolicyChatService(ChatService):
                 "taskIntent": task_contract.task_intent,
             },
         )
+        reserved_existing = existing
+        if existing is None:
+            self.repository.add_chat_turn(
+                ChatTurn(
+                    id=turn_id,
+                    thread_id=thread.id,
+                    user_message=command.user_input,
+                    assistant_message="",
+                    status="pending",
+                    parent_turn_id=retry_parent.id if retry_parent else None,
+                    operation_id=operation_id,
+                    conversation_instruction=command.conversation_instruction,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                )
+            )
+        else:
+            reassign = self.repository.reassign_chat_turn_operation(
+                turn_id,
+                expected_operation_id=existing.operation_id,
+                new_operation_id=operation_id,
+            )
+            if reassign is None:
+                self.repository.release_chat_operation(thread.id, operation_id)
+                raise ValueError(f"Chat turn cannot continue from current state: {turn_id}")
+            reserved_existing = reassign
+        cancel_check = self._make_cancel_check(turn_id, operation_id)
+        base_reply = ""
         try:
+            cancel_check("route")
             route = self.dependencies.route_request(
                 user_input=command.user_input,
                 selected_role=command.selected_role,
@@ -293,6 +325,7 @@ class ExternalDataPolicyChatService(ChatService):
                 )
             )
             evidence_ids = self._previous_disclosed_evidence_ids(thread.id)
+            cancel_check("pedagogy_evaluate")
             learner_evaluation = cast(
                 Any, self.dependencies.pedagogy_evaluation
             ).evaluate_learner(
@@ -340,6 +373,7 @@ class ExternalDataPolicyChatService(ChatService):
                 state=learning_state,
                 plan=pedagogy_plan,
             )
+            cancel_check("retrieval")
             rag_result = self.dependencies.retrieve_local_knowledge(
                 retrieval_plan.private_query,
                 enabled=(command.rag_enabled and decision.local_retrieval_allowed),
@@ -350,6 +384,7 @@ class ExternalDataPolicyChatService(ChatService):
             )
             rag = rag_result.to_dict()
             rag["query_plan"] = retrieval_plan.to_dict()
+            cancel_check("web_tools")
             if decision.web_allowed:
                 web_tools = self.dependencies.resolve_web_tools(
                     command.user_input,
@@ -491,7 +526,6 @@ class ExternalDataPolicyChatService(ChatService):
                     existing.assistant_message if existing else "",
                     command.partial_reply,
                 )
-            now = utc_now()
             pedagogy_snapshot = {
                 **pedagogy_plan.to_dict(),
                 "learning_state_before": learning_state.to_dict(),
@@ -501,28 +535,11 @@ class ExternalDataPolicyChatService(ChatService):
                 "external_data_policy": external_data_execution,
                 "task_contract": task_contract.to_dict(),
             }
-            if existing is None:
-                pending = ChatTurn(
-                    id=turn_id,
-                    thread_id=thread.id,
-                    user_message=command.user_input,
-                    assistant_message=base_reply,
-                    status="pending",
-                    role=route["role"],
-                    mode=route["mode"],
-                    model=route["model_profile"],
-                    route_snapshot=route,
-                    rag_snapshot=rag,
-                    pedagogy_snapshot=pedagogy_snapshot,
-                    parent_turn_id=retry_parent.id if retry_parent else None,
-                    operation_id=operation_id,
-                    conversation_instruction=command.conversation_instruction,
-                    created_at=now,
-                    updated_at=now,
-                )
-                self.repository.add_chat_turn(pending)
-            streaming = self.repository.update_chat_turn(
-                turn_id,
+            streaming_truth = _normalized_turn_truth(
+                turn=reserved_existing,
+                fallback_turn_id=turn_id,
+                thread_id=thread.id,
+                user_message=command.user_input,
                 assistant_message=base_reply,
                 status="streaming",
                 role=route["role"],
@@ -531,15 +548,60 @@ class ExternalDataPolicyChatService(ChatService):
                 route_snapshot=route,
                 rag_snapshot=rag,
                 pedagogy_snapshot=pedagogy_snapshot,
+                parent_turn_id=retry_parent.id if retry_parent else None,
                 operation_id=operation_id,
-                expected_operation_id=(operation_id if existing is None else existing.operation_id),
+                conversation_instruction=command.conversation_instruction,
+            )
+            expected = "pending" if reserved_existing is None or reserved_existing.status == "pending" else "interrupted"
+            streaming = self.repository.update_chat_turn(
+                turn_id,
+                assistant_message=base_reply,
+                status="streaming",
+                role=route["role"],
+                mode=route["mode"],
+                model=route["model_profile"],
+                route_snapshot=route,
+                rag_snapshot=streaming_truth.rag_snapshot,
+                pedagogy_snapshot=pedagogy_snapshot,
+                operation_id=operation_id,
+                expected_operation_id=operation_id,
                 enforce_operation_owner=True,
-                expected_status="pending" if existing is None else "interrupted",
+                expected_status=expected,
+                forbid_cancel_requested=True,
             )
             if streaming is None:
                 raise RuntimeError(f"Chat turn was not created: {turn_id}")
+        except TurnCancelled as exc:
+            self._settle_cancelled_preparation(
+                turn_id=exc.turn_id,
+                operation_id=exc.operation_id,
+                stage=exc.stage,
+                assistant_message=base_reply,
+            )
+            raise
         except Exception:
-            self.repository.release_chat_operation(thread.id, operation_id)
+            settled_failed = False
+            with suppress(Exception):
+                lingering = self.repository.get_chat_turn(turn_id)
+                if (
+                    lingering is not None
+                    and lingering.status == "pending"
+                    and lingering.operation_id == operation_id
+                ):
+                    self.repository.update_chat_turn(
+                        turn_id,
+                        assistant_message=lingering.assistant_message,
+                        status="failed",
+                        expected_status="pending",
+                        enforce_operation_owner=True,
+                        expected_operation_id=operation_id,
+                        release_operation=True,
+                        forbid_cancel_requested=True,
+                    )
+                    settled_failed = True
+            if not settled_failed:
+                with suppress(ValueError):
+                    self.repository.release_chat_operation(thread.id, operation_id)
             raise
         return PreparedChatTurn(
             thread=self.repository.get_chat_thread(thread.id) or thread,
@@ -612,6 +674,7 @@ class ExternalDataPolicyChatService(ChatService):
             expected_operation_id=prepared.turn.operation_id,
             enforce_operation_owner=True,
             expected_status="streaming",
+            forbid_cancel_requested=True,
         )
 
     def generate(self, prepared: PreparedChatTurn) -> str:

@@ -49,6 +49,29 @@ class ChatRequest(BaseModel):
     retry_of_turn_id: str | None = None
     partial_reply: str = ""
     turn_id: str | None = None
+    operation_id: str | None = None
+
+
+class CancelTurnRequest(BaseModel):
+    expected_operation_id: str = Field(min_length=1)
+    reason: str = "user_cancelled"
+
+
+class CancelTurnResponse(BaseModel):
+    turn_id: str
+    outcome: str
+    status: str | None = None
+    cancel_requested_at: str | None = None
+
+
+class TurnStatusResponse(BaseModel):
+    turn_id: str
+    status: str
+    operation_id: str | None = None
+    cancel_requested_at: str | None = None
+    cancel_stage: str | None = None
+    cancel_reason: str | None = None
+    assistant_message: str = ""
 
 
 class CommitTurnRequest(BaseModel):

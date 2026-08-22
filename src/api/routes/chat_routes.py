@@ -10,12 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.models.chat import (
+    CancelTurnRequest,
+    CancelTurnResponse,
     ChatRequest,
     ChatResponse,
     CommitTurnRequest,
     CommitTurnResponse,
+    TurnStatusResponse,
 )
-from src.application.chat_service import ChatService
+from src.application.chat_service import ChatService, TurnCancelled
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
 from src.application.research_evidence import research_sources_snapshot
@@ -32,6 +35,15 @@ WebLookupServiceDependency = Annotated[
 
 class _ClientDisconnected(Exception):
     pass
+
+
+class _TurnCancelled(Exception):
+    """Signals that a turn cancellation was observed during streaming."""
+
+    def __init__(self, turn_id: str, operation_id: str) -> None:
+        super().__init__(f"Turn cancelled during streaming: {turn_id}")
+        self.turn_id = turn_id
+        self.operation_id = operation_id
 
 
 def pedagogy_summary_from_plan(plan: Any) -> dict[str, Any]:
@@ -55,6 +67,16 @@ def chat_endpoint(
     try:
         prepared = service.start_turn(_chat_command(request, research_service))
         reply = service.generate(prepared)
+    except TurnCancelled as exc:
+        raise HTTPException(
+            status_code=499,
+            detail={
+                "message": "Chat turn cancelled",
+                "turn_id": exc.turn_id,
+                "operation_id": exc.operation_id,
+                "stage": exc.stage,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ChatResponse(
@@ -110,6 +132,16 @@ async def chat_stream_endpoint(
 
         try:
             prepared = prepare_task.result()
+        except TurnCancelled as exc:
+            yield sse_event(
+                "cancelled",
+                {
+                    "turn_id": exc.turn_id,
+                    "operation_id": exc.operation_id,
+                    "stage": exc.stage,
+                },
+            )
+            return
         except Exception as exc:
             yield sse_event(
                 "error",
@@ -152,7 +184,15 @@ async def chat_stream_endpoint(
                 if preview:
                     reply_parts.append(preview)
                     yield sse_event("token", {"text": preview})
-            async for token in _tokens_until_disconnected(stream, http_request):
+            async for token in _tokens_until_disconnected(
+                stream,
+                http_request,
+                cancel_poll=(
+                    _make_cancel_poll(service, prepared.turn.id, prepared.turn.operation_id or "")
+                    if prepared.turn.operation_id
+                    else None
+                ),
+            ):
                 reply_parts.append(token)
                 yield sse_event("token", {"text": token})
             suffix = "".join(reply_parts)
@@ -170,6 +210,19 @@ async def chat_stream_endpoint(
         except _ClientDisconnected:
             with suppress(ValueError):
                 service.interrupt_turn(prepared, "".join(reply_parts))
+            return
+        except _TurnCancelled as exc:
+            with suppress(ValueError):
+                service.finish_cancelled_turn(prepared, "".join(reply_parts))
+            yield sse_event(
+                "cancelled",
+                {
+                    "turn_id": exc.turn_id,
+                    "operation_id": exc.operation_id,
+                    "stage": "generation",
+                    "partial": "".join(reply_parts),
+                },
+            )
             return
         except asyncio.CancelledError:
             with suppress(ValueError):
@@ -277,8 +330,9 @@ async def _tokens_until_disconnected(
     request: Request,
     *,
     poll_interval: float = 0.05,
+    cancel_poll: Any = None,
 ) -> AsyncIterator[str]:
-    """Wait for provider tokens while keeping client disconnects observable."""
+    """Wait for provider tokens while keeping client disconnects and cancellation observable."""
 
     while True:
         next_token: asyncio.Task[str] = asyncio.create_task(
@@ -294,6 +348,11 @@ async def _tokens_until_disconnected(
                     with suppress(asyncio.CancelledError):
                         await next_token
                     raise _ClientDisconnected
+                if cancel_poll is not None and cancel_poll():
+                    next_token.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await next_token
+                    raise _TurnCancelled(cancel_poll.turn_id, cancel_poll.operation_id)
             try:
                 yield next_token.result()
             except StopAsyncIteration:
@@ -305,8 +364,83 @@ async def _tokens_until_disconnected(
                     await next_token
 
 
+def _make_cancel_poll(
+    service: ChatService, turn_id: str, operation_id: str
+) -> Any:
+    """Build a cooperative cancel poll callable for the streaming loop."""
+
+    def poll() -> bool:
+        return service.repository.turn_cancel_requested(turn_id, operation_id)
+
+    poll.turn_id = turn_id  # type: ignore[attr-defined]
+    poll.operation_id = operation_id  # type: ignore[attr-defined]
+    return poll
+
+
 async def _next_stream_token(stream: AsyncIterator[str]) -> str:
     return await anext(stream)
+
+
+@router.post("/chat/turns/{turn_id}/cancel", response_model=CancelTurnResponse)
+def cancel_turn_endpoint(
+    turn_id: str,
+    request: CancelTurnRequest,
+    service: ChatServiceDependency,
+) -> CancelTurnResponse:
+    """Register a cooperative cancellation request for an active turn.
+
+    G12 decision 20: the POST only confirms the request was registered; the
+    client polls the turn-status endpoint for the durable terminal state.
+    Pre-reservation cancellations (turn row not yet persisted) wait briefly
+    for the row to appear, mirroring the WebLookup ``cancel_owned_by_turn``
+    bounded-wait precedent.
+    """
+    import time
+
+    deadline = time.monotonic() + 2.0
+    outcome = "not_found"
+    turn = None
+    while True:
+        outcome, turn = service.repository.request_turn_cancel(
+            turn_id,
+            expected_operation_id=request.expected_operation_id,
+            reason=request.reason,
+        )
+        if outcome != "not_found" or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Chat turn not found")
+    if outcome == "operation_mismatch":
+        raise HTTPException(status_code=409, detail="Chat turn operation mismatch")
+    status = turn.status if turn is not None else None
+    cancel_at = turn.cancel_requested_at if turn is not None else None
+    return CancelTurnResponse(
+        turn_id=turn_id,
+        outcome=outcome,
+        status=status,
+        cancel_requested_at=cancel_at,
+    )
+
+
+@router.get("/chat/turns/{turn_id}/status", response_model=TurnStatusResponse)
+def turn_status_endpoint(
+    turn_id: str,
+    service: ChatServiceDependency,
+) -> TurnStatusResponse:
+    """Poll the durable terminal state of a turn (G12 decision 20)."""
+    turn = service.repository.get_chat_turn(turn_id)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="Chat turn not found")
+    return TurnStatusResponse(
+        turn_id=turn_id,
+        status=turn.status,
+        operation_id=turn.operation_id,
+        cancel_requested_at=turn.cancel_requested_at,
+        cancel_stage=turn.cancel_stage,
+        cancel_reason=turn.cancel_reason,
+        assistant_message=turn.assistant_message,
+    )
 
 
 @router.post(
@@ -432,4 +566,5 @@ def _chat_command(
         retry_of_turn_id=request.retry_of_turn_id,
         partial_reply=request.partial_reply,
         turn_id=request.turn_id,
+        operation_id=request.operation_id,
     )

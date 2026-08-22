@@ -54,6 +54,9 @@ class ChatTurn:
     conversation_instruction: str = ""
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+    cancel_requested_at: str | None = None
+    cancel_stage: str | None = None
+    cancel_reason: str | None = None
 
     def __post_init__(self) -> None:
         # ChatTurn owns versioned projections derived from already persisted raw

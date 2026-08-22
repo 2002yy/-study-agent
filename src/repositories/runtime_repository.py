@@ -354,15 +354,39 @@ class RuntimeRepository:
                 (cutoff,),
             ).fetchall()
             for row in rows:
-                connection.execute(
+                stale_turns = connection.execute(
                     """
-                    UPDATE chat_turns
-                    SET status = 'interrupted', updated_at = ?
+                    SELECT id, assistant_message, cancel_requested_at FROM chat_turns
                     WHERE thread_id = ? AND operation_id = ?
                       AND status IN ('pending', 'streaming')
                     """,
-                    (updated_at, row["id"], row["active_operation_id"]),
-                )
+                    (row["id"], row["active_operation_id"]),
+                ).fetchall()
+                for stale in stale_turns:
+                    if stale["cancel_requested_at"] is not None:
+                        terminal = (
+                            "interrupted"
+                            if str(stale["assistant_message"] or "").strip()
+                            else "cancelled"
+                        )
+                        connection.execute(
+                            """
+                            UPDATE chat_turns
+                            SET status = ?, cancel_stage = 'recovery',
+                                cancel_reason = 'stale_recovery', updated_at = ?
+                            WHERE id = ? AND status IN ('pending', 'streaming')
+                            """,
+                            (terminal, updated_at, stale["id"]),
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE chat_turns
+                            SET status = 'interrupted', updated_at = ?
+                            WHERE id = ? AND status IN ('pending', 'streaming')
+                            """,
+                            (updated_at, stale["id"]),
+                        )
                 connection.execute(
                     """
                     UPDATE chat_threads
@@ -374,6 +398,161 @@ class RuntimeRepository:
                     (updated_at, row["id"], row["active_operation_id"]),
                 )
         return len(rows)
+
+    def request_turn_cancel(
+        self,
+        turn_id: str,
+        *,
+        expected_operation_id: str,
+        reason: str = "user_cancelled",
+    ) -> tuple[str, ChatTurn | None]:
+        """Register a cooperative cancellation request for an active turn.
+
+        Returns ``(outcome, turn)``. Outcomes:
+        - ``accepted``: request registered; worker checkpoints will observe it
+        - ``already_completed``: the operation committed ``completed`` first
+        - ``already_terminal``: the turn is already in another terminal state
+        - ``not_found``: the turn row does not exist yet (pre-reservation)
+        - ``operation_mismatch``: the turn belongs to a different operation
+        """
+        now = utc_now()
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_turns WHERE id = ?", (turn_id,)
+            ).fetchone()
+            if row is None:
+                return "not_found", None
+            turn = _chat_turn_from_row(row)
+            if turn.operation_id != expected_operation_id:
+                return "operation_mismatch", turn
+            if turn.status in {"pending", "streaming"}:
+                if turn.cancel_requested_at is not None:
+                    return "accepted", turn
+                cursor = connection.execute(
+                    """
+                    UPDATE chat_turns
+                    SET cancel_requested_at = ?, cancel_reason = ?, updated_at = ?
+                    WHERE id = ? AND operation_id = ?
+                      AND status IN ('pending', 'streaming')
+                      AND cancel_requested_at IS NULL
+                    """,
+                    (now, reason, now, turn_id, expected_operation_id),
+                )
+                if cursor.rowcount == 1:
+                    refreshed = connection.execute(
+                        "SELECT * FROM chat_turns WHERE id = ?", (turn_id,)
+                    ).fetchone()
+                    return "accepted", _chat_turn_from_row(refreshed)
+                resolved = connection.execute(
+                    "SELECT * FROM chat_turns WHERE id = ?", (turn_id,)
+                ).fetchone()
+                resolved_turn = _chat_turn_from_row(resolved)
+                if resolved_turn.status == "completed":
+                    return "already_completed", resolved_turn
+                return "already_terminal", resolved_turn
+            if turn.status == "completed":
+                return "already_completed", turn
+            return "already_terminal", turn
+
+    def turn_cancel_requested(self, turn_id: str, operation_id: str) -> bool:
+        """Cooperative cancellation poll for worker checkpoints."""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT cancel_requested_at FROM chat_turns
+                WHERE id = ? AND operation_id = ?
+                """,
+                (turn_id, operation_id),
+            ).fetchone()
+        return row is not None and row["cancel_requested_at"] is not None
+
+    def finish_turn_cancel(
+        self,
+        turn_id: str,
+        *,
+        operation_id: str,
+        stage: str,
+        reason: str,
+        assistant_message: str,
+    ) -> ChatTurn | None:
+        """Atomically settle an accepted cancellation into a durable terminal state.
+
+        ``cancelled`` when no partial output is visible, ``interrupted`` when a
+        partial reply must be preserved. The thread operation lock is released
+        in the same transaction. Returns ``None`` when the CAS fails (the turn
+        already reached a terminal state, e.g. ``completed`` won the race).
+        """
+        now = utc_now()
+        terminal = "interrupted" if assistant_message.strip() else "cancelled"
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chat_turns
+                SET status = ?, assistant_message = ?, cancel_stage = ?,
+                    cancel_reason = ?, updated_at = ?
+                WHERE id = ? AND operation_id = ?
+                  AND status IN ('pending', 'streaming')
+                  AND cancel_requested_at IS NOT NULL
+                """,
+                (
+                    terminal,
+                    assistant_message,
+                    stage,
+                    reason,
+                    now,
+                    turn_id,
+                    operation_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            connection.execute(
+                """
+                UPDATE chat_threads
+                SET active_operation_id = NULL, active_operation_started_at = NULL,
+                    updated_at = ?, version = version + 1
+                WHERE id = (SELECT thread_id FROM chat_turns WHERE id = ?)
+                  AND active_operation_id = ?
+                """,
+                (now, turn_id, operation_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM chat_turns WHERE id = ?", (turn_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return _chat_turn_from_row(row)
+
+    def reassign_chat_turn_operation(
+        self,
+        turn_id: str,
+        *,
+        expected_operation_id: str | None,
+        new_operation_id: str,
+    ) -> ChatTurn | None:
+        """Move an interrupted turn to a fresh operation and clear stale cancel flags.
+
+        A new operation never inherits an old cancellation mark (G12 decision 8).
+        """
+        now = utc_now()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chat_turns
+                SET operation_id = ?, cancel_requested_at = NULL,
+                    cancel_stage = NULL, cancel_reason = NULL, updated_at = ?
+                WHERE id = ? AND status = 'interrupted' AND operation_id IS ?
+                """,
+                (new_operation_id, now, turn_id, expected_operation_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM chat_turns WHERE id = ?", (turn_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return _chat_turn_from_row(row)
 
     def add_chat_turn(self, turn: ChatTurn) -> ChatTurn:
         with self.database.connect() as connection:
@@ -390,9 +569,10 @@ class RuntimeRepository:
                 INSERT INTO chat_turns(
                     id, thread_id, user_message, assistant_message, status, role, mode, model,
                     route_snapshot, rag_snapshot, pedagogy_snapshot, parent_turn_id, operation_id,
-                    conversation_instruction, created_at, updated_at
+                    conversation_instruction, created_at, updated_at,
+                    cancel_requested_at, cancel_stage, cancel_reason
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn.id,
@@ -411,6 +591,9 @@ class RuntimeRepository:
                     turn.conversation_instruction,
                     turn.created_at,
                     turn.updated_at,
+                    turn.cancel_requested_at,
+                    turn.cancel_stage,
+                    turn.cancel_reason,
                 ),
             )
             connection.execute(
@@ -497,6 +680,7 @@ class RuntimeRepository:
         expected_status: str | None = None,
         release_operation: bool = False,
         supersede_parent_turn_id: str | None = None,
+        forbid_cancel_requested: bool = False,
     ) -> ChatTurn | None:
         current = self.get_chat_turn(turn_id)
         if current is None:
@@ -515,6 +699,10 @@ class RuntimeRepository:
         if expected_status is not None:
             conditions.append("status = ?")
             condition_values.append(expected_status)
+        if forbid_cancel_requested:
+            # Monotonic fence: an operation whose cancellation was accepted can
+            # never advance again (G12 decision 6).
+            conditions.append("cancel_requested_at IS NULL")
         with self.database.connect() as connection:
             cursor = connection.execute(
                 f"""
@@ -619,6 +807,7 @@ class RuntimeRepository:
                     route_snapshot = ?, rag_snapshot = ?,
                     pedagogy_snapshot = ?, updated_at = ?
                 WHERE id = ? AND status = 'streaming' AND operation_id = ?
+                  AND cancel_requested_at IS NULL
                 """,
                 (
                     assistant_message,
@@ -704,6 +893,9 @@ def _chat_turn_from_row(row: sqlite3.Row) -> ChatTurn:
         conversation_instruction=row["conversation_instruction"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        cancel_requested_at=row["cancel_requested_at"],
+        cancel_stage=row["cancel_stage"],
+        cancel_reason=row["cancel_reason"],
     )
 
 

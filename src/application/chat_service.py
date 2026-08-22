@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Callable, Iterator
@@ -24,6 +25,20 @@ from src.tools.local_knowledge import retrieve_local_knowledge
 from src.tools.web_agent import WebToolTrace, web_tools_disabled
 
 PERFORMANCE_MODES = {"fast", "standard", "deep"}
+
+
+class TurnCancelled(Exception):
+    """Raised at a cooperative checkpoint when a turn cancellation was accepted.
+
+    The repository already holds the ``cancel_requested_at`` marker; the worker
+    is expected to settle the durable terminal state before propagating this.
+    """
+
+    def __init__(self, *, stage: str, turn_id: str, operation_id: str) -> None:
+        super().__init__(f"Chat turn cancelled at stage '{stage}': {turn_id}")
+        self.stage = stage
+        self.turn_id = turn_id
+        self.operation_id = operation_id
 
 
 @dataclass(frozen=True)
@@ -53,6 +68,7 @@ class ChatCommand:
     retry_of_turn_id: str | None = None
     partial_reply: str = ""
     turn_id: str | None = None
+    operation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +122,71 @@ class ChatService:
         self.repository = repository
         self.dependencies = dependencies or ChatDependencies()
 
+    def _make_cancel_check(
+        self, turn_id: str, operation_id: str
+    ) -> Callable[[str], None]:
+        """Build a cooperative checkpoint callable for one operation.
+
+        Each checkpoint call is a repository poll; the first accepted cancel
+        raises :class:`TurnCancelled`. A ``None`` turn/operation pair short
+        circuits to a no-op so legacy requests without a handle remain usable.
+        """
+
+        def check(stage: str) -> None:
+            if self.repository.turn_cancel_requested(turn_id, operation_id):
+                raise TurnCancelled(
+                    stage=stage, turn_id=turn_id, operation_id=operation_id
+                )
+
+        return check
+
+    def _settle_cancelled_preparation(
+        self,
+        *,
+        turn_id: str,
+        operation_id: str,
+        stage: str,
+        assistant_message: str,
+    ) -> None:
+        """Settle a cancellation raised during pre-answer preparation.
+
+        With no visible output the turn settles to ``cancelled``; a continuation
+        carrying a previously persisted partial keeps it as ``interrupted``.
+        The repository releases the thread operation in the same transaction.
+        """
+
+        settled = self.repository.finish_turn_cancel(
+            turn_id,
+            operation_id=operation_id,
+            stage=stage,
+            reason="user_cancelled",
+            assistant_message=assistant_message,
+        )
+        if settled is None:
+            # The operation completed first or already reached a terminal
+            # state; the fence already released the operation.
+            return
+
+    def finish_cancelled_turn(
+        self, prepared: PreparedChatTurn, partial: str
+    ) -> ChatTurn | None:
+        """Settle a cancellation raised during streaming generation.
+
+        Visible partial output becomes ``interrupted`` (preserved), otherwise
+        ``cancelled``. Returns ``None`` when the turn already settled (race
+        with completion); callers must tolerate that outcome.
+        """
+        reply = (
+            f"{prepared.base_reply}{partial}" if prepared.is_continuation else partial
+        )
+        return self.repository.finish_turn_cancel(
+            prepared.turn.id,
+            operation_id=prepared.turn.operation_id or "",
+            stage="generation",
+            reason="user_cancelled",
+            assistant_message=reply,
+        )
+
     def start_turn(self, command: ChatCommand) -> PreparedChatTurn:
         command, existing, retry_parent = self._validate_turn_command(command)
         runtime_modes = self._runtime_modes(command.performance_mode)
@@ -119,7 +200,7 @@ class ChatService:
         if existing is not None and not is_continuation:
             raise ValueError(f"Chat turn already exists: {turn_id}")
         thread = self.repository.ensure_chat_thread(thread_id)
-        operation_id = new_id("op")
+        operation_id = command.operation_id or new_id("op")
         thread = self.repository.acquire_chat_operation(
             thread.id,
             operation_id,
@@ -128,7 +209,38 @@ class ChatService:
                 "conversationInstruction": command.conversation_instruction,
             },
         )
+        # Reserve the turn before any expensive preparation (G12 decision 2) so a
+        # cancellation request can find it even before retrieval starts.
+        reserved_existing = existing
+        if existing is None:
+            self.repository.add_chat_turn(
+                ChatTurn(
+                    id=turn_id,
+                    thread_id=thread.id,
+                    user_message=command.user_input,
+                    assistant_message="",
+                    status="pending",
+                    parent_turn_id=retry_parent.id if retry_parent else None,
+                    operation_id=operation_id,
+                    conversation_instruction=command.conversation_instruction,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                )
+            )
+        else:
+            reassign = self.repository.reassign_chat_turn_operation(
+                turn_id,
+                expected_operation_id=existing.operation_id,
+                new_operation_id=operation_id,
+            )
+            if reassign is None:
+                self.repository.release_chat_operation(thread.id, operation_id)
+                raise ValueError(f"Chat turn cannot continue from current state: {turn_id}")
+            reserved_existing = reassign
+        cancel_check = self._make_cancel_check(turn_id, operation_id)
+        base_reply = ""
         try:
+            cancel_check("route")
             route = self.dependencies.route_request(
                 user_input=command.user_input,
                 selected_role=command.selected_role,
@@ -147,6 +259,7 @@ class ChatService:
                 )
             )
             evidence_ids = self._previous_disclosed_evidence_ids(thread.id)
+            cancel_check("pedagogy_evaluate")
             learner_evaluation = self.dependencies.pedagogy_evaluation.evaluate_learner(
                 learner_input=command.user_input,
                 state=learning_state,
@@ -183,6 +296,7 @@ class ChatService:
                 state=learning_state,
                 plan=pedagogy_plan,
             )
+            cancel_check("retrieval")
             rag_result = self.dependencies.retrieve_local_knowledge(
                 retrieval_plan.private_query,
                 enabled=command.rag_enabled,
@@ -193,6 +307,7 @@ class ChatService:
             )
             rag = rag_result.to_dict()
             rag["query_plan"] = retrieval_plan.to_dict()
+            cancel_check("web_tools")
             web_tools = self.dependencies.resolve_web_tools(
                 command.user_input,
                 model_profile=route["model_profile"],
@@ -251,7 +366,6 @@ class ChatService:
                     existing.assistant_message if existing else "",
                     command.partial_reply,
                 )
-            now = utc_now()
             pedagogy_snapshot = {
                 **pedagogy_plan.to_dict(),
                 "learning_state_before": learning_state.to_dict(),
@@ -259,28 +373,8 @@ class ChatService:
                 "evidence_disclosure": disclosed.policy,
                 "evidence_units": list(disclosed.units),
             }
-            if existing is None:
-                pending = ChatTurn(
-                    id=turn_id,
-                    thread_id=thread.id,
-                    user_message=command.user_input,
-                    assistant_message=base_reply,
-                    status="pending",
-                    role=route["role"],
-                    mode=route["mode"],
-                    model=route["model_profile"],
-                    route_snapshot=route,
-                    rag_snapshot=rag,
-                    pedagogy_snapshot=pedagogy_snapshot,
-                    parent_turn_id=retry_parent.id if retry_parent else None,
-                    operation_id=operation_id,
-                    conversation_instruction=command.conversation_instruction,
-                    created_at=now,
-                    updated_at=now,
-                )
-                self.repository.add_chat_turn(pending)
             streaming_truth = _normalized_turn_truth(
-                turn=existing,
+                turn=reserved_existing,
                 fallback_turn_id=turn_id,
                 thread_id=thread.id,
                 user_message=command.user_input,
@@ -296,6 +390,7 @@ class ChatService:
                 operation_id=operation_id,
                 conversation_instruction=command.conversation_instruction,
             )
+            expected = "pending" if reserved_existing is None or reserved_existing.status == "pending" else "interrupted"
             streaming = self.repository.update_chat_turn(
                 turn_id,
                 assistant_message=base_reply,
@@ -307,14 +402,47 @@ class ChatService:
                 rag_snapshot=streaming_truth.rag_snapshot,
                 pedagogy_snapshot=pedagogy_snapshot,
                 operation_id=operation_id,
-                expected_operation_id=(operation_id if existing is None else existing.operation_id),
+                expected_operation_id=operation_id,
                 enforce_operation_owner=True,
-                expected_status="pending" if existing is None else "interrupted",
+                expected_status=expected,
+                forbid_cancel_requested=True,
             )
             if streaming is None:
                 raise RuntimeError(f"Chat turn was not created: {turn_id}")
+        except TurnCancelled as exc:
+            self._settle_cancelled_preparation(
+                turn_id=exc.turn_id,
+                operation_id=exc.operation_id,
+                stage=exc.stage,
+                assistant_message=base_reply,
+            )
+            raise
         except Exception:
-            self.repository.release_chat_operation(thread.id, operation_id)
+            # Settlement: ensure a reserved turn does not linger in pending
+            # when preparation failed. The settlement transaction releases the
+            # thread operation; fall back to a bare release when it cannot run.
+            settled_failed = False
+            with suppress(Exception):
+                lingering = self.repository.get_chat_turn(turn_id)
+                if (
+                    lingering is not None
+                    and lingering.status == "pending"
+                    and lingering.operation_id == operation_id
+                ):
+                    self.repository.update_chat_turn(
+                        turn_id,
+                        assistant_message=lingering.assistant_message,
+                        status="failed",
+                        expected_status="pending",
+                        enforce_operation_owner=True,
+                        expected_operation_id=operation_id,
+                        release_operation=True,
+                        forbid_cancel_requested=True,
+                    )
+                    settled_failed = True
+            if not settled_failed:
+                with suppress(ValueError):
+                    self.repository.release_chat_operation(thread.id, operation_id)
             raise
         return PreparedChatTurn(
             thread=self.repository.get_chat_thread(thread.id) or thread,
@@ -336,6 +464,10 @@ class ChatService:
         )
 
     def generate(self, prepared: PreparedChatTurn) -> str:
+        cancel_check = self._make_cancel_check(
+            prepared.turn.id, prepared.turn.operation_id or ""
+        )
+        cancel_check("generate_pre")
         try:
             suffix = self.dependencies.chat(
                 prepared.messages,
@@ -345,8 +477,30 @@ class ChatService:
                 ),
                 task_name="single_chat",
             )
+        except TurnCancelled:
+            # Fence: settle to a durable terminal state without the model
+            # output; the repository releases the thread operation.
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage="generate_pre",
+                assistant_message=prepared.base_reply if prepared.is_continuation else "",
+            )
+            raise
         except Exception:
             self.fail_turn(prepared)
+            raise
+        try:
+            cancel_check("generate_post")
+        except TurnCancelled:
+            # Decision 9: the synchronous provider call returned naturally but
+            # its output is discarded — the accepted cancel fences completion.
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage="generate_post",
+                assistant_message=prepared.base_reply if prepared.is_continuation else "",
+            )
             raise
         return self.complete_turn(prepared, suffix).assistant_message
 
@@ -471,6 +625,7 @@ class ChatService:
             enforce_operation_owner=True,
             expected_status="streaming",
             release_operation=True,
+            forbid_cancel_requested=True,
         )
         if updated is None:
             raise RuntimeError(f"Chat turn disappeared: {prepared.turn.id}")
@@ -507,6 +662,7 @@ class ChatService:
             enforce_operation_owner=True,
             expected_status="streaming",
             release_operation=True,
+            forbid_cancel_requested=True,
         )
         if updated is None:
             raise RuntimeError(f"Chat turn disappeared: {prepared.turn.id}")
@@ -629,6 +785,7 @@ class ChatService:
             enforce_operation_owner=existing.status == "streaming",
             expected_status=existing.status,
             release_operation=existing.status == "streaming",
+            forbid_cancel_requested=True,
         )
         if updated is None:
             raise ValueError(f"Chat turn not found: {turn_id}")

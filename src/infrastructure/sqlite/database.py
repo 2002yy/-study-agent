@@ -10,7 +10,7 @@ from typing import Callable
 from src.infrastructure.sqlite.learning_semantic_schema import LEARNING_SEMANTIC_MIGRATION_V18
 from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -445,6 +445,14 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ADD COLUMN semantic_review_provider TEXT NOT NULL DEFAULT '';
         ALTER TABLE pedagogy_eval_runs
             ADD COLUMN semantic_review_data_categories TEXT NOT NULL DEFAULT '[]';
+        """,
+    ),
+    (
+        20,
+        """
+        ALTER TABLE chat_turns ADD COLUMN cancel_requested_at TEXT;
+        ALTER TABLE chat_turns ADD COLUMN cancel_stage TEXT;
+        ALTER TABLE chat_turns ADD COLUMN cancel_reason TEXT;
         """,
     ),
 )
