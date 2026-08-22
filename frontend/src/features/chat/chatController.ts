@@ -671,7 +671,21 @@ export function useChatController(options: ControllerOptions) {
     cancelWorkspaceRuns();
     const isActive = sessionId === state.activeChatThreadId;
     try {
-      await archiveSession(sessionId);
+      const archived = await archiveSession(sessionId);
+      if (archived.queued) {
+        // G12 decision 15: the intent is persisted server-side; it executes
+        // when the cancelled operation settles (or on restart). The user can
+        // still switch or start a new session right away.
+        if (isActive) {
+          const created = await createNewSession();
+          transitionSession(created.session_id, seedMessages, null);
+          options.setInput("");
+          options.clearChatArtifacts();
+          options.setConversationInstruction("");
+        }
+        await options.refresh();
+        return;
+      }
       if (isActive) {
         const created = await createNewSession();
         transitionSession(created.session_id, seedMessages, null);
@@ -681,6 +695,8 @@ export function useChatController(options: ControllerOptions) {
       }
       await options.refresh();
     } catch (error) {
+      // Decision 15: a failed archive keeps the session active and shows a
+      // distinct error instead of silently dropping the session.
       options.setOperationError(
         `会话归档失败：${error instanceof Error ? error.message : "会话归档失败"}`
       );

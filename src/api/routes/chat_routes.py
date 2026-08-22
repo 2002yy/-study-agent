@@ -22,7 +22,12 @@ from src.application.chat_service import ChatService, TurnCancelled
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
 from src.application.research_evidence import research_sources_snapshot
-from src.application.runtime_repository import get_chat_service, get_web_lookup_service
+from src.application.runtime_repository import (
+    get_chat_service,
+    get_session_service,
+    get_web_lookup_service,
+)
+from src.application.session_service import SessionService
 from src.application.web_lookup_service import WebLookupService
 
 router = APIRouter(tags=["chat"])
@@ -31,6 +36,17 @@ WebLookupServiceDependency = Annotated[
     WebLookupService,
     Depends(get_web_lookup_service),
 ]
+SessionServiceDependency = Annotated[SessionService, Depends(get_session_service)]
+
+
+def _drain_queued_archive(
+    session_service: SessionService | None, thread_id: str | None
+) -> None:
+    """Best-effort execution of a persisted "archive after cancel" intent."""
+    if session_service is None or not thread_id:
+        return
+    with suppress(Exception):
+        session_service.execute_queued_archive_if_due(thread_id)
 
 
 class _ClientDisconnected(Exception):
@@ -95,6 +111,7 @@ async def chat_stream_endpoint(
     http_request: Request,
     service: ChatServiceDependency,
     research_service: WebLookupServiceDependency,
+    session_service: SessionServiceDependency,
 ) -> StreamingResponse:
     try:
         command = _chat_command(chat_request, research_service)
@@ -248,6 +265,8 @@ async def chat_stream_endpoint(
                         service.interrupt_turn(prepared, "".join(reply_parts))
                     else:
                         service.fail_turn(prepared)
+            # G12 decision 15: run a queued archive once the operation settled.
+            _drain_queued_archive(session_service, prepared.thread.id)
 
     return StreamingResponse(
         events(),
@@ -427,11 +446,15 @@ def cancel_turn_endpoint(
 def turn_status_endpoint(
     turn_id: str,
     service: ChatServiceDependency,
+    session_service: SessionServiceDependency,
 ) -> TurnStatusResponse:
     """Poll the durable terminal state of a turn (G12 decision 20)."""
     turn = service.repository.get_chat_turn(turn_id)
     if turn is None:
         raise HTTPException(status_code=404, detail="Chat turn not found")
+    # G12 decision 15: the status poll doubles as a queue drain trigger, so a
+    # persisted archive intent executes even without a live stream finally.
+    _drain_queued_archive(session_service, turn.thread_id)
     return TurnStatusResponse(
         turn_id=turn_id,
         status=turn.status,

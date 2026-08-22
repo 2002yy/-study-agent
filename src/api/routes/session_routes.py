@@ -161,10 +161,23 @@ def archive_session(
     service: SessionServiceDependency,
 ) -> SessionArchiveResponse:
     try:
-        thread = service.archive_session(session_id)
+        outcome = service.request_archive(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if outcome.get("status") == "queued":
+        # G12 decision 15: persisted server-side; executes when the cancelled
+        # operation settles (or on restart via the startup sweep).
+        return SessionArchiveResponse(
+            session_id=session_id,
+            kind="archived",
+            path="",
+            archived=False,
+            queued=True,
+        )
+    thread = service.repository.get_chat_thread(session_id)
     if thread is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if thread.status != "archived":
         raise HTTPException(status_code=404, detail="Session has no messages to archive")
     return SessionArchiveResponse(
         session_id=thread.id,
@@ -172,6 +185,16 @@ def archive_session(
         path=thread.export_path,
         archived=True,
     )
+
+
+@router.delete("/sessions/{session_id}/archive-queue")
+def cancel_queued_archive(
+    session_id: str,
+    service: SessionServiceDependency,
+) -> dict[str, Any]:
+    """User-visible "cancel the pending archive" (G12 decision 15)."""
+    changed = service.cancel_pending_archive(session_id)
+    return {"session_id": session_id, "cancelled": changed}
 
 
 @router.post("/sessions/{session_id}/flush")

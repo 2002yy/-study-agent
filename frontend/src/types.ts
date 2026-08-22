@@ -604,6 +604,9 @@ export type SessionArchiveResponse = {
   kind: string;
   path: string;
   archived: boolean;
+  // G12 decision 15: the archive intent is persisted server-side and will
+  // execute once the cancelled operation settles (or on restart).
+  queued?: boolean;
 };
 
 export type ApiSnapshot = {

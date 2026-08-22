@@ -286,6 +286,100 @@ class RuntimeRepository:
                 recovered += 1
         return recovered
 
+    def queue_archive_after_cancel(
+        self, thread_id: str, *, operation_id: str
+    ) -> ChatThread | None:
+        """Persist an "archive once this operation settles" intent (decision 15).
+
+        Bound to the owning operation so a stale marker can never fire for a
+        later operation. Survives refresh, close, and restart.
+        """
+        updated_at = utc_now()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chat_threads
+                SET archive_after_cancel_operation_id = ?, updated_at = ?,
+                    version = version + 1
+                WHERE id = ? AND active_operation_id = ? AND status = 'active'
+                """,
+                (operation_id, updated_at, thread_id, operation_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM chat_threads WHERE id = ?", (thread_id,)
+            ).fetchone()
+        return _chat_thread_from_row(row) if row is not None else None
+
+    def cancel_queued_archive(self, thread_id: str) -> bool:
+        """User-visible "cancel the pending archive" (decision 15)."""
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chat_threads
+                SET archive_after_cancel_operation_id = NULL,
+                    updated_at = ?, version = version + 1
+                WHERE id = ? AND archive_after_cancel_operation_id IS NOT NULL
+                """,
+                (utc_now(), thread_id),
+            )
+        return cursor.rowcount == 1
+
+    def pop_archive_after_cancel(self, thread_id: str, *, operation_id: str) -> bool:
+        """Exactly-once consumption of the queued archive marker."""
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chat_threads
+                SET archive_after_cancel_operation_id = NULL,
+                    updated_at = ?, version = version + 1
+                WHERE id = ?
+                  AND archive_after_cancel_operation_id = ?
+                """,
+                (utc_now(), thread_id, operation_id),
+            )
+        return cursor.rowcount == 1
+
+    def archive_queue_due(self, thread_id: str) -> str | None:
+        """Return the bound operation id when the queue is ready to execute.
+
+        Ready means: a marker exists, that operation no longer owns the thread,
+        and its turn reached a terminal state (no pending/streaming remains).
+        """
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT t.id AS thread_id,
+                       t.archive_after_cancel_operation_id AS op_id
+                FROM chat_threads t
+                WHERE t.id = ? AND t.archive_after_cancel_operation_id IS NOT NULL
+                """,
+                (thread_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            operation_id = row["op_id"]
+            active = connection.execute(
+                "SELECT 1 FROM chat_turns WHERE thread_id = ? AND operation_id = ? "
+                "AND status IN ('pending', 'streaming') LIMIT 1",
+                (thread_id, operation_id),
+            ).fetchone()
+        if active is not None:
+            return None
+        return operation_id
+
+    def list_threads_with_queued_archive(self) -> list[str]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM chat_threads
+                WHERE archive_after_cancel_operation_id IS NOT NULL
+                ORDER BY updated_at
+                """
+            ).fetchall()
+        return [row["id"] for row in rows]
+
     def acquire_chat_operation(
         self,
         thread_id: str,
@@ -913,9 +1007,9 @@ def _chat_thread_from_row(row: sqlite3.Row) -> ChatThread:
         active_operation_started_at=row["active_operation_started_at"],
         archive_operation_id=row["archive_operation_id"],
         archive_started_at=row["archive_started_at"],
+        archive_after_cancel_operation_id=row["archive_after_cancel_operation_id"],
         version=row["version"],
     )
-
 
 def _require_active_thread(connection: sqlite3.Connection, thread_id: str) -> None:
     row = connection.execute(

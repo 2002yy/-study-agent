@@ -208,13 +208,24 @@ def get_rag_run_service():
 def get_session_service():
     from src.application.session_service import SessionService
 
-    return SessionService(
+    service = SessionService(
         get_runtime_repository(),
         summary_repository=get_thread_summary_repository(),
         navigation_repository=get_session_navigation_repository(),
         current_dir=runtime_current_dir(),
         archive_dir=runtime_archive_dir(),
     )
+    # G12 decision 15: queued "archive after cancel" intents survive restarts;
+    # drain any that became due while the process was down.
+    try:
+        service.process_pending_archives()
+    except Exception:  # pragma: no cover - startup must not fail on this
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Startup archive-queue sweep failed", exc_info=True
+        )
+    return service
 
 
 @lru_cache(maxsize=1)

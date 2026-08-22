@@ -39,6 +39,9 @@ class SessionArchiveResponse(BaseModel):
     kind: str
     path: str
     archived: bool
+    # G12 decision 15: the archive intent was persisted and will execute once
+    # the cancelled operation settles.
+    queued: bool = False
 
 
 class SessionTitleUpdateRequest(BaseModel):

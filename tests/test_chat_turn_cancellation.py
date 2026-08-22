@@ -841,3 +841,132 @@ def test_retry_after_cancel_creates_fresh_operation_and_retrieval(tmp_path):
     assert retried.turn.operation_id == "op_r2"
     assert retried.turn.cancel_requested_at is None
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Persisted archive queue (G12 decisions 10/15)
+# ---------------------------------------------------------------------------
+
+
+def _session_service(repository, base_dir):
+    from pathlib import Path
+
+    from src.application.session_service import SessionService
+
+    base = Path(base_dir)
+    return SessionService(
+        repository,
+        current_dir=base / "current",
+        archive_dir=base / "sessions",
+    )
+
+
+def test_archive_queues_while_cancellation_pending(tmp_path):
+    service, repository = _service(tmp_path)
+    session_svc = _session_service(repository, tmp_path)
+    prepared = service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_aq", operation_id="op_aq")
+    )
+    repository.request_turn_cancel(
+        prepared.turn.id, expected_operation_id=prepared.turn.operation_id
+    )
+    outcome = session_svc.request_archive("chat_aq")
+    assert outcome == {"status": "queued", "queued": True}
+    thread = repository.get_chat_thread("chat_aq")
+    assert thread.archive_after_cancel_operation_id == "op_aq"
+    # The thread must not be archived while the operation runs.
+    assert thread.status == "active"
+
+
+def test_archive_rejected_without_cancel_marker(tmp_path):
+    service, repository = _service(tmp_path)
+    session_svc = _session_service(repository, tmp_path)
+    service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_na", operation_id="op_na")
+    )
+    with pytest.raises(ValueError):
+        session_svc.request_archive("chat_na")
+    thread = repository.get_chat_thread("chat_na")
+    assert thread.archive_after_cancel_operation_id is None
+
+
+def test_queued_archive_executes_after_settlement(tmp_path):
+    service, repository = _service(tmp_path)
+    session_svc = _session_service(repository, tmp_path)
+    prepared = service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_qe", operation_id="op_qe")
+    )
+    service.complete_turn(prepared, "answer body")
+    # Queue after settlement (race window): request_archive sees no active op
+    # and archives synchronously.
+    outcome = session_svc.request_archive("chat_qe")
+    assert outcome["status"] == "archived"
+    thread = repository.get_chat_thread("chat_qe")
+    assert thread.status == "archived"
+
+
+def test_queue_survives_restart_and_drains(tmp_path):
+    """Decision 15: refresh/close/restart still executes the queued archive."""
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    deps = _dependencies()
+    service = ChatService(repository, deps)
+    command = ChatCommand(
+        user_input="q", thread_id="chat_rs", operation_id="op_rs", turn_id="turn_rs"
+    )
+    prepared = service.start_turn(command)
+    # Cancel stays pending (accepted, not yet settled) while the archive
+    # intent is persisted.
+    outcome_ok, _ = repository.request_turn_cancel(
+        prepared.turn.id, expected_operation_id=command.operation_id
+    )
+    assert outcome_ok == "accepted"
+
+    from src.application.session_service import SessionService
+
+    session_svc = SessionService(
+        repository,
+        current_dir=tmp_path / "current",
+        archive_dir=tmp_path / "sessions",
+    )
+    outcome = session_svc.request_archive("chat_rs")
+    assert outcome == {"status": "queued", "queued": True}
+    # Settle the cancellation; the marker survives until someone drains it.
+    repository.finish_turn_cancel(
+        prepared.turn.id,
+        operation_id=command.operation_id,
+        stage="web_tools",
+        reason="user_cancelled",
+        assistant_message="",
+    )
+    thread = repository.get_chat_thread("chat_rs")
+    assert thread.archive_after_cancel_operation_id == "op_rs"
+    # Simulate restart: a brand-new service instance drains the queue.
+    restarted_svc = SessionService(
+        repository,
+        current_dir=tmp_path / "current",
+        archive_dir=tmp_path / "sessions",
+    )
+    processed = restarted_svc.process_pending_archives()
+    assert processed >= 1
+    thread = repository.get_chat_thread("chat_rs")
+    assert thread.status == "archived"
+    assert thread.archive_after_cancel_operation_id is None
+
+
+def test_cancel_pending_archive_clears_marker(tmp_path):
+    service, repository = _service(tmp_path)
+    session_svc = _session_service(repository, tmp_path)
+    prepared = service.start_turn(
+        ChatCommand(user_input="q", thread_id="chat_ca", operation_id="op_ca")
+    )
+    repository.request_turn_cancel(
+        prepared.turn.id, expected_operation_id=prepared.turn.operation_id
+    )
+    outcome = session_svc.request_archive("chat_ca")
+    assert outcome["queued"] is True
+    changed = session_svc.cancel_pending_archive("chat_ca")
+    assert changed is True
+    thread = repository.get_chat_thread("chat_ca")
+    assert thread.archive_after_cancel_operation_id is None
+    # Draining now finds nothing due.
+    assert session_svc.execute_queued_archive_if_due("chat_ca") is None

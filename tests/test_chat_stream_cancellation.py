@@ -59,12 +59,14 @@ async def _consume_stream(
     session_id: str,
     *,
     turn_id: str | None = None,
+    session_service=None,
 ) -> str:
     response = await chat_stream_endpoint(
         ChatRequest(user_input="question", session_id=session_id, turn_id=turn_id),
         request,
         service,
         research_service,
+        session_service,
     )
     chunks: list[str] = []
     async for chunk in response.body_iterator:
@@ -107,6 +109,7 @@ def test_preparation_streams_owned_research_progress_before_session(
             ConnectedRequest(),
             "research-progress-session",
             turn_id="research-progress-turn",
+                session_service=runtime_test_context.session_service,
         )
     )
 
@@ -137,6 +140,7 @@ def test_failed_research_emits_visible_notice_before_model_tokens(runtime_test_c
             runtime_test_context.web_lookup_service,
             ConnectedRequest(),
             "failed-research-visible-notice",
+                session_service=runtime_test_context.session_service,
         )
     )
 
@@ -183,6 +187,7 @@ def test_successful_research_emits_source_preview_before_model_tokens(
             runtime_test_context.web_lookup_service,
             ConnectedRequest(),
             "successful-research-visible-preview",
+                session_service=runtime_test_context.session_service,
         )
     )
 
@@ -209,6 +214,7 @@ def test_disconnect_before_first_token_interrupts_turn(runtime_test_context):
                 runtime_test_context.web_lookup_service,
                 DisconnectRequest(),
                 "disconnect-before-token",
+                session_service=runtime_test_context.session_service,
             ),
             timeout=1,
         )
@@ -242,6 +248,7 @@ def test_disconnect_after_partial_token_preserves_full_partial(runtime_test_cont
                 runtime_test_context.web_lookup_service,
                 DisconnectRequest(),
                 "disconnect-after-token",
+                session_service=runtime_test_context.session_service,
             ),
             timeout=1,
         )

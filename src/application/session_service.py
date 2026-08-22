@@ -199,6 +199,109 @@ class SessionService:
             )
         return archived
 
+    def request_archive(self, session_id: str) -> dict[str, Any]:
+        """Archive a session, queueing behind an accepted cancellation.
+
+        G12 decisions 10/15: archiving must wait for the active operation's
+        terminal state. When the active turn has an accepted cancel marker the
+        archive intent is persisted server-side (surviving refresh and
+        restart) instead of failing; without a cancellation the historical
+        "active turn" rejection applies unchanged.
+        """
+        thread = self.repository.get_chat_thread(session_id)
+        if thread is None:
+            self.importer.import_session(self.repository, session_id)
+            thread = self.repository.get_chat_thread(session_id)
+        if thread is None:
+            raise ValueError(f"Chat session not found: {session_id}")
+        if thread.status == "archived":
+            return {"status": "archived", "queued": False}
+        operation_id = thread.active_operation_id
+        if operation_id:
+            turns = self.repository.list_chat_turns(session_id)
+            active_turn = next(
+                (
+                    turn
+                    for turn in turns
+                    if turn.operation_id == operation_id
+                    and turn.status in {"pending", "streaming"}
+                ),
+                None,
+            )
+            if active_turn is not None:
+                if active_turn.cancel_requested_at is None:
+                    raise ValueError(
+                        "Chat thread has an active turn and cannot be archived"
+                    )
+                queued = self.repository.queue_archive_after_cancel(
+                    session_id, operation_id=operation_id
+                )
+                if queued is None:
+                    # The operation settled between our read and the CAS; run
+                    # the plain archive now.
+                    archived_now = self._archive_or_raise(session_id)
+                    return {
+                        "status": "archived" if archived_now else "empty",
+                        "queued": False,
+                    }
+                return {"status": "queued", "queued": True}
+        archived = self._archive_or_raise(session_id)
+        if archived is None:
+            raise ValueError("Session has no messages to archive")
+        return {"status": "archived", "queued": False}
+
+    def _archive_or_raise(self, session_id: str) -> ChatThread | None:
+        try:
+            return self.archive_session(session_id)
+        except ValueError as exc:
+            if "active turn" in str(exc):
+                # The window closed while we raced; surface the queue contract.
+                raise ValueError(
+                    "Chat thread has an active turn and cannot be archived"
+                ) from exc
+            raise
+
+    def execute_queued_archive_if_due(self, session_id: str) -> dict[str, Any] | None:
+        """Consume and execute a queued archive when its operation has settled.
+
+        Exactly-once: only the caller that pops the marker runs the archive.
+        On failure the session stays active (the archive failure path already
+        restores it) so the user can retry — decision 15's "保留会话并显示独
+        立错误".
+        """
+        operation_id = self.repository.archive_queue_due(session_id)
+        if operation_id is None:
+            return None
+        if not self.repository.pop_archive_after_cancel(
+            session_id, operation_id=operation_id
+        ):
+            return None
+        archived = self.archive_session(session_id)
+        if archived is None:
+            return {"status": "skipped_empty", "queued": False}
+        return {"status": "archived", "queued": False}
+
+    def cancel_pending_archive(self, session_id: str) -> bool:
+        """User-visible "cancel the pending archive" (decision 15)."""
+        return self.repository.cancel_queued_archive(session_id)
+
+    def process_pending_archives(self) -> int:
+        """Startup sweep: execute queued archives that survived a restart."""
+        processed = 0
+        for session_id in self.repository.list_threads_with_queued_archive():
+            try:
+                result = self.execute_queued_archive_if_due(session_id)
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Queued archive for %s failed; session kept active",
+                    session_id,
+                    exc_info=True,
+                )
+                continue
+            if result is not None and result.get("status") == "archived":
+                processed += 1
+        return processed
+
     def flush_session(self, session_id: str) -> Path | None:
         thread = self.repository.get_chat_thread(session_id)
         if thread is None or thread.status != "active":

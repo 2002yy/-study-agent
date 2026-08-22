@@ -33,6 +33,8 @@ class ChatThread:
     active_operation_started_at: str | None = None
     archive_operation_id: str | None = None
     archive_started_at: str | None = None
+    # G12 decision 15: persisted "archive once this operation settles" marker.
+    archive_after_cancel_operation_id: str | None = None
     version: int = 1
 
 
