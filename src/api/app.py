@@ -39,6 +39,9 @@ from .routes.memory_routes import router as _memory_router
 from .routes.learning_closure_routes import router as _learning_closure_router
 from .routes.tool_routes import router as _tool_router
 from .routes.session_routes import router as _session_router
+from .routes.session_attachment_routes import (
+    router as _session_attachment_router,
+)
 from .routes.wechat_routes import router as _wechat_router
 from .routes.news_routes import router as _news_router
 from .routes.rag_routes import router as _rag_router
@@ -53,6 +56,7 @@ app.include_router(_memory_router)
 app.include_router(_learning_closure_router)
 app.include_router(_tool_router)
 app.include_router(_session_router)
+app.include_router(_session_attachment_router)
 app.include_router(_wechat_router)
 app.include_router(_news_router)
 app.include_router(_rag_router)
