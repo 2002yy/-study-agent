@@ -217,6 +217,7 @@ export type RuntimeSettingsResponse = {
     web_policy?: "off" | "ask" | "auto";
     cloud_context_policy?: "question_only" | "recent_chat" | "allow_local_evidence";
     deep_research_sensitivity?: "conservative" | "balanced" | "eager";
+    attachment_vision_enabled?: boolean;
   };
   options: {
     roles: RuntimeOption[];

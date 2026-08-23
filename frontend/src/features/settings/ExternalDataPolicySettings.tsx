@@ -60,6 +60,8 @@ export function ExternalDataPolicySettings({
     useState<CloudContextPolicy>("allow_local_evidence");
   const [deepSensitivity, setDeepSensitivity] =
     useState("balanced" as (typeof DEEP_SENSITIVITY_OPTIONS)[number][0]);
+  // G14 gate 6: independent image-understanding authorization.
+  const [visionEnabled, setVisionEnabled] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -67,6 +69,7 @@ export function ExternalDataPolicySettings({
     setWebPolicy(normalizeWebPolicy(settings.web_policy));
     setCloudContextPolicy(normalizeCloudContextPolicy(settings.cloud_context_policy));
     setDeepSensitivity(normalizeDeepSensitivity(settings.deep_research_sensitivity));
+    setVisionEnabled(Boolean(settings.attachment_vision_enabled));
   }, [settings.web_policy, settings.cloud_context_policy]);
 
   const save = async () => {
@@ -77,6 +80,7 @@ export function ExternalDataPolicySettings({
         web_policy: webPolicy,
         cloud_context_policy: cloudContextPolicy,
         deep_research_sensitivity: deepSensitivity,
+        attachment_vision_enabled: visionEnabled,
       });
       await onSaved();
       setMessage("外发数据策略已保存");
@@ -143,6 +147,19 @@ export function ExternalDataPolicySettings({
       </label>
       <small className="field-hint">
         控制复杂问题自动进入深度调研的频率；“保守”只在明确要求时触发。
+      </small>
+      <label className="toggle-row">
+        <input
+          checked={visionEnabled}
+          disabled={disabled || isSaving}
+          onChange={(event) => setVisionEnabled(event.target.checked)}
+          type="checkbox"
+        />
+        <span>允许云端图片理解（临时附件）</span>
+      </label>
+      <small className="field-hint">
+        默认关闭：图片附件只保存不解析。开启后，上传的图片会发送给
+        DeepSeek 视觉模型生成文字描述用于检索，每次调用都会记录审计。
       </small>
       <button
         className="primary-action secondary"

@@ -228,3 +228,32 @@
     flex-direction: column;
   }
 }
+
+/* ── G14 temporary session attachments ─────────────────────────── */
+
+.session-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+}
+
+.attachment-status {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.attachment-status-ready { color: #16794f; }
+.attachment-status-failed { color: #b3261e; }
+.attachment-status-parsing,
+.attachment-status-chunking,
+.attachment-status-indexing { color: #9a6b00; }
+
+.attachment-stage-log {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}

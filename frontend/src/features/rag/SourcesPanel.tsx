@@ -23,6 +23,7 @@ import {
   type EvidenceKnowledgeDocumentListResponse,
   type EvidenceStatus,
 } from "./evidenceEligibilityApi";
+import { SessionAttachments } from "./SessionAttachments";
 
 type SourceRow = {
   key: string;
@@ -158,6 +159,7 @@ export function SourcesPanel({
   ragSearch,
   isSearching,
   knowledgeBase,
+  sessionId,
   onDeleteDocument,
   onSetEvidenceStatus,
   onRebuildKnowledge,
@@ -166,6 +168,7 @@ export function SourcesPanel({
   ragSearch: RagQueryResponse | null;
   isSearching: boolean;
   knowledgeBase?: EvidenceKnowledgeDocumentListResponse | null;
+  sessionId?: string | null;
   onDeleteDocument?: (documentId: string) => void;
   onSetEvidenceStatus?: (
     documentId: string,
@@ -302,6 +305,7 @@ export function SourcesPanel({
         {activeTab === "library" ? (
           knowledgeBase ? (
             <div className="sources-library">
+              <SessionAttachments sessionId={sessionId} />
               <div className="sources-library-summary">
                 <strong>已上传资料 {knowledgeBase.documents.length} 个</strong>
                 <span>当前可用于回答 {retrievableDocumentCount} 个</span>

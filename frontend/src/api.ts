@@ -705,6 +705,89 @@ export async function deleteKnowledgeDocument(documentId: string): Promise<{
   });
 }
 
+// ── G14 temporary session attachments ────────────────────────────────
+
+export type SessionAttachmentStageEntry = {
+  stage: string;
+  status: string;
+  at?: string;
+  detail?: string;
+  chunks?: number;
+  vector_status?: string;
+  retrievable?: boolean;
+  error?: string;
+};
+
+export type SessionAttachmentInfo = {
+  id: string;
+  thread_id: string;
+  filename: string;
+  content_hash: string;
+  mime_type: string;
+  size_bytes: number;
+  status: "parsing" | "chunking" | "indexing" | "ready" | "failed";
+  stage_error: string;
+  stage_history: SessionAttachmentStageEntry[];
+  retry_count: number;
+  promoted_rag_run_id: string;
+  external_calls: Array<Record<string, unknown>>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SessionAttachmentListResponse = {
+  attachments: SessionAttachmentInfo[];
+  max_files_per_thread: number;
+  total_bytes: number;
+};
+
+export async function listSessionAttachments(
+  threadId: string
+): Promise<SessionAttachmentListResponse> {
+  return requestJson<SessionAttachmentListResponse>(
+    `/sessions/${encodeURIComponent(threadId)}/attachments`
+  );
+}
+
+export async function uploadSessionAttachment(
+  threadId: string,
+  file: File
+): Promise<SessionAttachmentInfo> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return uploadForm<SessionAttachmentInfo>(
+    `/sessions/${encodeURIComponent(threadId)}/attachments`,
+    formData
+  );
+}
+
+export async function deleteSessionAttachment(attachmentId: string): Promise<void> {
+  await requestJson(`/attachments/${encodeURIComponent(attachmentId)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function retrySessionAttachment(
+  attachmentId: string
+): Promise<SessionAttachmentInfo> {
+  return requestJson<SessionAttachmentInfo>(
+    `/attachments/${encodeURIComponent(attachmentId)}/retry`,
+    { method: "POST" }
+  );
+}
+
+export async function promoteSessionAttachment(attachmentId: string): Promise<{
+  status: string;
+  attachment_id: string;
+  promoted_rag_run_id?: string;
+  long_term_document_id?: string;
+}> {
+  return requestJson(
+    `/attachments/${encodeURIComponent(attachmentId)}/promote`,
+    { method: "POST" }
+  );
+}
+
 export async function sendChat(
   userInput: string,
   history: ChatMessage[],

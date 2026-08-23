@@ -298,6 +298,7 @@ export function WorkspaceView({
           ragSearch={ragController.result}
           isSearching={ragController.isSearching}
           knowledgeBase={uploadController.documents}
+          sessionId={learningView.sessionId}
           onDeleteDocument={(documentId) => {
             if (window.confirm("确定从长期资料中删除这个文档及其索引片段吗？")) {
               void uploadController.removeDocument(documentId);
