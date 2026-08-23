@@ -334,15 +334,17 @@ class PersistentWebToolAgent(WebToolAgent):
         error = ""
         calls: list[dict[str, Any]] = []
         run = None
+        assert self.research_service is not None
+        research_service = self.research_service
         try:
-            run = self.research_service.create(
+            run = research_service.create(
                 query,
                 owner_thread_id=owner_thread_id,
                 owner_turn_id=owner_turn_id,
                 run_kind="deep_research",
                 research_mode="deep",
             )
-            completed = self.research_service.execute(run.id)
+            completed = research_service.execute(run.id)
             deep = completed.research_context.get("deep") or {}
             for attempt in completed.query_attempts:
                 calls.append(
@@ -376,7 +378,6 @@ class PersistentWebToolAgent(WebToolAgent):
                     )
             return WebToolTrace(
                 calls=tuple(calls),
-                source_block=completed.source_block,
                 run_id=completed.id,
             )
         except Exception as exc:
