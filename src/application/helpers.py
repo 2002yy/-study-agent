@@ -63,6 +63,9 @@ DEFAULT_FRONTEND_SETTINGS = {
     "web_policy": "auto",
     "cloud_context_policy": "allow_local_evidence",
     "deep_research_sensitivity": "balanced",
+    # G14 gate 6: independent image-understanding switch (default off;
+    # image bytes never leave the machine until explicitly enabled).
+    "attachment_vision_enabled": False,
 }
 
 ROLE_DESCRIPTIONS = {
@@ -171,6 +174,13 @@ def _normalize_frontend_settings(settings: dict[str, Any]) -> dict[str, Any]:
     sensitivity = settings.get("deep_research_sensitivity")
     if sensitivity in {"conservative", "balanced", "eager"}:
         normalized["deep_research_sensitivity"] = sensitivity
+    # G14 gate 6: independent image-understanding authorization.
+    normalized["attachment_vision_enabled"] = bool(
+        settings.get(
+            "attachment_vision_enabled",
+            normalized["attachment_vision_enabled"],
+        )
+    )
     return normalized
 
 

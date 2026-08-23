@@ -205,6 +205,41 @@ def get_rag_run_service():
 
 
 @lru_cache(maxsize=1)
+def get_session_attachment_repository():
+    from src.repositories.session_attachment_repository import (
+        SessionAttachmentRepository,
+    )
+
+    return SessionAttachmentRepository(RuntimeDatabase(runtime_database_path()))
+
+
+@lru_cache(maxsize=1)
+def get_session_attachment_service():
+    """G14 temporary attachment service with gated vision description."""
+    from src.application.session_attachment_service import (
+        SessionAttachmentService,
+    )
+
+    def vision_enabled() -> bool:
+        from src.application.helpers import load_frontend_settings
+
+        return bool(load_frontend_settings().get("attachment_vision_enabled"))
+
+    def vision_describer(path):
+        from src.application.attachment_vision import (
+            describe_image_with_deepseek,
+        )
+
+        return describe_image_with_deepseek(path)
+
+    return SessionAttachmentService(
+        get_session_attachment_repository(),
+        vision_describer=vision_describer,
+        vision_enabled=vision_enabled,
+    )
+
+
+@lru_cache(maxsize=1)
 def get_session_service():
     from src.application.session_service import SessionService
 

@@ -28,7 +28,7 @@ SAMPLE_TEXT = (
 )
 
 
-def _service(tmp_path, *, describer=None) -> SessionAttachmentService:
+def _service(tmp_path, *, describer=None, vision_enabled=None):
     database = RuntimeDatabase(tmp_path / "runtime.db")
     repository = SessionAttachmentRepository(database)
     return SessionAttachmentService(
@@ -37,6 +37,7 @@ def _service(tmp_path, *, describer=None) -> SessionAttachmentService:
         temp_index_path=tmp_path / "temp_attachments_index.json",
         long_term_index_path=tmp_path / "long_term_index.json",
         vision_describer=describer,
+        vision_enabled=vision_enabled,
     )
 
 
@@ -258,3 +259,64 @@ def test_image_with_describer_indexes_description(tmp_path):
     ]
     assert described, "description document must carry attachment metadata"
     assert described[0].metadata.get("origin") == "session_attachment"
+
+def test_vision_switch_off_stores_without_describing(tmp_path):
+    service = _service(
+        tmp_path,
+        describer=lambda path: "should never be called",
+        vision_enabled=lambda: False,
+    )
+    attachment = service.upload(
+        "thread_a", "diagram.png", _PNG_BYTES, content_type="image/png"
+    )
+
+    assert attachment.status == "ready"
+    refreshed = service.repository.get(attachment.id)
+    assert refreshed is not None
+    assert refreshed.external_calls == (), "disabled gate must not send or audit"
+
+
+def test_vision_switch_on_audits_cloud_send(tmp_path):
+    calls = []
+
+    def describe(path):
+        calls.append(path)
+        return "流程图描述：临时索引构建过程。"
+
+    service = _service(
+        tmp_path, describer=describe, vision_enabled=lambda: True
+    )
+    attachment = service.upload(
+        "thread_a", "diagram.png", _PNG_BYTES, content_type="image/png"
+    )
+
+    assert attachment.status == "ready"
+    assert len(calls) == 1
+    refreshed = service.repository.get(attachment.id)
+    assert refreshed is not None
+    statuses = [entry["status"] for entry in refreshed.external_calls]
+    assert statuses == ["attempted", "completed"]
+    first = refreshed.external_calls[0]
+    assert first["purpose"] == "image_description"
+    assert first["provider"] == "deepseek"
+    assert first["data_categories"] == ["image_content"]
+
+
+def test_vision_failure_records_audit_then_fails(tmp_path):
+    def broken(_path):
+        raise RuntimeError("vision api down")
+
+    service = _service(
+        tmp_path, describer=broken, vision_enabled=lambda: True
+    )
+    attachment = service.upload(
+        "thread_a", "diagram.png", _PNG_BYTES, content_type="image/png"
+    )
+
+    # Auto-retry-once (decision 9) exhausts both attempts, then failed.
+    assert attachment.status == "failed"
+    refreshed = service.repository.get(attachment.id)
+    assert refreshed is not None
+    statuses = [entry["status"] for entry in refreshed.external_calls]
+    assert statuses == ["attempted", "failed", "attempted", "failed"]
+

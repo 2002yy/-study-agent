@@ -45,6 +45,12 @@ IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
 PIPELINE_STATUSES = frozenset({"parsing", "chunking", "indexing"})
 
 
+def _vision_model_name() -> str:
+    from src.application.attachment_vision import vision_model_name
+
+    return vision_model_name()
+
+
 class AttachmentLimitError(ValueError):
     """Raised when thread count/size limits are exceeded."""
 
@@ -69,6 +75,7 @@ class SessionAttachmentService:
         attachment_root: Path | str = DEFAULT_ATTACHMENT_ROOT,
         temp_index_path: Path | str = DEFAULT_TEMP_INDEX_PATH,
         vision_describer: Callable[[Path], str] | None = None,
+        vision_enabled: Callable[[], bool] | None = None,
         long_term_index_path: Path | str | None = None,
         max_chars: int = 900,
         overlap_chars: int = 120,
@@ -77,6 +84,9 @@ class SessionAttachmentService:
         self.attachment_root = Path(attachment_root)
         self.temp_index_path = Path(temp_index_path)
         self.vision_describer = vision_describer
+        # G14 gate 6: the independent vision switch is evaluated at upload
+        # time so toggling the setting takes effect without a restart.
+        self.vision_enabled = vision_enabled
         # Resolved lazily so production callers always follow the live
         # DEFAULT_RAG_INDEX_PATH while tests can inject a temporary path.
         self.long_term_index_path = (
@@ -84,6 +94,13 @@ class SessionAttachmentService:
         )
         self.max_chars = max_chars
         self.overlap_chars = overlap_chars
+
+    def _vision_active(self) -> bool:
+        if self.vision_describer is None:
+            return False
+        if self.vision_enabled is not None and not self.vision_enabled():
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Upload + per-file pipeline
@@ -286,8 +303,8 @@ class SessionAttachmentService:
     def _describe_image(
         self, attachment: SessionAttachment, source: Path
     ) -> tuple[RagDocument, list[RagChunk]]:
-        """Images index their description only when a describer is wired."""
-        if self.vision_describer is None:
+        """Images index their description only when the switch allows it."""
+        if not self._vision_active():
             stored = RagDocument(
                 source_path=str(source),
                 title=attachment.filename,
@@ -297,7 +314,43 @@ class SessionAttachmentService:
                 document_id=f"att_{attachment.id}",
             )
             return stored, []
-        description = self.vision_describer(source).strip()
+        # Gate 6: every cloud send is audited on the attachment record.
+        self.repository.record_external_call(
+            attachment.id,
+            {
+                "purpose": "image_description",
+                "provider": "deepseek",
+                "model": _vision_model_name(),
+                "data_categories": ["image_content"],
+                "status": "attempted",
+                "at": utc_now(),
+            },
+        )
+        try:
+            description = self.vision_describer(source).strip()  # type: ignore[misc]
+        except Exception as exc:
+            self.repository.record_external_call(
+                attachment.id,
+                {
+                    "purpose": "image_description",
+                    "provider": "deepseek",
+                    "status": "failed",
+                    "detail": str(exc)[:300],
+                    "at": utc_now(),
+                },
+            )
+            raise
+        if not description:
+            raise ValueError("vision describer returned an empty description")
+        self.repository.record_external_call(
+            attachment.id,
+            {
+                "purpose": "image_description",
+                "provider": "deepseek",
+                "status": "completed",
+                "at": utc_now(),
+            },
+        )
         described = RagDocument(
             source_path=str(source),
             title=attachment.filename,
