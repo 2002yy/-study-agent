@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import os
+import re
 import time
 from typing import Any, Protocol
 
-from src.domain.runtime_entities import WebLookupRun, new_id
+from src.domain.runtime_entities import WebLookupRun, new_id, utc_now
 from src.news.digest import format_news_source_block
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research_contract import (
@@ -259,9 +260,16 @@ class WebLookupService:
         self,
         repository: WebLookupRepository,
         gateway: WebLookupGateway | None = None,
+        planner: Any = None,
     ):
         self.repository = repository
         self.gateway = gateway or ResearchWebGateway()
+        # G18: optional deep-research planner. Two callables are expected on
+        # the object: ``plan(query, context) -> [sub_question]`` for initial
+        # decomposition and ``revise(memo, notes, remaining) ->
+        # {"done": bool, "additional": [sub_question]}`` for per-round gap
+        # analysis. When absent, deterministic fallbacks are used.
+        self.planner = planner
 
     def create(
         self,
@@ -271,6 +279,7 @@ class WebLookupService:
         owner_thread_id: str | None = None,
         owner_turn_id: str | None = None,
         run_kind: str = "standalone",
+        research_mode: str = "standard",
     ) -> WebLookupRun:
         normalized = query.strip()
         if not normalized:
@@ -291,6 +300,18 @@ class WebLookupService:
                 "run_kind": run_kind,
             }
         )
+        if research_mode not in {"standard", "deep"}:
+            raise ValueError(f"Unsupported research_mode: {research_mode}")
+        context["research_mode"] = research_mode
+        if research_mode == "deep":
+            context["deep"] = {
+                "plan": [],
+                "round_index": 0,
+                "notes": [],
+                "memo": "",
+                "steering": [],
+                "steps": [],
+            }
         if owner_thread_id or owner_turn_id:
             context["owner"] = {
                 "thread_id": owner_thread_id or "",
@@ -469,6 +490,24 @@ class WebLookupService:
         provider_status = run.provider_status
         reason = run.stop_reason
         answer_confidence = run.answer_confidence
+
+        if str(context.get("research_mode") or "") == "deep":
+            return self._execute_deep(
+                run_id,
+                run=run,
+                stage=stage,
+                operation_id=operation_id,
+                context=context,
+                query_attempts=query_attempts,
+                selected_sources=selected_sources,
+                rejected_sources=rejected_sources,
+                items=items,
+                warnings=warnings,
+                provider_status=provider_status,
+                reason=reason,
+                answer_confidence=answer_confidence,
+                raise_on_error=raise_on_error,
+            )
 
         def checkpoint() -> WebLookupRun:
             return self.repository.checkpoint(
@@ -753,6 +792,502 @@ class WebLookupService:
                 run_id,
                 operation_id=operation_id,
             )
+        except Exception as exc:
+            latest = self.get(run_id)
+            if latest.status == "running" and latest.active_operation_id == operation_id:
+                failed = self.repository.fail(
+                    run_id,
+                    str(exc),
+                    research_context=context,
+                    query_attempts=query_attempts,
+                    provider_status=(provider_status or "unknown"),
+                    stop_reason=(reason or "research_stage_failed"),
+                    operation_id=operation_id,
+                )
+            else:
+                failed = latest
+            if raise_on_error:
+                raise
+            return failed
+
+
+    # ------------------------------------------------------------------
+    # G18 deep research: multi-round iterative pipeline (decisions 1-16)
+    # ------------------------------------------------------------------
+
+    _DEEP_MAX_ROUNDS_DEFAULT = 4
+    _DEEP_MAX_READS_DEFAULT = 16
+    _DEEP_MAX_TOTAL_CHARS_DEFAULT = 100_000
+    _DEEP_TASKS_PER_ROUND = 2
+    _DEEP_PLAN_CAP = 12
+    _DEEP_MEMO_CHARS = 8_000
+    _DEEP_STEPS_CAP = 200
+    _DEEP_NOTE_FACTS_CHARS = 1_200
+
+    def steer(self, run_id: str, *, content: str) -> WebLookupRun:
+        """G18 decision 12: inject a mid-run steering message."""
+        steered = self.repository.append_steering(run_id, content=content)
+        if steered is None:
+            raise ValueError(
+                f"WebLookupRun cannot be steered (not running): {run_id}"
+            )
+        return steered
+
+    def _deep_log(self, deep: dict[str, Any], kind: str, text: str) -> None:
+        steps = [
+            dict(item) for item in deep.get("steps", []) if isinstance(item, dict)
+        ]
+        steps.append({"at": utc_now(), "kind": kind, "text": text[:300]})
+        deep["steps"] = steps[-self._DEEP_STEPS_CAP :]
+
+    def _deep_consume_steering(self, deep: dict[str, Any], round_index: int) -> bool:
+        """Mark pending steering as incorporated; True when anything consumed."""
+        consumed = False
+        for entry in deep.get("steering", []):
+            if isinstance(entry, dict) and entry.get("incorporated_in_round") is None:
+                entry["incorporated_in_round"] = round_index
+                consumed = True
+                self._deep_log(
+                    deep,
+                    "steering",
+                    f"研究方向已更新：{str(entry.get('content', ''))[:120]}",
+                )
+        return consumed
+
+    def _deep_default_plan(
+        self, query: str, context: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        variants = [
+            str(value).strip()
+            for value in context.get("query_variants", [])
+            if str(value).strip()
+        ] or [query.strip()]
+        return [
+            {
+                "task_id": f"t{index + 1}",
+                "sub_question": variant,
+                "status": "pending",
+                "round": None,
+            }
+            for index, variant in enumerate(variants[: self._DEEP_PLAN_CAP])
+        ]
+
+    def _deep_planner_plan(
+        self, query: str, context: dict[str, Any]
+    ) -> list[dict[str, Any]] | None:
+        plan_callable = getattr(self.planner, "plan", None)
+        if not callable(plan_callable):
+            return None
+        result = plan_callable(query, context)
+        tasks = [
+            {
+                "task_id": f"t{index + 1}",
+                "sub_question": str(item),
+                "status": "pending",
+                "round": None,
+            }
+            for index, item in enumerate(result or [])
+            if str(item).strip()
+        ]
+        return tasks or None
+
+    @staticmethod
+    def _deep_rewrite_query(sub_question: str) -> str:
+        """Retry-once variant (decision 15): strip filler and refocus."""
+        rewritten = re.sub(r"[？?！!。.,，\s]+", " ", sub_question or "").strip()
+        return rewritten or sub_question
+
+    def _execute_deep(
+        self,
+        run_id: str,
+        *,
+        run: WebLookupRun,
+        stage: str,
+        operation_id: str,
+        context: dict[str, Any],
+        query_attempts: list[dict[str, Any]],
+        selected_sources: list[dict[str, Any]],
+        rejected_sources: list[dict[str, Any]],
+        items: list[dict[str, Any]],
+        warnings: list[str],
+        provider_status: str,
+        reason: str,
+        answer_confidence: str,
+        raise_on_error: bool = False,
+    ) -> WebLookupRun:
+        max_rounds = _env_int(
+            "WEB_RESEARCH_MAX_DEEP_ROUNDS",
+            self._DEEP_MAX_ROUNDS_DEFAULT,
+            minimum=1,
+            maximum=5,
+        )
+        deep_reads = _env_int(
+            "WEB_RESEARCH_DEEP_MAX_READS",
+            self._DEEP_MAX_READS_DEFAULT,
+            minimum=1,
+            maximum=40,
+        )
+        deep_total_chars = _env_int(
+            "WEB_RESEARCH_DEEP_MAX_TOTAL_CHARS",
+            self._DEEP_MAX_TOTAL_CHARS_DEFAULT,
+            minimum=5_000,
+            maximum=400_000,
+        )
+        budget = ResearchReadBudget.from_env()
+        deep = dict(context.get("deep") or {})
+        plan = [dict(task) for task in deep.get("plan", []) if isinstance(task, dict)]
+        notes = [dict(n) for n in deep.get("notes", []) if isinstance(n, dict)]
+        memo = str(deep.get("memo") or "")
+        round_index = int(deep.get("round_index") or 0)
+
+        def persist() -> WebLookupRun:
+            # Local working copies (plan/notes/memo/steps) are rebound or
+            # mutated independently; fold them back before every durable
+            # checkpoint so nothing accumulated during a round is lost.
+            deep["notes"] = notes
+            deep["memo"] = memo
+            deep["round_index"] = round_index
+            deep["plan"] = plan
+            context["deep"] = deep
+            return self.repository.checkpoint(
+                run_id,
+                operation_id=operation_id,
+                research_context=context,
+                query_attempts=query_attempts,
+                selected_sources=selected_sources,
+                rejected_sources=rejected_sources,
+                items=items,
+                warnings=_dedupe(warnings),
+                provider_status=provider_status,
+                stop_reason=reason,
+                answer_confidence=answer_confidence,
+            )
+
+        def set_stage(next_stage: str) -> None:
+            nonlocal stage
+            stage = self.repository.set_stage(
+                run_id, stage=next_stage, operation_id=operation_id
+            ).stage
+
+        def ensure_active() -> None:
+            if self.repository.cancel_requested(run_id, operation_id=operation_id):
+                raise ResearchCancelled("Research cancelled by user")
+
+        try:
+            ensure_active()
+
+            # ---- planning -------------------------------------------------
+            set_stage("planning")
+            if not plan:
+                planned = self._deep_planner_plan(run.query, context)
+                plan = planned or self._deep_default_plan(run.query, context)
+                deep["plan"] = plan
+            self._deep_log(deep, "planning", f"研究计划已生成（{len(plan)} 个子问题）")
+            persist()
+
+            search_method = getattr(self.gateway, "search", None)
+            read_method = getattr(self.gateway, "read", None)
+
+            while round_index < max_rounds:
+                ensure_active()
+                steered_this_round = self._deep_consume_steering(
+                    deep, round_index + 1
+                )
+                pending_tasks = [
+                    task
+                    for task in plan
+                    if isinstance(task, dict) and task.get("status") == "pending"
+                ]
+                batch = pending_tasks[: self._DEEP_TASKS_PER_ROUND]
+                if not batch:
+                    break
+
+                round_index += 1
+                deep["round_index"] = round_index
+                set_stage("searching")
+                self._deep_log(
+                    deep,
+                    "round",
+                    f"第 {round_index}/{max_rounds} 轮开始"
+                    + ("（含用户转向）" if steered_this_round else ""),
+                )
+                persist()
+
+                read_state = _read_summary(selected_sources, budget)
+                used_chars = int(read_state.get("used_chars") or 0)
+                attempted_reads = int(read_state.get("attempted") or 0)
+
+                for task in batch:
+                    ensure_active()
+                    sub_question = str(task.get("sub_question", ""))
+                    queries = [sub_question]
+                    rewritten = self._deep_rewrite_query(sub_question)
+                    # Decision 15: always retry once, even when the rewrite is
+                    # identical (covers transient provider failures).
+                    queries.append(rewritten)
+
+                    found_any = False
+                    for candidate_query in queries:
+                        ensure_active()
+                        if not callable(search_method):
+                            break
+                        try:
+                            results = search_method(
+                                candidate_query, max_items=run.max_items
+                            )
+                        except Exception as exc:
+                            warnings.append(
+                                f"deep search failed ({candidate_query}): {exc}"
+                            )
+                            results = []
+                        payload = successful_attempt(
+                            candidate_query, len(results)
+                        ).to_dict()
+                        payload.update(
+                            {
+                                "run_attempt": context["run_attempt"],
+                                "operation_id": operation_id,
+                                "round": round_index,
+                                "influenced_by_steering": steered_this_round,
+                            }
+                        )
+                        query_attempts.append(payload)
+                        if results:
+                            found_any = True
+                            for item in results:
+                                candidate = dict(item)
+                                candidate["round"] = round_index
+                                if steered_this_round:
+                                    candidate["influenced_by_steering"] = True
+                                context.setdefault("candidate_items", []).append(
+                                    candidate
+                                )
+                            persist()
+                            break
+                    if not found_any:
+                        # Decision 15: retry once via rewritten variant happened
+                        # above; still nothing → skip this sub-question.
+                        task["status"] = "skipped"
+                        task["round"] = round_index
+                        self._deep_log(
+                            deep, "gap", f"子问题无可用结果，跳过：{sub_question[:80]}"
+                        )
+                        persist()
+                        continue
+
+                    # ---- assessing (this task's candidates only) ----------
+                    set_stage("assessing")
+                    task_candidates = [
+                        dict(item)
+                        for item in context.get("candidate_items", [])
+                        if isinstance(item, dict)
+                        and item.get("round") == round_index
+                    ]
+                    task_selected, task_rejected = assess_sources(
+                        task_candidates,
+                        canonical_query=str(
+                            context.get("canonical_query") or run.query
+                        ),
+                    )
+                    known_urls = {_source_url(record) for record in selected_sources}
+                    fresh = [
+                        record
+                        for record in task_selected
+                        if _source_url(record) not in known_urls
+                    ]
+                    selected_sources.extend(fresh)
+                    rejected_sources.extend(task_rejected)
+                    items.extend(_selected_items(fresh))
+                    persist()
+
+                    # ---- reading + noting ---------------------------------
+                    if callable(read_method):
+                        set_stage("reading")
+                        for record in fresh:
+                            ensure_active()
+                            url = _source_url(record)
+                            if (
+                                attempted_reads >= deep_reads
+                                or used_chars >= deep_total_chars
+                            ):
+                                break
+                            assessment = dict(record.get("assessment") or {})
+                            if assessment.get("worth_reading") is not True or not url:
+                                continue
+                            source_limit = min(
+                                budget.max_chars_per_source,
+                                deep_total_chars - used_chars,
+                            )
+                            try:
+                                raw_result = read_method(url, max_chars=source_limit)
+                                read_result, _ = _bounded_read_result(
+                                    dict(raw_result or {}), max_chars=source_limit
+                                )
+                                read_result["status"] = (
+                                    "read" if _is_read_ok(read_result) else "failed"
+                                )
+                            except Exception as exc:
+                                read_result = {
+                                    "ok": False,
+                                    "status": "failed",
+                                    "url": url,
+                                    "error": f"{type(exc).__name__}: {exc}",
+                                }
+                            attempted_reads += 1
+                            facts = str(read_result.get("content") or "")[
+                                : self._DEEP_NOTE_FACTS_CHARS
+                            ]
+                            title = str(
+                                (record.get("item") or {}).get("title") or url
+                            )
+                            note = {
+                                "round": round_index,
+                                "sub_question": sub_question[:160],
+                                "url": url,
+                                "title": title,
+                                "facts": facts,
+                                "influenced_by_steering": bool(
+                                    record.get("influenced_by_steering")
+                                    or steered_this_round
+                                ),
+                            }
+                            if read_result.get("status") == "read":
+                                notes.append(note)
+                                used_chars += len(facts)
+                                memo = (
+                                    (memo + "\n\n" if memo else "")
+                                    + f"[R{round_index}] {title}: "
+                                    + facts[:300]
+                                )
+                                memo = memo[-self._DEEP_MEMO_CHARS :]
+                                self._deep_log(deep, "read", f"已阅读：{title}")
+                            else:
+                                warnings.append(
+                                    f"deep source read failed ({url}): "
+                                    + str(read_result.get("error") or "read_failed")
+                                )
+                            record_read = dict(record)
+                            record_read["read"] = read_result
+                            for position, existing_record in enumerate(
+                                selected_sources
+                            ):
+                                if _source_url(existing_record) == url:
+                                    selected_sources[position] = record_read
+                                    break
+                            context["read_summary"] = {
+                                **_read_summary(selected_sources, budget),
+                                "attempted": attempted_reads,
+                            }
+                            persist()
+
+                    task["status"] = "done"
+                    task["round"] = round_index
+                    answer_confidence = evidence_confidence(selected_sources)
+                    persist()
+
+                # ---- gap analysis / plan revision (decision 9) ----------
+                revise = getattr(self.planner, "revise", None)
+                if callable(revise):
+                    verdict = revise(memo, notes, [
+                        str(task.get("sub_question", ""))
+                        for task in plan
+                        if isinstance(task, dict) and task.get("status") == "pending"
+                    ]) or {}
+                    additional = [
+                        str(item).strip()
+                        for item in verdict.get("additional", [])
+                        if str(item).strip()
+                    ]
+                    for index, sub_question in enumerate(additional):
+                        if len(plan) >= self._DEEP_PLAN_CAP:
+                            break
+                        plan.append(
+                            {
+                                "task_id": f"a{round_index}_{index + 1}",
+                                "sub_question": sub_question,
+                                "status": "pending",
+                                "round": None,
+                            }
+                        )
+                        self._deep_log(
+                            deep, "revise", f"新增子问题：{sub_question[:80]}"
+                        )
+                    if verdict.get("done"):
+                        break
+                remaining_pending = any(
+                    task.get("status") == "pending"
+                    for task in plan
+                    if isinstance(task, dict)
+                )
+                if not remaining_pending:
+                    break
+
+            # ---- synthesizing ---------------------------------------------
+            ensure_active()
+            set_stage("synthesizing")
+            items = _selected_items(selected_sources)
+            read_summary = _read_summary(selected_sources, ResearchReadBudget.from_env())
+            context["read_summary"] = read_summary
+            had_provider_failure = any(
+                attempt.get("status") == "provider_failed" for attempt in query_attempts
+            )
+            had_read_failure = int(read_summary.get("failed") or 0) > 0
+            candidate_items = context.get("candidate_items", [])
+            if items:
+                provider_status = (
+                    "partial" if had_provider_failure or had_read_failure else "found"
+                )
+            elif candidate_items:
+                provider_status = "insufficient"
+            else:
+                provider_status = "partial" if had_provider_failure else "empty"
+            reason = reason or (
+                "sources_partially_read"
+                if had_read_failure
+                else "sources_read"
+                if int(read_summary.get("successful") or 0) > 0
+                else "direct_results_found"
+            )
+            answer_confidence = evidence_confidence(selected_sources)
+
+            memo_block = ""
+            if memo:
+                memo_block = f"研究备忘录（滚动更新）：\n{memo}\n\n"
+            notes_block = ""
+            if notes:
+                note_lines = [
+                    f"- [{note['title']}]({note['url']}) R{note['round']}"
+                    f"{'+steer' if note.get('influenced_by_steering') else ''}: "
+                    f"{note['facts'][:200]}"
+                    for note in notes[-30:]
+                ]
+                notes_block = (
+                    f"逐页结构化笔记（{len(notes)} 条，最近 30 条）：\n"
+                    + "\n".join(note_lines)
+                    + "\n\n"
+                )
+            base_block = _format_research_source_block(
+                run.query, items, selected_sources
+            )
+            source_block = f"{memo_block}{notes_block}{base_block}"
+
+            persist()
+            return self.repository.complete(
+                run_id,
+                operation_id=operation_id,
+                items=items,
+                source_block=source_block,
+                warnings=_dedupe(warnings),
+                research_context=context,
+                query_attempts=query_attempts,
+                selected_sources=selected_sources,
+                rejected_sources=rejected_sources,
+                provider_status=provider_status,
+                stop_reason=reason,
+                answer_confidence=answer_confidence,
+            )
+        except ResearchCancelled:
+            return self.repository.finish_cancel(run_id, operation_id=operation_id)
         except Exception as exc:
             latest = self.get(run_id)
             if latest.status == "running" and latest.active_operation_id == operation_id:

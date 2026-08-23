@@ -240,6 +240,84 @@ class WebLookupRepository:
             )
         return self._required(run_id)
 
+    def set_stage(
+        self,
+        run_id: str,
+        *,
+        stage: str,
+        operation_id: str,
+    ) -> WebLookupRun:
+        """Owner-scoped unconditional stage write for the G18 round loop.
+
+        The deep-research loop revisits the same stages across rounds, so the
+        strict expected-stage CAS of ``transition_stage`` does not fit; the
+        running-owner + version guards are the concurrency contract here.
+        """
+        if not stage.strip():
+            raise ValueError("Research stage must be non-empty")
+        run = self._required(run_id)
+        self._assert_running_owner(run, operation_id)
+        now = utc_now()
+        context = _with_operation(run.research_context, stage_started_at=now)
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE web_lookup_runs
+                SET stage = ?, research_context = ?, updated_at = ?,
+                    version = version + 1
+                WHERE id = ? AND status = 'running' AND version = ?
+                """,
+                (stage, _dump(context), now, run_id, run.version),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"WebLookupRun stage write conflicted: {run_id}")
+        return self._required(run_id)
+
+    def append_steering(self, run_id: str, *, content: str) -> WebLookupRun | None:
+        """G18 decision 12: inject a mid-run steering message into a running run.
+
+        The message is metadata attached to the active run (never a new
+        ChatTurn); the iteration loop consumes it at the next round boundary.
+        """
+        normalized = " ".join((content or "").strip().split())
+        if not normalized:
+            raise ValueError("Steering content is required")
+        run = self._required(run_id)
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM web_lookup_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            # Steering is valid while queued (pending) as well as running:
+            # the user may refine direction before the worker starts.
+            if row is None or row["status"] not in {"running", "pending"}:
+                return None
+            current = _from_row(row)
+            context = dict(current.research_context)
+            deep = dict(context.get("deep") or {})
+            steering = [
+                dict(item) for item in deep.get("steering", []) if isinstance(item, dict)
+            ]
+            steering.append(
+                {
+                    "content": normalized[:2000],
+                    "received_at": utc_now(),
+                    "incorporated_in_round": None,
+                }
+            )
+            deep["steering"] = steering
+            context["deep"] = deep
+            cursor = connection.execute(
+                """
+                UPDATE web_lookup_runs
+                SET research_context = ?, updated_at = ?, version = version + 1
+                WHERE id = ? AND status IN ('running', 'pending') AND version = ?
+                """,
+                (_dump(context), utc_now(), run_id, run.version),
+            )
+        if cursor.rowcount != 1:
+            return None
+        return self._required(run_id)
+
     def checkpoint(
         self,
         run_id: str,
