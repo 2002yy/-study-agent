@@ -10,6 +10,7 @@ import { RAG_UPLOAD_ACCEPT, RAG_UPLOAD_HELP_TEXT } from "../features/rag/uploadC
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { ExternalDataFirstUseNotice } from "../features/settings/ExternalDataFirstUseNotice";
 import { ChatPanel } from "../features/single-chat/ChatPanel";
+import { MemoryConsentBadge } from "../features/chat/MemoryConsentBadge";
 import { SessionNavigator } from "../features/sessions/SessionNavigator";
 import { WorkspaceTransitionDialog } from "../features/sessions/WorkspaceTransitionDialog";
 import { useWorkspaceTransitionGuard } from "../features/sessions/workspaceTransitionGuard";
@@ -68,6 +69,10 @@ export function WorkspaceView({
   const { state, dispatch } = useWorkspace();
   const openDrawer = (drawer: DrawerId) => dispatch({ type: "OPEN_DRAWER", drawer });
   const closeDrawer = () => dispatch({ type: "CLOSE_DRAWER" });
+  // G16 decision 1: badge only participates under the ask policy.
+  const memoryPolicy = String(
+    snapshot.runtimeSettings?.settings?.memory_policy ?? "auto",
+  );
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -190,6 +195,11 @@ export function WorkspaceView({
             requestUpload("upload");
           }}
           onDismiss={uploadController.dismissFlow}
+        />
+        <MemoryConsentBadge
+          memoryPolicy={memoryPolicy}
+          onChanged={() => void refresh()}
+          sessionId={learningView.sessionId}
         />
         <ChatPanel
           sessionId={learningView.sessionId}

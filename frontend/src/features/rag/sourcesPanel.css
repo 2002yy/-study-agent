@@ -257,3 +257,36 @@
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* ── G16 memory consent badge ──────────────────────────────────── */
+
+.memory-consent-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: #16794f;
+  background: rgba(22, 121, 79, 0.08);
+  border: 1px solid rgba(22, 121, 79, 0.25);
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.memory-consent-badge button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid rgba(22, 121, 79, 0.35);
+  border-radius: 6px;
+  color: #16794f;
+  cursor: pointer;
+}
+
+.memory-consent-badge button:hover {
+  background: rgba(22, 121, 79, 0.12);
+}

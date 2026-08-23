@@ -62,6 +62,8 @@ DEFAULT_FRONTEND_SETTINGS = {
     "rag_min_score": 0.01,
     "web_policy": "auto",
     "cloud_context_policy": "allow_local_evidence",
+    # G16 decision 1: independent read gate for cross-session memory.
+    "memory_policy": "auto",
     "deep_research_sensitivity": "balanced",
     # G14 gate 6: independent image-understanding switch (default off;
     # image bytes never leave the machine until explicitly enabled).
@@ -172,6 +174,10 @@ def _normalize_frontend_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "allow_local_evidence",
     }:
         normalized["cloud_context_policy"] = cloud_context_policy
+    # G16 decision 1: memory read authorization.
+    memory_policy = settings.get("memory_policy")
+    if memory_policy in {"off", "ask", "auto"}:
+        normalized["memory_policy"] = memory_policy
     # G18 decision 4: user-tunable deep-research auto-escalation gate.
     sensitivity = settings.get("deep_research_sensitivity")
     if sensitivity in {"conservative", "balanced", "eager"}:

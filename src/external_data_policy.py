@@ -18,6 +18,10 @@ CloudContextPolicy = Literal[
     "recent_chat",
     "allow_local_evidence",
 ]
+# G16 decision 1: independent read-authorization gate for cross-session
+# memory (read_memory_bundle). Write behavior stays under runtime
+# memory_mode; this only gates what enters the model context.
+MemoryPolicy = Literal["off", "ask", "auto"]
 
 WEB_POLICIES: tuple[WebPolicy, ...] = ("off", "ask", "auto")
 CLOUD_CONTEXT_POLICIES: tuple[CloudContextPolicy, ...] = (
@@ -25,12 +29,14 @@ CLOUD_CONTEXT_POLICIES: tuple[CloudContextPolicy, ...] = (
     "recent_chat",
     "allow_local_evidence",
 )
+MEMORY_POLICIES: tuple[MemoryPolicy, ...] = ("off", "ask", "auto")
 
 
 @dataclass(frozen=True)
 class ExternalDataDecision:
     web_policy: WebPolicy
     cloud_context_policy: CloudContextPolicy
+    memory_policy: MemoryPolicy
     task_source_policy: SourcePolicy
     web_allowed: bool
     local_retrieval_allowed: bool
@@ -53,15 +59,31 @@ def normalize_cloud_context_policy(value: str | None) -> CloudContextPolicy:
     return "allow_local_evidence"
 
 
+def normalize_memory_policy(value: str | None) -> MemoryPolicy:
+    return value if value in MEMORY_POLICIES else "auto"  # type: ignore[return-value]
+
+
 def decide_external_data(
     *,
     web_policy: str | None,
     web_consent: bool,
     cloud_context_policy: str | None,
     task_source_policy: SourcePolicy,
+    memory_policy: str | None = None,
+    memory_consent: bool = False,
 ) -> ExternalDataDecision:
+    """G16: memory_consent carries the per-session grant for ask mode.
+
+    AND gate (decision 9): memory needs BOTH the memory policy to allow it
+    (auto, or ask with a session grant) AND cloud_context_policy at
+    allow_local_evidence. `memory_consent` is ignored in auto mode.
+    """
     normalized_web = normalize_web_policy(web_policy)
     normalized_context = normalize_cloud_context_policy(cloud_context_policy)
+    normalized_memory = normalize_memory_policy(memory_policy)
+    memory_policy_allowed = normalized_memory == "auto" or (
+        normalized_memory == "ask" and memory_consent
+    )
     task_allows_web = task_source_policy in {
         "web_only",
         "local_and_web",
@@ -92,11 +114,12 @@ def decide_external_data(
     return ExternalDataDecision(
         web_policy=normalized_web,
         cloud_context_policy=normalized_context,
+        memory_policy=normalized_memory,
         task_source_policy=task_source_policy,
         web_allowed=web_allowed,
         local_retrieval_allowed=local_retrieval_allowed,
         history_allowed=history_allowed,
-        memory_allowed=local_context_allowed,
+        memory_allowed=local_context_allowed and memory_policy_allowed,
         local_evidence_to_model_allowed=local_context_allowed,
         reason=reason,
     )

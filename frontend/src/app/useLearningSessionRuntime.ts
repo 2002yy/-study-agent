@@ -93,6 +93,8 @@ export function useLearningSessionRuntime(options: {
   setOperationError: Dispatch<SetStateAction<string>>;
   evidence: EvidenceLearningPort;
   webPolicy: string;
+  memoryPolicy?: string;
+  memoryAvailable?: boolean;
 }) {
   const { state, dispatch } = useWorkspace();
   const [chatSettings, setChatSettings] = useState<ChatSettings>(
@@ -170,6 +172,8 @@ export function useLearningSessionRuntime(options: {
     webLookupRunId: options.evidence.webLookupRunId,
     useWebLookup: options.evidence.useWebLookup,
     webPolicy: options.webPolicy,
+    memoryPolicy: options.memoryPolicy,
+    memoryAvailable: options.memoryAvailable,
     setUseWebLookup: options.evidence.setUseWebLookup,
     setInput: options.setInput,
     setOperationError: options.setOperationError,

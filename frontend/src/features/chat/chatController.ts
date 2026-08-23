@@ -51,6 +51,10 @@ type ControllerOptions = {
   webLookupRunId?: string;
   useWebLookup: boolean;
   webPolicy?: string;
+  // G16: memory ask inputs resolved from runtime settings + memory status.
+  // Consent state is checked per-send against the backend session detail.
+  memoryPolicy?: string;
+  memoryAvailable?: boolean;
   setUseWebLookup: Dispatch<SetStateAction<boolean>>;
   setInput: Dispatch<SetStateAction<string>>;
   setOperationError: Dispatch<SetStateAction<string>>;
@@ -308,6 +312,28 @@ export function useChatController(options: ControllerOptions) {
     ) {
       turnWebContext = WEB_CONSENT_MARKER;
     }
+    // G16 decisions 4-5, 9, 12: ask for cross-session memory only when the
+    // policy demands it and memory is non-empty. The grant state is checked
+    // against the backend session detail (authoritative), so restored
+    // sessions never re-prompt after a prior consent.
+    let memoryConsent = false;
+    if (options.memoryPolicy === "ask" && options.memoryAvailable) {
+      let granted = false;
+      const sessionIdForConsent = state.activeChatThreadId;
+      if (sessionIdForConsent) {
+        try {
+          const detail = await loadSessionDetail(sessionIdForConsent);
+          granted = Boolean(detail.settings?.memory_consent_granted);
+        } catch {
+          granted = false;
+        }
+      }
+      if (!granted && !extraOpts.continuationOfTurnId && !extraOpts.retryOfTurnId) {
+        memoryConsent = window.confirm(
+          "允许本会话使用你的跨会话记忆吗（如学习者画像、历史摘要）？同意后本会话内不再询问。"
+        );
+      }
+    }
 
     try {
       const response = await sendChatStream(
@@ -326,6 +352,7 @@ export function useChatController(options: ControllerOptions) {
           conversationInstruction: options.conversationInstruction,
           webContext: turnWebContext,
           webContextRunId: shouldConsumeWebLookup ? options.webLookupRunId : undefined,
+          memoryConsent,
           continuationOfTurnId: extraOpts.continuationOfTurnId,
           retryOfTurnId: extraOpts.retryOfTurnId,
           partialReply: extraOpts.partialReply ?? "",

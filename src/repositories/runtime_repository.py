@@ -115,6 +115,51 @@ class RuntimeRepository:
             raise ValueError(f"Chat thread not found: {thread_id}")
         return thread
 
+    # G16 decisions 6/11: memory consent mutates exactly one key inside the
+    # JSON snapshot via json_set, so concurrent snapshot writers can never
+    # clobber it (and vice versa) — no read-modify-write race exists.
+    def grant_session_memory_consent(self, thread_id: str) -> ChatThread:
+        return self._set_memory_consent(thread_id, granted=True)
+
+    def revoke_session_memory_consent(self, thread_id: str) -> ChatThread:
+        return self._set_memory_consent(thread_id, granted=False)
+
+    def _set_memory_consent(self, thread_id: str, *, granted: bool) -> ChatThread:
+        now = utc_now()
+        # Two explicit json_set shapes instead of CASE-on-json(): SQLite has
+        # no boolean literal context inside json_set args, and keeping the
+        # counterpart timestamp untouched preserves the audit history.
+        if granted:
+            mutation = (
+                "json_set(COALESCE(settings_snapshot, '{}'), "
+                "'$.memory_consent_granted', json('true'), "
+                "'$.memory_consent_granted_at', ?)"
+            )
+            params: tuple[Any, ...] = (now,)
+        else:
+            mutation = (
+                "json_set(COALESCE(settings_snapshot, '{}'), "
+                "'$.memory_consent_granted', json('false'), "
+                "'$.memory_consent_revoked_at', ?)"
+            )
+            params = (now,)
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE chat_threads
+                SET settings_snapshot = {mutation},
+                    updated_at = ?, version = version + 1
+                WHERE id = ?
+                """,
+                (*params, now, thread_id),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"Chat thread is not writable: {thread_id}")
+        thread = self.get_chat_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"Chat thread not found: {thread_id}")
+        return thread
+
     def update_chat_thread_learning_state(
         self,
         thread_id: str,
@@ -397,7 +442,8 @@ class RuntimeRepository:
                 UPDATE chat_threads
                 SET active_operation_id = ?, active_operation_started_at = ?,
                     settings_snapshot = CASE
-                        WHEN ? IS NULL THEN settings_snapshot ELSE ?
+                        WHEN ? IS NULL THEN settings_snapshot
+                        ELSE json_patch(COALESCE(settings_snapshot, '{}'), ?)
                     END,
                     updated_at = ?, version = version + 1
                 WHERE id = ? AND status = 'active' AND active_operation_id IS NULL

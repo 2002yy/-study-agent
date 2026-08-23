@@ -216,6 +216,7 @@ export type RuntimeSettingsResponse = {
     rag_min_score: number;
     web_policy?: "off" | "ask" | "auto";
     cloud_context_policy?: "question_only" | "recent_chat" | "allow_local_evidence";
+    memory_policy?: "off" | "ask" | "auto";
     deep_research_sensitivity?: "conservative" | "balanced" | "eager";
     attachment_vision_enabled?: boolean;
     enter_to_send?: boolean;
@@ -472,6 +473,14 @@ export type SessionDetailResponse = {
     ragEnabled?: boolean;
     ragSettings?: Partial<RagSettings>;
     keepCurrentRole?: boolean;
+    // G16: per-session memory grant persisted by the backend.
+    memory_consent_granted?: boolean;
+    memory_consent_granted_at?: string | null;
+    memory_consent_revoked_at?: string | null;
+    webPolicy?: string;
+    cloudContextPolicy?: string;
+    memoryPolicy?: string;
+    [key: string]: unknown;
   };
   route: Record<string, unknown>;
   rag: ChatResponse["rag"] | Record<string, unknown>;

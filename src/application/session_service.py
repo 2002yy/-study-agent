@@ -306,6 +306,21 @@ class SessionService:
         """User-visible "cancel the pending archive" (decision 15)."""
         return self.repository.cancel_queued_archive(session_id)
 
+    # G16 decision 11: revoke the per-session memory grant. CAS clears the
+    # snapshot key immediately; the next ask-policy first question re-confirms.
+    def revoke_memory_consent(self, session_id: str) -> dict[str, Any]:
+        thread = self.repository.get_chat_thread(session_id)
+        if thread is None:
+            raise ValueError(f"Chat session not found: {session_id}")
+        updated = self.repository.revoke_session_memory_consent(session_id)
+        return {
+            "session_id": updated.id,
+            "memory_consent_granted": False,
+            "revoked_at": (updated.settings_snapshot or {}).get(
+                "memory_consent_revoked_at", ""
+            ),
+        }
+
     def process_pending_archives(self) -> int:
         """Startup sweep: execute queued archives that survived a restart."""
         processed = 0

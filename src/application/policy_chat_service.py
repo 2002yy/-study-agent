@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, replace
+import logging
 import os
 from typing import Any, AsyncIterator, Iterator, cast
 
@@ -55,6 +56,10 @@ class PolicyChatCommand(ChatCommand):
     web_policy: str | None = None
     web_consent: bool = False
     cloud_context_policy: str | None = None
+    memory_policy: str | None = None
+    # G16 decision 6: explicit per-turn consent signal from the frontend
+    # confirm dialog; persisted server-side as a session-level grant.
+    memory_consent: bool = False
     task_intent: TaskIntent | None = None
     research_sources: dict[str, Any] | None = None
 
@@ -284,10 +289,14 @@ class ExternalDataPolicyChatService(ChatService):
         marker_consent = command.web_context.strip() == WEB_CONSENT_MARKER
         manual_web_context = "" if marker_consent else command.web_context
         effective_web_consent = command.web_consent or marker_consent
+        effective_memory_policy = command.memory_policy or str(
+            saved_policy.get("memory_policy", "auto")
+        )
         settings = {
             **_session_settings(command, context_mode),
             "webPolicy": effective_web_policy,
             "cloudContextPolicy": effective_cloud_context_policy,
+            "memoryPolicy": effective_memory_policy,
         }
         turn_id = command.turn_id or command.continuation_of_turn_id or new_id("turn")
         is_continuation = bool(command.continuation_of_turn_id)
@@ -319,8 +328,7 @@ class ExternalDataPolicyChatService(ChatService):
         reserved_existing = existing
         if existing is None:
             self.repository.add_chat_turn(
-                ChatTurn(
-                    id=turn_id,
+                ChatTurn(                    id=turn_id,
                     thread_id=thread.id,
                     user_message=command.user_input,
                     assistant_message="",
@@ -343,6 +351,26 @@ class ExternalDataPolicyChatService(ChatService):
                 raise ValueError(f"Chat turn cannot continue from current state: {turn_id}")
             reserved_existing = reassign
         cancel_check = self._make_cancel_check(turn_id, operation_id)
+        # G16 decisions 5-8: per-session memory consent. The grant lives in
+        # the thread snapshot; a fresh frontend consent marker persists it
+        # once via CAS. A failed CAS fails the turn closed (declined).
+        memory_consent_granted = bool(
+            (thread.settings_snapshot or {}).get("memory_consent_granted")
+        )
+        if (
+            effective_memory_policy == "ask"
+            and not memory_consent_granted
+            and command.memory_consent
+        ):
+            try:
+                self.repository.grant_session_memory_consent(thread.id)
+                memory_consent_granted = True
+            except Exception:  # noqa: BLE001 - decision 7 fail-closed
+                logging.getLogger(__name__).warning(
+                    "Memory consent grant failed for %s; turn declined",
+                    thread.id,
+                    exc_info=True,
+                )
         base_reply = ""
         try:
             cancel_check("route")
@@ -363,6 +391,8 @@ class ExternalDataPolicyChatService(ChatService):
                 web_consent=effective_web_consent,
                 cloud_context_policy=effective_cloud_context_policy,
                 task_source_policy=_source_policy(route),
+                memory_policy=effective_memory_policy,
+                memory_consent=memory_consent_granted,
             )
             route = {**route, "external_data_policy": decision.to_dict()}
             expected_concepts = tuple(
@@ -517,6 +547,17 @@ class ExternalDataPolicyChatService(ChatService):
                 **decision.to_dict(),
                 "history_message_count": len(sent_history),
                 "local_evidence_chunk_count": len(local_evidence_units),
+                # G16 decision 10: why memory did or did not enter context.
+                # granted = bundle used; declined = user policy/refusal kept
+                # it out (off or unanswered ask); not_required = another gate
+                # (non-allow context policy) made memory moot this turn.
+                "memory_consent": (
+                    "granted"
+                    if memory_bundle and decision.memory_allowed
+                    else "declined"
+                    if effective_memory_policy in {"off", "ask"}
+                    else "not_required"
+                ),
                 "answer_data_categories": [
                     "current_question",
                     *(["recent_chat"] if sent_history else []),

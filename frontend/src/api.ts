@@ -88,6 +88,9 @@ type ChatRequestOptions = {
   partialReply?: string;
   turnId?: string;
   operationId?: string;
+  // G16 decision 6: frontend confirm-dialog consent for cross-session
+  // memory (ask policy). Persisted server-side as a session-level grant.
+  memoryConsent?: boolean;
 };
 
 type ChatStreamHandlers = {
@@ -143,6 +146,7 @@ function buildChatPayload(userInput: string, history: ChatMessage[], options: Ch
     rag_min_score: options.ragSettings.minScore,
     web_context: options.webContext ?? "",
     web_context_run_id: options.webContextRunId ?? null,
+    memory_consent: options.memoryConsent ?? false,
     task_intent: consumePendingTaskIntentOverride() ?? null,
     continuation_of_turn_id: options.continuationOfTurnId ?? null,
     retry_of_turn_id: options.retryOfTurnId ?? null,
@@ -800,8 +804,15 @@ export async function sendChat(
   });
 }
 
-export async function cancelChatResearchRuns(turnId: string): Promise<WebLookupRunResponse[]> {
-  const response = await requestJson<{ runs: WebLookupRunResponse[] }>(
+// G16 decision 11: revoke the per-session memory grant.
+export async function revokeSessionMemoryConsent(sessionId: string): Promise<void> {
+  await requestJson(
+    `/sessions/${encodeURIComponent(sessionId)}/memory-consent/revoke`,
+    { method: "POST" }
+  );
+}
+
+export async function cancelChatResearchRuns(turnId: string): Promise<WebLookupRunResponse[]> {  const response = await requestJson<{ runs: WebLookupRunResponse[] }>(
     `/research-runs/owners/turns/${encodeURIComponent(turnId)}/cancel`,
     { method: "POST" }
   );

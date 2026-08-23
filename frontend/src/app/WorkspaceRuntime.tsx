@@ -25,6 +25,13 @@ export default function WorkspaceRuntime() {
   const webPolicy = String(
     snapshot.runtimeSettings?.settings?.web_policy ?? "auto",
   );
+  // G16 decision 1: memory ask policy from runtime settings; availability
+  // from the memory status file list. Consent state is resolved per-send
+  // by the controller against the backend (authoritative source).
+  const memoryPolicy = String(
+    snapshot.runtimeSettings?.settings?.memory_policy ?? "auto",
+  );
+  const memoryAvailable = (snapshot.memoryStatus?.files ?? []).length > 0;
   const learning = useLearningSessionRuntime({
     refresh,
     sessions: snapshot.sessions,
@@ -32,6 +39,8 @@ export default function WorkspaceRuntime() {
     setOperationError,
     evidence: evidence.learning,
     webPolicy,
+    memoryPolicy,
+    memoryAvailable,
   });
   const extension = useExtensionRuntime({
     snapshot,

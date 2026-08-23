@@ -15,6 +15,13 @@ const CONTEXT_OPTIONS = [
   ["allow_local_evidence", "允许本地资料片段"],
 ] as const;
 
+// G16 decision 1: independent read gate for cross-session memory.
+const MEMORY_OPTIONS = [
+  ["off", "不使用记忆"],
+  ["ask", "每次会话询问"],
+  ["auto", "自动使用"],
+] as const;
+
 // G18 decision 4: deep-research auto-escalation sensitivity.
 const DEEP_SENSITIVITY_OPTIONS = [
   ["conservative", "保守（仅明确要求时深度调研）"],
@@ -39,6 +46,14 @@ function normalizeCloudContextPolicy(value: unknown): CloudContextPolicy {
     : "allow_local_evidence";
 }
 
+type MemoryPolicy = (typeof MEMORY_OPTIONS)[number][0];
+
+function normalizeMemoryPolicy(value: unknown): MemoryPolicy {
+  return MEMORY_OPTIONS.some(([option]) => option === value)
+    ? (value as MemoryPolicy)
+    : "auto";
+}
+
 function normalizeDeepSensitivity(value: unknown) {
   return DEEP_SENSITIVITY_OPTIONS.some(([option]) => option === value)
     ? (value as (typeof DEEP_SENSITIVITY_OPTIONS)[number][0])
@@ -58,6 +73,7 @@ export function ExternalDataPolicySettings({
   const [webPolicy, setWebPolicy] = useState<WebPolicy>("auto");
   const [cloudContextPolicy, setCloudContextPolicy] =
     useState<CloudContextPolicy>("allow_local_evidence");
+  const [memoryPolicy, setMemoryPolicy] = useState<MemoryPolicy>("auto");
   const [deepSensitivity, setDeepSensitivity] =
     useState("balanced" as (typeof DEEP_SENSITIVITY_OPTIONS)[number][0]);
   // G14 gate 6: independent image-understanding authorization.
@@ -68,6 +84,7 @@ export function ExternalDataPolicySettings({
   useEffect(() => {
     setWebPolicy(normalizeWebPolicy(settings.web_policy));
     setCloudContextPolicy(normalizeCloudContextPolicy(settings.cloud_context_policy));
+    setMemoryPolicy(normalizeMemoryPolicy(settings.memory_policy));
     setDeepSensitivity(normalizeDeepSensitivity(settings.deep_research_sensitivity));
     setVisionEnabled(Boolean(settings.attachment_vision_enabled));
   }, [settings.web_policy, settings.cloud_context_policy]);
@@ -79,6 +96,7 @@ export function ExternalDataPolicySettings({
       await saveRuntimeSettings({
         web_policy: webPolicy,
         cloud_context_policy: cloudContextPolicy,
+        memory_policy: memoryPolicy,
         deep_research_sensitivity: deepSensitivity,
         attachment_vision_enabled: visionEnabled,
       });
@@ -128,6 +146,23 @@ export function ExternalDataPolicySettings({
       </label>
       <small className="field-hint">
         “仅当前问题”不发送历史、长期记忆或本地检索片段；“最近对话”仍不发送本地资料。
+      </small>
+      <label className="field-row">
+        <span>跨会话记忆</span>
+        <select
+          disabled={disabled || isSaving}
+          onChange={(event) =>
+            setMemoryPolicy(normalizeMemoryPolicy(event.target.value))
+          }
+          value={memoryPolicy}
+        >
+          {MEMORY_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </label>
+      <small className="field-hint">
+        控制长期记忆（如学习者画像）进入回答上下文。“每次会话询问”会在新会话首次使用前确认，且需同时允许本地资料片段。
       </small>
       <label className="field-row">
         <span>深度调研灵敏度</span>

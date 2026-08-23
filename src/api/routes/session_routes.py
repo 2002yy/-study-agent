@@ -197,6 +197,18 @@ def cancel_queued_archive(
     return {"session_id": session_id, "cancelled": changed}
 
 
+@router.post("/sessions/{session_id}/memory-consent/revoke")
+def revoke_memory_consent(
+    session_id: str,
+    service: SessionServiceDependency,
+) -> dict[str, Any]:
+    """Revoke the per-session memory grant (G16 decision 11)."""
+    try:
+        return service.revoke_memory_consent(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/sessions/{session_id}/flush")
 def flush_session(
     session_id: str,
