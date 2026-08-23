@@ -440,7 +440,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 3. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G12 全门闭合并交付 main；G18 深度调研已交付 main（CI 全绿，第 11 节）；G14 临时附件合同已于 2026-08-23 Grill 冻结（决策 1–16 + 验收门 v2 见第 12 节），实施立即开始。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**G12 可取消本地 RAG 与 G18 深度调研均已交付 main 并全绿；G14 临时附件已全切片交付 main（合同第 12 节：schema v22 / 生命周期服务 / DeepSeek vision 门控审计 / REST+前端面板 / chat 检索优先接入 / 归档成功后清理钩子，17 专项测试，CI #32645814002 通过）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -685,3 +685,9 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 - **G18 合同冻结：COMPLETE。实施：GO（立即）。**
 - 实施中若出现新的 owner/终态/授权矛盾，带证据回到 Grill。
+
+### 12.5 交付证据（2026-08-23）
+
+- `f4fec33` 合同冻结 → `b4c5ade` G14-a/b（schema v22 `session_attachments` 表、CAS 状态迁移仓储、上传/解析/分块/索引/失败管线、自动重试一次+手动重试、thread 过滤检索、删除/清理/幂等转正）→ `68ec561` G14-c（deepseek-v4-flash-vision-exp 描述管线，独立开关默认关，逐次 image_description 审计）→ `4240707` G14-d1（REST 适配器，404/409/413/400 映射）→ `27b065a` G14-d2（资料面板内本会话附件区：每文件状态徽章+步骤日志+重试/转正/删除；设置面板 vision 开关）→ `c761052` G14-e（chat 检索附件优先合并+provenance 快照、归档成功后才清理且失败不回滚归档）。
+- 验证：后端 pytest 1081 全过（含 17 个 G14 专项测试覆盖验收门 1/3/4/5/7/8）；前端 vitest 337 全过 + tsc 干净；ruff 全过；mypy 基线无新增（122≤128）；CI #32645814002 success。
+- 验收门对照：①每文件状态机✅（stage_history 落库可展开）；②thread 内命中+文件名标注+优先排序✅；③清理绑定归档成功之后✅（archive_session 为唯一汇聚点，兼容 G18 归档队列与启动扫描）；④手动删除即时生效✅；⑤转正幂等（规范化文本哈希去重）✅；⑥双层 fail-closed✅；⑦仅 ready 可召回✅（failed 片段永不入索引）；⑧重名独立+内容去重✅。
