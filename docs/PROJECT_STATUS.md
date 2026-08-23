@@ -409,7 +409,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G14 导入与来源范围 | PARTIAL (P1) | 长期资料库、server-owned RagRun、来源范围、删除/重建确认已存在；仍缺每文件阶段与单文件重试、当前会话临时附件，以及临时附件的禁联网/禁云端/禁记忆/会话结束删除控制。 |
 | G15 会话转换 | COMPLETE (automation) / MANUAL VISUAL PENDING | 新建、切换、归档共用一个只读派生 transition guard；覆盖 chat generation、Memory preview/closure、partial ResearchRun 与 RagWrite，逐项说明停止、保留、继续或放弃的真实效果。归档只确认一次；从抽屉触发时先关闭来源抽屉，避免双 `aria-modal`。RagWrite 仍没有服务端取消能力，守卫明确说明其继续到真实终态而不冒充已取消。完整远程浏览器与 real-stack 矩阵已通过。 |
 | G16 外发数据与隐私 | STOP-GATE COMPLETE / DELIVERED (P1) | evaluator 前已阻断 `question_only` / `recent_chat` 的外部语义复核；ChatTurn 按调用记录 purpose/provider/categories/count/result；外部 Chroma query/document embedding 在 provider/client 前 fail closed，RagWriteRun 保留本地激活并记录 `blocked_by_policy`；legacy UI 全部执行事实显示 unknown。实现 `2662cd3` 与浏览器验收修正 `a3f00de` 已交付 `main`，完整 CI #32499954659 全绿。文档/附件级云处理授权仍属于后续 G14/G16 产品切片。 |
-| G17 首次使用/可访问性 | PARTIAL (P1) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 仍固定；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
+| G17 首次使用/可访问性 | PARTIAL (P1, Enter 已收口 `f297dc9`) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 已可通过设置切换为 Ctrl+Enter 发送（`enter_to_send`，`f297dc9`，CI #32648090478）；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
 当前未发现传统远程利用或数据破坏型 P0。已确认的 **G16 P1 隐私真实性缺陷** 已完成窄修复、快进交付和完整远程 CI 验证，止血交付门关闭。唯一立即路线现为 G12 pre-answer/RAG cooperative cancellation；随后是 G14 临时附件/每文件恢复、G16 文档级授权产品面与 G17 人工可访问性验收；G4 历史分页和 G10 follow-up 复用仍属 P2。
@@ -437,7 +437,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 1. ~~实施 G12 可取消本地 RAG~~ — 已交付并全门闭合（第 10 节）。
 2. **唯一立即步骤：实施已冻结合同的 G18 深度调研（第 11 节），插队 G14 前。** 扩展 WebLookupRun 多轮迭代管线；G14 临时附件合同在 G18 交付后再单独冻结。 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试；不得复用长期资料库冒充临时生命周期，也不在取消切片中夹带附件实现。
-3. **G16 其余控制与 G17 人工验收。** 按会话记忆 ask、文档/附件级云处理授权随 G14 合同收口；Enter 配置、对比度、屏幕阅读器与实体设备需要独立证据。
+3. **G16 其余控制与 G17 剩余人工验收。** 按会话记忆 ask 是剩余的自动化切片（需先 Grill 冻结合同）；文档/附件级云处理授权已随 G14 vision 开关收口；Enter 配置已交付；对比度、屏幕阅读器与实体设备需要用户本人提供独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
 当前阶段：**G12 可取消本地 RAG 与 G18 深度调研均已交付 main 并全绿；G14 临时附件已全切片交付 main（合同第 12 节：schema v22 / 生命周期服务 / DeepSeek vision 门控审计 / REST+前端面板 / chat 检索优先接入 / 归档成功后清理钩子，17 专项测试，CI #32645814002 通过）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
