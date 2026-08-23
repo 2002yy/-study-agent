@@ -4,11 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
 from src.domain.answer_claims import normalize_answer_claim_snapshot_for_turn
 from src.domain.evidence import ClaimEvidenceLinkV1, build_evidence_snapshot
+
+# G14 decision 1: first-version temporary attachment types. Text types reuse
+# the long-term loader; image types are stored (and only described when the
+# vision switch is explicitly enabled).
+SESSION_ATTACHMENT_EXTENSIONS = frozenset(
+    {".md", ".markdown", ".txt", ".pdf", ".docx"}
+    | {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+)
 
 
 def new_id(prefix: str) -> str:
@@ -273,6 +282,38 @@ class ToolRun:
     version: int = 1
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+
+
+# G14 decision 1/12: per-file lifecycle states for temporary session
+# attachments. Only `ready` chunks are retrievable; `failed` files never
+# contribute fragments to any question context.
+SESSION_ATTACHMENT_STATUSES = frozenset(
+    {"parsing", "chunking", "indexing", "ready", "failed"}
+)
+
+
+def is_session_attachment_kind(filename: str) -> bool:
+    return Path(filename or "").suffix.lower() in SESSION_ATTACHMENT_EXTENSIONS
+
+
+@dataclass(frozen=True)
+class SessionAttachment:
+    id: str = field(default_factory=lambda: new_id("att"))
+    thread_id: str = ""
+    filename: str = ""
+    content_hash: str = ""
+    mime_type: str = ""
+    size_bytes: int = 0
+    storage_path: str = ""
+    status: str = "parsing"
+    stage_error: str = ""
+    stage_history: tuple[dict[str, Any], ...] = ()
+    retry_count: int = 0
+    promoted_rag_run_id: str = ""
+    external_calls: tuple[dict[str, Any], ...] = ()
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+    version: int = 1
 
 
 @dataclass(frozen=True)

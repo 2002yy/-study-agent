@@ -10,7 +10,7 @@ from typing import Callable
 from src.infrastructure.sqlite.learning_semantic_schema import LEARNING_SEMANTIC_MIGRATION_V18
 from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -459,6 +459,34 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         21,
         """
         ALTER TABLE chat_threads ADD COLUMN archive_after_cancel_operation_id TEXT;
+        """,
+    ),
+    (
+        22,
+        """
+        CREATE TABLE session_attachments (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            mime_type TEXT NOT NULL DEFAULT '',
+            size_bytes INTEGER NOT NULL,
+            storage_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            stage_error TEXT NOT NULL DEFAULT '',
+            stage_history TEXT NOT NULL DEFAULT '[]',
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            promoted_rag_run_id TEXT NOT NULL DEFAULT '',
+            external_calls TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE INDEX idx_session_attachments_thread_status
+            ON session_attachments(thread_id, status);
+        CREATE INDEX idx_session_attachments_thread_hash
+            ON session_attachments(thread_id, content_hash);
         """,
     ),
 )

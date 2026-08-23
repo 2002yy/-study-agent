@@ -25,6 +25,8 @@ from src.rag.schema import (
     EVIDENCE_STATUS_ACTIVE,
     EVIDENCE_STATUS_SUPERSEDED,
     EVIDENCE_STATUSES,
+    RagChunk,
+    RagDocument,
     RagIndex,
     RagSearchResult,
 )
@@ -398,6 +400,95 @@ def append_documents_to_index_with_stages(
         ],
         active_version=merged.version,
     )
+
+
+def attach_document_to_index_with_stages(
+    document: RagDocument,
+    chunks: Sequence[RagChunk],
+    *,
+    index_path: str | Path = DEFAULT_RAG_INDEX_PATH,
+) -> RagIndexWriteResult:
+    """G14: merge an already-parsed attachment document into the target index.
+
+    The caller owns the parse/chunk stages (so the per-file state machine can
+    record them separately); this helper performs merge + vector stage +
+    transactional activation, mirroring append_documents_to_index_with_stages.
+    A blocked_by_policy vector stage still activates lexical-only retrieval.
+    """
+    incoming = RagIndex(
+        version=1, documents=(document,), chunks=tuple(chunks)
+    )
+    target = Path(index_path)
+    if target.is_file():
+        existing = load_rag_index(target)
+    else:
+        existing = RagIndex(version=0, documents=(), chunks=())
+
+    merged = _merge_document_revisions(
+        existing,
+        incoming,
+        version=existing.version + 1 if target.is_file() else 1,
+    )
+    vector_stage = _vector_stage(merged)
+    if vector_stage["status"] not in {"completed", "blocked_by_policy"}:
+        return RagIndexWriteResult(
+            index=merged,
+            stages=[
+                _staged_local_stage(merged, target),
+                vector_stage,
+                _activation_stage(
+                    merged,
+                    target,
+                    status="skipped",
+                    detail="required vector stage failed",
+                ),
+            ],
+            activated=False,
+            active_version=existing.version if target.is_file() else 0,
+        )
+    _transactional_save_index(merged, target)
+    return RagIndexWriteResult(
+        index=merged,
+        stages=[
+            _completed_local_stage(merged, target),
+            vector_stage,
+            _activation_stage(merged, target, status="completed"),
+        ],
+        active_version=merged.version,
+    )
+
+
+def remove_documents_from_index(
+    document_ids: Sequence[str],
+    *,
+    index_path: str | Path = DEFAULT_RAG_INDEX_PATH,
+) -> RagIndex:
+    """Remove documents (and their chunks) from an index by document id.
+
+    Missing index files are a no-op. Used by G14 attachment deletion and
+    thread purge so that removed content leaves both DB records and the
+    retrieval corpus in the same operation.
+    """
+    target = Path(index_path)
+    if not target.is_file():
+        return RagIndex(version=0, documents=(), chunks=())
+    existing = load_rag_index(target)
+    doomed = set(document_ids)
+    merged = RagIndex(
+        version=existing.version + 1,
+        documents=tuple(
+            document
+            for document in existing.documents
+            if _document_id(document) not in doomed
+        ),
+        chunks=tuple(
+            chunk
+            for chunk in existing.chunks
+            if _chunk_document_id(chunk) not in doomed
+        ),
+    )
+    _transactional_save_index(merged, target)
+    return merged
 
 
 def list_knowledge_documents(
