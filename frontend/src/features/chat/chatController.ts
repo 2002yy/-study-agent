@@ -7,6 +7,7 @@ import {
   getChatTurnStatus,
   loadSessionDetail,
   sendChatStream,
+  steerResearchRun,
 } from "../../api";
 import { operationRegistry } from "../../app/operationRegistry";
 import { useWorkspace } from "../../app/WorkspaceProvider";
@@ -87,6 +88,9 @@ export function useChatController(options: ControllerOptions) {
   const [researchProgress, setResearchProgress] = useState<ChatResearchProgress | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
   const activeOperationIdRef = useRef<string>("");
+  // G18: the run id of an in-flight deep-research journey; while set, main
+  // input messages become mid-run steering (decision 12).
+  const deepRunIdRef = useRef<string | null>(null);
   // G12 decision 13: the server is the only writer of partial replies. The
   // controller only reflects durable turn states; commitTurn is gone.
   const cancelledSettledRef = useRef(false);
@@ -200,6 +204,32 @@ export function useChatController(options: ControllerOptions) {
     extraOpts: SendOptions = {}
   ) => {
     if (!question || isSending) return;
+
+    // G18 decision 12: while a deep-research run is streaming, a message from
+    // the main input becomes mid-run steering instead of a new chat turn.
+    if (deepRunIdRef.current) {
+      const runId = deepRunIdRef.current;
+      try {
+        await steerResearchRun(runId, question);
+        setMessages((current) => [
+          ...current,
+          {
+            role: "user" as const,
+            content: question,
+            avatarRole: "user" as const,
+            transient: true,
+            turnStatus: "cancelling-registered",
+          },
+        ]);
+        options.setInput("");
+        options.setOperationError("");
+      } catch (error) {
+        options.setOperationError(
+          `研究方向注入失败：${error instanceof Error ? error.message : "未知错误"}`
+        );
+      }
+      return;
+    }
 
     const operationOwner = state.activeChatThreadId;
     const { operationId, controller: abortController, generationId } = operationRegistry.start(
@@ -352,6 +382,17 @@ export function useChatController(options: ControllerOptions) {
           onResearch: (progress) => {
             if (!isCurrent()) return;
             setResearchProgress(progress);
+            // G18: a deep run (round field present) opens the steering
+            // channel while it runs; terminal states close it.
+            if (progress.round != null) {
+              deepRunIdRef.current =
+                ["completed", "partial", "failed", "cancelled"].includes(
+                  progress.status
+                ) || progress.status === "pending"
+                  ? null
+                  : progress.run_id;
+              if (deepRunIdRef.current === null) stopCancelPolling();
+            }
             options.onResearchRunDiscovered(
               progress.run_id,
               ["completed", "partial", "failed", "cancelled"].includes(progress.status),
@@ -502,6 +543,7 @@ export function useChatController(options: ControllerOptions) {
         activeOperationIdRef.current = "";
       }
       cancelMarkRef.current = null;
+      deepRunIdRef.current = null;
       const ownsSettlement = isOwned();
       operationRegistry.complete(operationId);
       if (ownsSettlement) setIsSending(false);

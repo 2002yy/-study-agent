@@ -276,6 +276,17 @@ async def chat_stream_endpoint(
 
 
 def _research_progress(run: Any) -> dict[str, Any]:
+    deep = {}
+    context = getattr(run, "research_context", None)
+    if isinstance(context, dict):
+        candidate = context.get("deep")
+        if isinstance(candidate, dict):
+            deep = candidate
+    steps = [
+        step for step in deep.get("steps", []) if isinstance(step, dict)
+    ]
+    notes = [note for note in deep.get("notes", []) if isinstance(note, dict)]
+    last_step = steps[-1] if steps else None
     return {
         "run_id": run.id,
         "status": run.status,
@@ -286,6 +297,11 @@ def _research_progress(run: Any) -> dict[str, Any]:
         "query_attempt_count": len(run.query_attempts),
         "selected_source_count": len(run.selected_sources),
         "version": run.version,
+        # G18 deep-research journey fields.
+        "round": int(deep.get("round_index") or 0) or None,
+        "notes_count": len(notes),
+        "last_step_kind": (last_step or {}).get("kind"),
+        "last_step_text": (last_step or {}).get("text"),
     }
 
 

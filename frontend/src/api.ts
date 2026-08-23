@@ -725,6 +725,26 @@ export async function cancelChatResearchRuns(turnId: string): Promise<WebLookupR
   return response.runs;
 }
 
+/**
+ * G18 decision 12: inject mid-run steering into an active deep-research run.
+ * Returns the refreshed run; the caller keeps polling separately.
+ */
+export async function steerResearchRun(
+  runId: string,
+  content: string,
+  requestOptions: { signal?: AbortSignal } = {}
+): Promise<WebLookupRunResponse> {
+  return requestJson<WebLookupRunResponse>(
+    `/research-runs/${encodeURIComponent(runId)}/steer`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+      signal: requestOptions.signal
+    }
+  );
+}
+
 export type ChatTurnCancelOutcome =
   | "accepted"
   | "already_completed"

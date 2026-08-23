@@ -550,6 +550,11 @@ export type ChatResearchProgress = {
   query_attempt_count: number;
   selected_source_count: number;
   version: number;
+  // G18 deep-research journey fields (present only for deep runs).
+  round?: number | null;
+  notes_count?: number | null;
+  last_step_kind?: string | null;
+  last_step_text?: string | null;
 };
 
 export type ToolRunResponse = {

@@ -46,14 +46,28 @@ export function ChatResearchRecovery({
   onResume: () => void;
 }) {
   if (progress && ["pending", "running"].includes(progress.status)) {
+    const isDeep = progress.round != null;
     return (
       <div className="memory-note" role="status">
         <Loader2 className="spin" size={16} />
         <div>
-          <strong>{stageLabels[progress.stage] ?? "联网研究进行中"}</strong>
+          <strong>
+            {stageLabels[progress.stage] ?? "联网研究进行中"}
+            {isDeep ? `（第 ${progress.round} 轮）` : ""}
+          </strong>
           <span>
-            已记录 {progress.query_attempt_count} 次查询和 {progress.selected_source_count} 个来源。
+            已记录 {progress.query_attempt_count} 次查询和{" "}
+            {progress.selected_source_count} 个来源
+            {isDeep && progress.notes_count
+              ? `，已整理 ${progress.notes_count} 条笔记`
+              : ""}
+            。
           </span>
+          {isDeep && progress.last_step_text ? (
+            <span className="research-step-line">
+              最近一步（{progress.last_step_kind}）：{progress.last_step_text}
+            </span>
+          ) : null}
         </div>
       </div>
     );
