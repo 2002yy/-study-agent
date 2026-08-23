@@ -44,3 +44,4 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - 实体手机、视觉对比度和真实屏幕阅读器验收仍需人工证据。
 - “仅当前问题”约束所有回答、教学评估和 embedding 调用；`allow_local_evidence` 不等于允许全量资料云端 embedding。
 - 最新 SHA、CI、缺口和下一步必须从 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 引用，避免本展示材料漂移。
+- G16 按会话记忆 ask：2026-08-23 Grill 决策 1–14 + 验收门 v2 冻结，实施排期立即开始；三档 memory_policy（默认 auto）、会话级 ask、CAS 落库 thread 快照、可撤销徽章、审计三态字段。两轮审计修复 7 个问题（恢复判定/CAS 并发/审计位置/撤销语义/空 bundle/fail-closed/retry）。合同见 PROJECT_STATUS 第 13 节。

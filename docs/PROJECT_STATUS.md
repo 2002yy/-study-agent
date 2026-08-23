@@ -440,7 +440,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 3. **G16 其余控制与 G17 剩余人工验收。** 按会话记忆 ask 是剩余的自动化切片（需先 Grill 冻结合同）；文档/附件级云处理授权已随 G14 vision 开关收口；Enter 配置已交付；对比度、屏幕阅读器与实体设备需要用户本人提供独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G12 可取消本地 RAG 与 G18 深度调研均已交付 main 并全绿；G14 临时附件已全切片交付 main（合同第 12 节：schema v22 / 生命周期服务 / DeepSeek vision 门控审计 / REST+前端面板 / chat 检索优先接入 / 归档成功后清理钩子，17 专项测试，CI #32645814002 通过）。Learner Model 独立 UI NO-GO；GraphRAG、长期画像写回与 Android 均未启动。**
+当前阶段：**G12/G18/G14 已交付 main 全绿；G17 Enter 配置已收口（f297dc9）；G16 按会话记忆 ask 合同已冻结（第 13 节，2026-08-23），实施立即开始。G17 剩余对比度/屏幕阅读器/实体手机待用户人工验收。Learner Model UI NO-GO；GraphRAG、长期画像写回与 Android 未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -691,3 +691,53 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - `f4fec33` 合同冻结 → `b4c5ade` G14-a/b（schema v22 `session_attachments` 表、CAS 状态迁移仓储、上传/解析/分块/索引/失败管线、自动重试一次+手动重试、thread 过滤检索、删除/清理/幂等转正）→ `68ec561` G14-c（deepseek-v4-flash-vision-exp 描述管线，独立开关默认关，逐次 image_description 审计）→ `4240707` G14-d1（REST 适配器，404/409/413/400 映射）→ `27b065a` G14-d2（资料面板内本会话附件区：每文件状态徽章+步骤日志+重试/转正/删除；设置面板 vision 开关）→ `c761052` G14-e（chat 检索附件优先合并+provenance 快照、归档成功后才清理且失败不回滚归档）。
 - 验证：后端 pytest 1081 全过（含 17 个 G14 专项测试覆盖验收门 1/3/4/5/7/8）；前端 vitest 337 全过 + tsc 干净；ruff 全过；mypy 基线无新增（122≤128）；CI #32645814002 success。
 - 验收门对照：①每文件状态机✅（stage_history 落库可展开）；②thread 内命中+文件名标注+优先排序✅；③清理绑定归档成功之后✅（archive_session 为唯一汇聚点，兼容 G18 归档队列与启动扫描）；④手动删除即时生效✅；⑤转正幂等（规范化文本哈希去重）✅；⑥双层 fail-closed✅；⑦仅 ready 可召回✅（failed 片段永不入索引）；⑧重名独立+内容去重✅。
+## 13. G16 按会话记忆 ask 冻结合同（2026-08-23 Grill，决策 1–14 + 验收门 v2）
+
+背景：跨会话记忆（read_memory_bundle）目前只受 cloud_context_policy==allow_local_evidence 一个门控制，设为 allow 即静默进入每次回答。memory_mode 只管写入不管读取。本合同补上记忆读取的显式授权控制。
+
+### 13.1 冻结决策
+
+1. **策略形态：**独立三档 `memory_policy: off / ask / auto`，默认 auto，位于外发数据面板；与 cloud_context_policy 解耦。
+2. **ask 粒度：**会话级一次——新会话首问前确认，同意后本会话内不再询问。
+3. **范围：**read_memory_bundle 全部内容（learner_profile、跨会话 summary 等）；本会话自身 learning_state/历史属于本轮上下文不算记忆；范围仅单聊（群聊不读记忆）。
+4. **默认值：**auto——升级无感，维持现状行为。
+5. **确认 UI：**window.confirm 弹窗，与联网 ask 同模式；仅当「ask + 会话未授权 + bundle 非空（memoryStatus.files 判定）」时出现。
+6. **技术路径：**前端 confirm 同意 → 请求携带 MEMORY_CONSENT_MARKER → 后端 CAS 写入 ChatThread.settings_snapshot → 本会话后续轮次后端自读快照放行。
+7. **CAS 失败语义：**落库写失败 = 当轮 fail-closed 拒绝（declined），下一问重试。
+8. **拒绝/off：**无记忆继续正常回答，不阻塞。
+9. **AND 双门：**需 memory_policy 放行 且 cloud_context_policy==allow_local_evidence 才进记忆；非 allow 档即使 auto 也无记忆。
+10. **审计：**external_data_execution 新增顶层字段 `memory_consent ∈ {granted, declined, not_required}`；answer_data_categories 粒度不变；键缺失解释为机制上线前的历史轮次，不升 external_data_audit_version。
+11. **撤销：**ask+granted 时输入区上方显示可撤销徽章；点击调用 revoke 端点 CAS 清除授权并记 revoked_at；立即生效（本轮起无记忆），下次首问重新确认。
+12. **会话恢复：**session detail payload 暴露 memory_consent_granted 状态；已授权会话刷新/重启/切回后不再询问且记忆生效。
+13. **记录边界：**仅 ask 的同意产生授权记录；auto/off 不落库。
+14. **显式声明：**本合同不改变"记忆内容随回答发给所配置 LLM provider"的既有事实（默认 auto 维持现状），只增加可控性。
+
+### 13.2 审计记录
+
+两轮复审共修复 7 个问题：
+- 🔴 会话恢复后前端无法判定是否弹 confirm → 决策 12（detail 暴露状态）；
+- 🔴 settings_snapshot 整包覆写并发风险 → 决策 6/11 强制专用 CAS 方法；
+- 🟡 declined 布尔塞类别列表破坏语义 → 决策 10（顶层三态字段）;
+- 🟡 撤销语义不完整 → 决策 11（立即生效 + revoked_at + 再问）；
+- 🟡 bundle 为空时询问无意义 → 决策 5（非空才问）；
+- 🟡 marker 落库失败当轮归属 → 决策 7（fail-closed）；
+- ✅ retry 被拒轮次自然重新确认（快照无授权），无需机制。
+波及面验证：decide_external_data 仅 policy_chat_service 一个生产调用方；群聊不读记忆。
+
+### 13.3 验收门 v2
+
+1. 三档设置默认 auto，升级用户行为不变（门②）。
+2. off = 任何上下文档位 bundle 都不进上下文。
+3. ask 未授权会话：首问 confirm（bundle 非空时）；同意后会话内静默且持久化到 thread 快照。
+4. 被拒本轮无记忆继续且审计记 declined；下一问再次询问。
+5. AND 双门：cloud_context_policy 非 allow 时即使 auto 也无记忆。
+6. 审计新增 memory_consent 三态字段，其余粒度不变。
+7. 会话恢复（刷新/重启/切换）：已授权免问且生效；未授权再次首问仍询问。
+8. 撤销徽章：点击即 CAS 清除、立即生效、下次首问再问。
+9. 归档随 settings_snapshot 自然处理，无特殊清理。
+
+### 13.4 GO / NO-GO
+
+- **合同冻结：COMPLETE。实施：GO（立即）。**
+- 实施中如出现新的 owner/终态矛盾，带证据回到 Grill。
+
