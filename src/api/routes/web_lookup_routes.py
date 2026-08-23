@@ -11,6 +11,7 @@ from src.api.models.news import (
     NewsLookupRequest,
     NewsLookupResponse,
     ResearchRunCreateRequest,
+    ResearchSteerRequest,
     WebLookupRunListResponse,
     WebLookupRunResponse,
 )
@@ -164,6 +165,19 @@ def cancel_research_run(
 ) -> WebLookupRunResponse:
     try:
         return _response(service.cancel(run_id))
+    except ValueError as exc:
+        raise _not_found_or_conflict(exc) from exc
+
+
+@router.post("/research-runs/{run_id}/steer", response_model=WebLookupRunResponse)
+def steer_research_run(
+    run_id: str,
+    request: ResearchSteerRequest,
+    service: WebLookupServiceDependency,
+) -> WebLookupRunResponse:
+    """G18 decision 12: inject mid-run steering into an active deep-research run."""
+    try:
+        return _response(service.steer(run_id, content=request.content))
     except ValueError as exc:
         raise _not_found_or_conflict(exc) from exc
 

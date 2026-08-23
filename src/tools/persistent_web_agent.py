@@ -86,6 +86,22 @@ def _requires_planned_tools(user_input: str) -> bool:
         or re.search(r"\bpr\s*#?\s*\d+\b", lowered) is not None
     )
 
+
+DEEP_RESEARCH_PREFIX = "请深度研究："
+
+
+def _requires_deep_research(user_input: str) -> bool:
+    """G18 decision 4: explicit deep-research trigger (auto-escalation later)."""
+    import os
+
+    if os.getenv("WEB_DEEP_RESEARCH_ENABLED", "1").strip().lower() in {
+        "0",
+        "false",
+        "off",
+    }:
+        return False
+    return str(user_input or "").strip().startswith(DEEP_RESEARCH_PREFIX)
+
 class PersistentWebToolAgent(WebToolAgent):
     """Add the composed PR review-context tool without widening the base gateway."""
 
@@ -111,6 +127,12 @@ class PersistentWebToolAgent(WebToolAgent):
     ) -> WebToolTrace:
         if not _env_flag("WEB_TOOL_ENABLED", default=True):
             return WebToolTrace(enabled=False)
+        if _requires_deep_research(user_input) and self.research_service is not None:
+            return self._resolve_deep_research(
+                user_input,
+                owner_thread_id=owner_thread_id,
+                owner_turn_id=owner_turn_id,
+            )
         run = None
         operation_id = ""
         persistence_error = ""
@@ -271,6 +293,86 @@ class PersistentWebToolAgent(WebToolAgent):
                 if persistence_error:
                     error = f"{error}; {persistence_error}"
             return WebToolTrace(error=error, run_id=(run.id if run else ""))
+
+    def _resolve_deep_research(
+        self,
+        user_input: str,
+        *,
+        owner_thread_id: str | None = None,
+        owner_turn_id: str | None = None,
+    ) -> WebToolTrace:
+        """G18 deep-research pipeline (decisions 1-16).
+
+        Runs the multi-round WebLookupRun synchronously inside the caller's
+        preparation thread; G12 cancellation semantics apply through the run's
+        cooperative checkpoints. The final source block carries the rolling
+        memo and structured notes so the chat answer is genuinely informed by
+        every round, not just the first page of hits.
+        """
+        stripped = user_input.strip()
+        query = (
+            stripped[len(DEEP_RESEARCH_PREFIX):].strip() or stripped
+        )
+        error = ""
+        calls: list[dict[str, Any]] = []
+        run = None
+        try:
+            run = self.research_service.create(
+                query,
+                owner_thread_id=owner_thread_id,
+                owner_turn_id=owner_turn_id,
+                run_kind="deep_research",
+                research_mode="deep",
+            )
+            completed = self.research_service.execute(run.id)
+            deep = completed.research_context.get("deep") or {}
+            for attempt in completed.query_attempts:
+                calls.append(
+                    {
+                        "name": "web_search",
+                        "arguments": {
+                            "query": str(attempt.get("query", "")),
+                            "round": attempt.get("round"),
+                            "influenced_by_steering": bool(
+                                attempt.get("influenced_by_steering")
+                            ),
+                        },
+                        "result": {
+                            "status": str(attempt.get("status") or ""),
+                            "result_count": int(attempt.get("result_count") or 0),
+                        },
+                    }
+                )
+            for note in deep.get("notes", []):
+                if isinstance(note, dict):
+                    calls.append(
+                        {
+                            "name": "web_read",
+                            "arguments": {"url": note.get("url", "")},
+                            "result": {
+                                "status": "read",
+                                "title": note.get("title", ""),
+                                "facts_excerpt": str(note.get("facts", ""))[:300],
+                            },
+                        }
+                    )
+            return WebToolTrace(
+                calls=tuple(calls),
+                source_block=completed.source_block,
+                run_id=completed.id,
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            cancelled = "ResearchCancelled" in type(exc).__name__ or (
+                "ResearchCancelled" in str(exc)
+            )
+            if cancelled:
+                error = "ResearchCancelled: 深度研究已被用户停止"
+            return WebToolTrace(
+                calls=tuple(calls),
+                error=error,
+                run_id=(run.id if run else ""),
+            )
 
     def _record_trace(
         self,

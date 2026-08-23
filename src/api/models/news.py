@@ -68,6 +68,10 @@ class ResearchRunCreateRequest(BaseModel):
     max_items: int = Field(default=8, gt=0, le=20)
 
 
+class ResearchSteerRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class NewsLookupResponse(BaseModel):
     run_id: str
     query_text: str
