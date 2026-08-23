@@ -440,7 +440,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 3. **G16 其余控制与 G17 剩余人工验收。** 按会话记忆 ask 是剩余的自动化切片（需先 Grill 冻结合同）；文档/附件级云处理授权已随 G14 vision 开关收口；Enter 配置已交付；对比度、屏幕阅读器与实体设备需要用户本人提供独立证据。
 4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
 
-当前阶段：**G12/G18/G14 已交付 main 全绿；G17 Enter 配置已收口（f297dc9）；G16 按会话记忆 ask 合同已冻结（第 13 节，2026-08-23），实施立即开始。G17 剩余对比度/屏幕阅读器/实体手机待用户人工验收。Learner Model UI NO-GO；GraphRAG、长期画像写回与 Android 未启动。**
+当前阶段：**G12/G18/G14 已交付 main 全绿；G17 Enter 配置已收口；G16 按会话记忆 ask 已全切片交付 main（合同第 13 节：三档 memory_policy、会话级 CAS 授权、json_patch 合并修复覆写缺陷、三态审计、可撤销徽章，9 专项测试，CI #32651981365 通过）。G16 自动化切片至此收口；G17 剩余对比度/屏幕阅读器/实体手机待用户人工验收。Learner Model UI NO-GO；GraphRAG、长期画像写回与 Android 未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -740,4 +740,9 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 - **合同冻结：COMPLETE。实施：GO（立即）。**
 - 实施中如出现新的 owner/终态矛盾，带证据回到 Grill。
+### 13.5 交付证据（2026-08-23）
+
+- `375a2dd` 合同冻结 → `4b64529` 实施：三档 memory_policy（helpers 默认 auto）、decide_external_data 双门、grant/revoke CAS（json_set 只动 consent 键）、acquire_chat_operation 改 json_patch 合并（修复整包覆写吞掉授权键的真实缺陷——即审计警告的并发问题在生产代码中的具体形态）、policy chat 逐轮解析授权 + marker 首次落库 + CAS 失败 fail-closed、external_data_execution.memory_consent 三态审计、revoke 端点、前端 confirm（仅 ask+非空+未授权时出现，向后端 detail 权威校验以满足恢复免问）、可撤销徽章。
+- 验证：后端 pytest 1090 全过（含 9 个 G16 测试覆盖验收门 1–9）；前端 vitest 338 全过 + tsc 干净；ruff 全过；mypy 基线无新增（122≤128）；CI #32651981365 success。
+
 
