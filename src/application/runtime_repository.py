@@ -249,6 +249,9 @@ def get_session_service():
         navigation_repository=get_session_navigation_repository(),
         current_dir=runtime_current_dir(),
         archive_dir=runtime_archive_dir(),
+        attachment_purger=lambda session_id: (
+            get_session_attachment_service().purge_thread(session_id)
+        ),
     )
     # G12 decision 15: queued "archive after cancel" intents survive restarts;
     # drain any that became due while the process was down.

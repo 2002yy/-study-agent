@@ -14,6 +14,7 @@ import base64
 import mimetypes
 import os
 from pathlib import Path
+from typing import Any
 
 DEFAULT_VISION_MODEL = "deepseek-v4-flash-vision-exp"
 
@@ -59,21 +60,24 @@ def describe_image_with_deepseek(image_path: Path) -> str:
             timeout=max(client.timeout_seconds, 60.0),
             max_retries=client.max_retries,
         )
+        # The multimodal content-block shape is valid on the wire but the
+        # openai SDK's TypedDict union cannot infer it cleanly.
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _DESCRIPTION_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _data_url(image_path)},
+                        "detail": "high",
+                    },
+                ],
+            }
+        ]
         response = api.chat.completions.create(
             model=vision_model_name(),
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _DESCRIPTION_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _data_url(image_path)},
-                            "detail": "high",
-                        },
-                    ],
-                }
-            ],
+            messages=messages,  # type: ignore[arg-type]
             max_tokens=1200,
             extra_body={"thinking": {"type": "disabled"}},
         )

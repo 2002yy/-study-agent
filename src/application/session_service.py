@@ -33,6 +33,7 @@ class SessionService:
         archive_dir: Path,
         summary_repository: ThreadSummaryRepository | None = None,
         navigation_repository: SessionNavigationRepository | None = None,
+        attachment_purger: Any = None,
     ):
         self.repository = repository
         self.summary_repository = summary_repository or ThreadSummaryRepository(
@@ -44,6 +45,9 @@ class SessionService:
         )
         self.importer = LegacySessionImporter(current_dir, archive_dir)
         self.exporter = SessionMarkdownExporter(current_dir, archive_dir)
+        # G14 gate 3: called only AFTER the archive has durably landed so a
+        # failed archive keeps both session and attachments (queue-safe).
+        self.attachment_purger = attachment_purger
         self._legacy_imported = False
 
     def list_sessions(self, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -197,6 +201,23 @@ class SessionService:
                 session_id,
                 exc,
             )
+        if self.attachment_purger is not None:
+            try:
+                summary = self.attachment_purger(session_id)
+                logging.getLogger(__name__).info(
+                    "Archived session %s purged attachments: %s",
+                    session_id,
+                    summary,
+                )
+            except Exception:
+                # The archive itself is durable; attachment cleanup failures
+                # must not roll it back. Orphans are retried on next archive
+                # sweep or manual cleanup.
+                logging.getLogger(__name__).warning(
+                    "Archived session %s but attachment purge failed",
+                    session_id,
+                    exc_info=True,
+                )
         return archived
 
     def request_archive(self, session_id: str) -> dict[str, Any]:

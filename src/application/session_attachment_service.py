@@ -232,6 +232,9 @@ class SessionAttachmentService:
                 stage_entry=_stage_entry("parsing", "completed"),
             )
             document = load_document(source)
+            # Storage names carry a hash prefix for on-disk uniqueness;
+            # evidence and citations must show the user-facing filename.
+            document = replace(document, title=attachment.filename)
             chunks = chunk_document(
                 document,
                 max_chars=self.max_chars,
@@ -383,16 +386,25 @@ class SessionAttachmentService:
         top_k: int = 3,
         min_score: float = 0.01,
         retrieval_mode: str = "hybrid",
+        should_cancel: Any = None,
     ) -> list[RagSearchResult]:
         """Search ready attachment chunks scoped to one thread.
 
         The thread_id filter is enforced via index metadata on every chunk;
         other threads' attachments can never surface here.
         """
+        if should_cancel is not None and should_cancel():
+            from src.rag.cancellation import RetrievalCancelled
+
+            raise RetrievalCancelled(stage="attachment_retrieval")
         try:
             index = load_rag_index(self.temp_index_path)
         except FileNotFoundError:
             return []
+        if should_cancel is not None and should_cancel():
+            from src.rag.cancellation import RetrievalCancelled
+
+            raise RetrievalCancelled(stage="attachment_search")
         diagnostics = search_documents_with_debug(
             index,
             query,
@@ -403,6 +415,34 @@ class SessionAttachmentService:
             suppress_duplicate_text=True,
         )
         return diagnostics.results
+
+    def attachment_ids_in_results(
+        self, results: list[RagSearchResult]
+    ) -> list[str]:
+        """Resolve which attachments produced the given hits.
+
+        Chunk-level metadata does not carry the attachment tag (it lives on
+        the document), so map each hit back through the temp index.
+        """
+        try:
+            index = load_rag_index(self.temp_index_path)
+        except FileNotFoundError:
+            return []
+        metadata_by_document = {
+            document.document_id or document.content_hash: (
+                document.metadata or {}
+            )
+            for document in index.documents
+        }
+        ids: list[str] = []
+        for hit in results:
+            document_metadata = metadata_by_document.get(
+                hit.chunk.document_id or hit.chunk.document_hash
+            ) or {}
+            attachment_id = document_metadata.get("attachment_id")
+            if attachment_id and str(attachment_id) not in ids:
+                ids.append(str(attachment_id))
+        return ids
 
     def _document_ids_for(
         self,

@@ -217,6 +217,51 @@ def _refresh_execution_truth(snapshot: dict[str, Any]) -> dict[str, Any]:
 class ExternalDataPolicyChatService(ChatService):
     """Apply user-controlled source and model-context gates."""
 
+    @staticmethod
+    def _retrieve_session_attachments(
+        query: str,
+        *,
+        thread_id: str,
+        enabled: bool,
+        top_k: int,
+        min_score: float,
+        should_cancel: Any = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Thread-scoped temporary attachment retrieval (G14 gate 2/7).
+
+        Failures degrade to "no attachments" instead of blocking the turn;
+        cooperative cancellation always propagates.
+        """
+        if not enabled:
+            return [], None
+        try:
+            from src.application.runtime_repository import (
+                get_session_attachment_service,
+            )
+
+            service = get_session_attachment_service()
+            hits = service.retrieve_for_thread(
+                query,
+                thread_id,
+                top_k=max(1, top_k),
+                min_score=min_score,
+                should_cancel=should_cancel,
+            )
+        except RetrievalCancelled:
+            raise
+        except Exception:  # noqa: BLE001 - attachments must not break turns
+            return [], {
+                "status": "error",
+                "count": 0,
+                "attachment_ids": [],
+            }
+        provenance = {
+            "status": "found" if hits else "none",
+            "count": len(hits),
+            "attachment_ids": service.attachment_ids_in_results(hits),
+        }
+        return [result.to_dict() for result in hits], provenance
+
     def start_turn(self, command: ChatCommand) -> PreparedChatTurn:
         policy_command = (
             command
@@ -387,6 +432,26 @@ class ExternalDataPolicyChatService(ChatService):
             )
             rag = rag_result.to_dict()
             rag["query_plan"] = retrieval_plan.to_dict()
+            # G14: thread-scoped temporary attachments join retrieval with
+            # priority over the long-term corpus (acceptance gate 2). Only
+            # `ready` chunks exist in the temp index, so processing files
+            # are invisible here (gate 7); failed fragments can never leak.
+            attachment_results, attachment_provenance = (
+                self._retrieve_session_attachments(
+                    retrieval_plan.private_query,
+                    thread_id=thread.id,
+                    enabled=(command.rag_enabled and decision.local_retrieval_allowed),
+                    top_k=command.rag_chat_top_k or command.rag_top_k,
+                    min_score=command.rag_min_score,
+                    should_cancel=_poll_cancel(
+                        self.repository, turn_id, operation_id
+                    ),
+                )
+            )
+            if attachment_results:
+                rag["results"] = [*attachment_results, *(rag.get("results") or [])]
+            if attachment_provenance is not None:
+                rag["session_attachments"] = attachment_provenance
             cancel_check("web_tools")
             if decision.web_allowed:
                 web_tools = self.dependencies.resolve_web_tools(
