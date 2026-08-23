@@ -91,7 +91,12 @@ DEEP_RESEARCH_PREFIX = "请深度研究："
 
 
 def _requires_deep_research(user_input: str) -> bool:
-    """G18 decision 4: explicit deep-research trigger (auto-escalation later)."""
+    """G18 decision 4: explicit prefix or heuristic auto-escalation.
+
+    The sensitivity switch lives in the user's frontend settings (default
+    conservative); the deterministic judge in src/web/deep_research.py keeps
+    short conversational questions out unconditionally.
+    """
     import os
 
     if os.getenv("WEB_DEEP_RESEARCH_ENABLED", "1").strip().lower() in {
@@ -100,10 +105,23 @@ def _requires_deep_research(user_input: str) -> bool:
         "off",
     }:
         return False
-    return str(user_input or "").strip().startswith(DEEP_RESEARCH_PREFIX)
+    stripped = str(user_input or "").strip()
+    if stripped.startswith(DEEP_RESEARCH_PREFIX):
+        return True
+    try:
+        from src.application.helpers import load_frontend_settings
+        from src.web.deep_research import should_use_deep_research
+
+        sensitivity = str(
+            load_frontend_settings().get("deep_research_sensitivity", "balanced")
+        )
+        return should_use_deep_research(stripped, sensitivity=sensitivity)
+    except Exception:
+        return False
+
 
 class PersistentWebToolAgent(WebToolAgent):
-    """Add the composed PR review-context tool without widening the base gateway."""
+    """Persistent variant that records every tool loop as a durable run."""
 
     def __init__(
         self,
