@@ -34,6 +34,7 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - G16 外发真值止血：实现提交 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进交付到 `main`；完整 [CI #32499954659](https://github.com/2002yy/study-agent/actions/runs/32499954659) 全绿，止血交付门关闭。
 - G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结，当前实施门为 GO；按 ChatTurn/operation owner 路线实施 cooperative cancellation，不新增 LocalRagRun。
 - G18 深度调研（DeepResearch）：2026-08-22 Grill 决策 1–16 冻结，实施排期插队 G14 前；扩展 WebLookupRun 多轮迭代管线，仅证据链不写 LearningTruth，运行中转向为元数据注入（修订 G12 决策 10）。合同见 PROJECT_STATUS 第 11 节。
+- G14 临时附件：2026-08-23 Grill 决策 1–16 + 验收门 v2 冻结，实施立即开始；thread 内共享库过滤隔离、随会话存活、一键转正幂等、双层 fail-closed（文本 embedding 跟随策略、vision 默认关）、删除绑定归档成功之后。合同见 PROJECT_STATUS 第 12 节。
 
 ## 展示边界
 
