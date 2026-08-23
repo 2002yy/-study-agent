@@ -62,6 +62,7 @@ DEFAULT_FRONTEND_SETTINGS = {
     "rag_min_score": 0.01,
     "web_policy": "auto",
     "cloud_context_policy": "allow_local_evidence",
+    "deep_research_sensitivity": "balanced",
 }
 
 ROLE_DESCRIPTIONS = {
@@ -166,6 +167,10 @@ def _normalize_frontend_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "allow_local_evidence",
     }:
         normalized["cloud_context_policy"] = cloud_context_policy
+    # G18 decision 4: user-tunable deep-research auto-escalation gate.
+    sensitivity = settings.get("deep_research_sensitivity")
+    if sensitivity in {"conservative", "balanced", "eager"}:
+        normalized["deep_research_sensitivity"] = sensitivity
     return normalized
 
 

@@ -216,6 +216,7 @@ export type RuntimeSettingsResponse = {
     rag_min_score: number;
     web_policy?: "off" | "ask" | "auto";
     cloud_context_policy?: "question_only" | "recent_chat" | "allow_local_evidence";
+    deep_research_sensitivity?: "conservative" | "balanced" | "eager";
   };
   options: {
     roles: RuntimeOption[];

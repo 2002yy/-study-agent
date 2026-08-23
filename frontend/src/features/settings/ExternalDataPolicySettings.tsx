@@ -15,6 +15,13 @@ const CONTEXT_OPTIONS = [
   ["allow_local_evidence", "允许本地资料片段"],
 ] as const;
 
+// G18 decision 4: deep-research auto-escalation sensitivity.
+const DEEP_SENSITIVITY_OPTIONS = [
+  ["conservative", "保守（仅明确要求时深度调研）"],
+  ["balanced", "平衡"],
+  ["eager", "积极"],
+] as const;
+
 type WebPolicy = (typeof WEB_OPTIONS)[number][0];
 type CloudContextPolicy = (typeof CONTEXT_OPTIONS)[number][0];
 
@@ -32,6 +39,12 @@ function normalizeCloudContextPolicy(value: unknown): CloudContextPolicy {
     : "allow_local_evidence";
 }
 
+function normalizeDeepSensitivity(value: unknown) {
+  return DEEP_SENSITIVITY_OPTIONS.some(([option]) => option === value)
+    ? (value as (typeof DEEP_SENSITIVITY_OPTIONS)[number][0])
+    : "balanced";
+}
+
 export function ExternalDataPolicySettings({
   runtimeSettings,
   disabled,
@@ -45,12 +58,15 @@ export function ExternalDataPolicySettings({
   const [webPolicy, setWebPolicy] = useState<WebPolicy>("auto");
   const [cloudContextPolicy, setCloudContextPolicy] =
     useState<CloudContextPolicy>("allow_local_evidence");
+  const [deepSensitivity, setDeepSensitivity] =
+    useState("balanced" as (typeof DEEP_SENSITIVITY_OPTIONS)[number][0]);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     setWebPolicy(normalizeWebPolicy(settings.web_policy));
     setCloudContextPolicy(normalizeCloudContextPolicy(settings.cloud_context_policy));
+    setDeepSensitivity(normalizeDeepSensitivity(settings.deep_research_sensitivity));
   }, [settings.web_policy, settings.cloud_context_policy]);
 
   const save = async () => {
@@ -60,6 +76,7 @@ export function ExternalDataPolicySettings({
       await saveRuntimeSettings({
         web_policy: webPolicy,
         cloud_context_policy: cloudContextPolicy,
+        deep_research_sensitivity: deepSensitivity,
       });
       await onSaved();
       setMessage("外发数据策略已保存");
@@ -107,6 +124,25 @@ export function ExternalDataPolicySettings({
       </label>
       <small className="field-hint">
         “仅当前问题”不发送历史、长期记忆或本地检索片段；“最近对话”仍不发送本地资料。
+      </small>
+      <label className="field-row">
+        <span>深度调研灵敏度</span>
+        <select
+          disabled={disabled || isSaving}
+          onChange={(event) =>
+            setDeepSensitivity(
+              normalizeDeepSensitivity(event.target.value),
+            )
+          }
+          value={deepSensitivity}
+        >
+          {DEEP_SENSITIVITY_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </label>
+      <small className="field-hint">
+        控制复杂问题自动进入深度调研的频率；“保守”只在明确要求时触发。
       </small>
       <button
         className="primary-action secondary"
