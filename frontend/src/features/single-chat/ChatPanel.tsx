@@ -104,6 +104,7 @@ type ChatPanelProps = {
   onRetryResearch: () => void;
   onResumeResearch: () => void;
   firstUseNotice?: ReactNode;
+  enterToSend?: boolean;
 };
 
 type CopyState = "idle" | "success" | "error";
@@ -140,6 +141,7 @@ export function ChatPanel(props: ChatPanelProps) {
     onRetryResearch,
     onResumeResearch,
     firstUseNotice,
+    enterToSend = true,
   } = props;
 
   const conversationRef = useRef<HTMLElement | null>(null);
@@ -218,7 +220,13 @@ export function ChatPanel(props: ChatPanelProps) {
   };
 
   const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    // G17: configurable send key. Default Enter sends / Shift+Enter newline;
+    // when enterToSend is off, Enter newlines and Ctrl/Cmd+Enter sends.
+    const sendRequested = enterToSend
+      ? !event.shiftKey
+      : Boolean(event.ctrlKey || event.metaKey);
+    if (!sendRequested) return;
     event.preventDefault();
     if (!isSending && input.trim()) event.currentTarget.form?.requestSubmit();
   };
@@ -469,6 +477,11 @@ export function ChatPanel(props: ChatPanelProps) {
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleComposerKeyDown}
             placeholder="输入你的问题，或继续当前学习..."
+            title={
+              enterToSend
+                ? "Enter 发送 · Shift+Enter 换行"
+                : "Ctrl+Enter 发送 · Enter 换行"
+            }
             value={input}
           />
         </div>

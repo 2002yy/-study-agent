@@ -66,6 +66,8 @@ DEFAULT_FRONTEND_SETTINGS = {
     # G14 gate 6: independent image-understanding switch (default off;
     # image bytes never leave the machine until explicitly enabled).
     "attachment_vision_enabled": False,
+    # G17: Enter sends by default; off = Enter newline, Ctrl+Enter send.
+    "enter_to_send": True,
 }
 
 ROLE_DESCRIPTIONS = {
@@ -180,6 +182,10 @@ def _normalize_frontend_settings(settings: dict[str, Any]) -> dict[str, Any]:
             "attachment_vision_enabled",
             normalized["attachment_vision_enabled"],
         )
+    )
+    # G17: composer send-key layout.
+    normalized["enter_to_send"] = bool(
+        settings.get("enter_to_send", normalized["enter_to_send"])
     )
     return normalized
 

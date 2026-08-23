@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, CheckCircle2, Database, Loader2, SearchCheck, Settings, SlidersHorizontal } from "lucide-react";
 
-import { checkSearchProviderHealth } from "../../api";
+import { checkSearchProviderHealth, saveRuntimeSettings } from "../../api";
 import { RoleAvatar } from "../../components/RoleAvatar";
 import { StatusDot } from "../../components/StatusDot";
 import { roleLabel, roleOptions } from "../roles/roleCatalog";
@@ -38,6 +38,64 @@ const roleDescriptions: Record<string, string> = {
   nahida: "偏概念解释、连接知识脉络。",
   firefly: "偏陪伴、感受整理和收束。",
 };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+// G17: composer send-key layout, persisted in runtime settings.
+function ComposerSendKeySettings({
+  runtimeSettings,
+  disabled,
+  onSaved,
+}: {
+  runtimeSettings: unknown;
+  disabled?: boolean;
+  onSaved: () => Promise<void> | void;
+}) {
+  const settings = asRecord(asRecord(runtimeSettings).settings);
+  const [enterToSend, setEnterToSend] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setEnterToSend(settings.enter_to_send !== false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.enter_to_send]);
+
+  const update = async (checked: boolean) => {
+    setEnterToSend(checked);
+    setIsSaving(true);
+    try {
+      await saveRuntimeSettings({ enter_to_send: checked });
+      await onSaved();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <section className="side-section" aria-labelledby="composer-key-settings">
+      <div className="section-title" id="composer-key-settings">
+        <Settings size={15} />
+        输入与发送
+      </div>
+      <label className="toggle-row">
+        <input
+          checked={enterToSend}
+          disabled={disabled || isSaving}
+          onChange={(event) => void update(event.target.checked)}
+          type="checkbox"
+        />
+        <span>按 Enter 发送消息</span>
+      </label>
+      <small className="field-hint">
+        {enterToSend
+          ? "当前：Enter 发送，Shift+Enter 换行。"
+          : "当前：Ctrl+Enter 发送，Enter 换行。"}
+      </small>
+    </section>
+  );
+}
 
 export const modeOptions = [
   ["auto", "自动"],
@@ -266,6 +324,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </label>
         <small className="field-hint">{relationshipDescriptions[chatSettings.relationshipMode]}</small>
       </section>
+
+      <ComposerSendKeySettings
+        runtimeSettings={snapshot.runtimeSettings}
+        disabled={isSending}
+        onSaved={refresh}
+      />
 
       <section className="side-section" aria-labelledby="ordinary-material-settings">
         <div className="section-title" id="ordinary-material-settings">

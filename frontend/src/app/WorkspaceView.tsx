@@ -227,6 +227,7 @@ export function WorkspaceView({
           canRetryResearch={webLookupController.canRetry}
           canResumeResearch={webLookupController.canResume}
           useResearchInChat={webLookupController.useInChat}
+          enterToSend={snapshot.runtimeSettings?.settings?.enter_to_send !== false}
           onRetryResearch={() => void webLookupController.retry()}
           onResumeResearch={() => void webLookupController.resume()}
           firstUseNotice={snapshot.runtimeSettings?.settings ? (

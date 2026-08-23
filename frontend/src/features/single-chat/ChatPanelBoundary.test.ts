@@ -16,6 +16,13 @@ describe("active ChatPanel interaction boundary", () => {
     expect(source).toContain("onKeyDown={handleComposerKeyDown}");
   });
 
+  it("keeps the send-key layout configurable (G17)", () => {
+    expect(source).toContain("enterToSend = true");
+    expect(source).toContain("? !event.shiftKey");
+    expect(source).toContain("event.ctrlKey || event.metaKey");
+    expect(source).toContain('"Ctrl+Enter 发送 · Enter 换行"');
+  });
+
   it("copies only the assistant message body", () => {
     expect(source).toContain('aria-label="复制回答正文"');
     expect(source).toContain("navigator.clipboard.writeText(content)");
