@@ -37,7 +37,7 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - G14 临时附件：决策 1–16 + 验收门 v2 已冻结并交付；thread 隔离、随会话存活、一键转正幂等、双层 fail-closed、归档成功后删除均已闭合。合同见 PROJECT_STATUS 第 12 节。
 - G16 按会话记忆 ask：决策 1–14 + 验收门 v2 已冻结并交付；三档策略、会话级 CAS 授权/撤销、恢复免问和三态审计已闭合。合同见 PROJECT_STATUS 第 13 节。
 - G4 会话导航：服务端搜索/分页与前端加载更多已交付，较早会话可从 UI 直达。
-- G10 一般 follow-up 继承：决策 1–15、覆盖复审、schema v23、服务端 child/重新验证、active steering 和四态 UI 已完成本地门禁；完整合同与交付证据见 PROJECT_STATUS 第 14 节，待远程 CI 后关闭交付门。
+- G10 一般 follow-up 继承：决策 1–15、覆盖复审、schema v23、服务端 child/重新验证、active steering 和四态 UI 已交付；`dd93fda` 的 CI #32761262084 attempt 2 全绿，完整合同与证据见 PROJECT_STATUS 第 14 节。
 
 ## 展示边界
 

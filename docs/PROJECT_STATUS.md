@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 `main` 基线：`82a1efc84170c0187a0b2732ea8ae31a1b6892d9`（[CI #32718648427](https://github.com/2002yy/study-agent/actions/runs/32718648427) 全门禁通过），本地与 `origin/main` 为 `0/0`。该基线已经包含 G12 cooperative cancellation、DR1 Deep Research、G14 临时附件、G17 Enter 配置、G16 会话记忆授权和 G4 服务端分页/搜索。
+当前已验证实现基线：`dd93fdabaa6f5f2637ef4f03604f43f91a1725c4`（[CI #32761262084 attempt 2](https://github.com/2002yy/study-agent/actions/runs/32761262084) 全门禁通过；验证时本地与 `origin/main` 为 `0/0`）。该基线已经包含 G12 cooperative cancellation、DR1 Deep Research、G14 临时附件、G17 Enter 配置、G16 会话记忆授权、G4 服务端分页/搜索和 G10 安全 follow-up lineage。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -402,7 +402,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G7 UI 聚焦 | COMPLETE | 一级入口已收敛，诊断/来源/设置等进入次级 surface，普通状态不暴露低层 record/provider 参数。 |
 | G8 窄屏可用 | COMPLETE (automation) / MANUAL DEFERRED | 自动化窄屏、三浏览器与 real-stack 门禁已通过；Android 导出/部署未就绪，实体手机记录表仍未填写。 |
 | G9 时效检索 | COMPLETE | 稳定 SearXNG 首选源、结构化 provider 失败、真假 `found`、8/12/20 秒预算和连续超时隔离均已有真实运行与 CI 证据。 |
-| G10 ResearchRun | COMPLETE (local verified) | follow-up child lineage、服务端安全 seed、本地候选、active Run steering、重新读取门、root aggregate、幂等与四态 EvidenceTrail 已实现；待本批提交及远程 CI 后关闭交付门。 |
+| G10 ResearchRun | COMPLETE | follow-up child lineage、服务端安全 seed、本地候选、active Run steering、重新读取门、root aggregate、幂等与四态 EvidenceTrail 已实现；`dd93fda` 的 CI #32761262084 attempt 2 全门禁通过。 |
 | G11 TaskContract | COMPLETE | task/source/closure 合同在角色、RAG、联网和记忆前确定，并持久化到 route snapshot。 |
 | G12 预回答与取消 | COMPLETE | ChatTurn reservation + operation CAS、ResearchRun/本地 RAG/模型生成 cooperative checkpoints、durable cancelled/interrupted、server single writer、归档队列和三 viewport 真实栈时序证据均已交付。RagWriteRun 是独立写入生命周期，不属于本次只读 turn retrieval 取消合同。 |
 | G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
@@ -412,7 +412,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G17 首次使用/可访问性 | PARTIAL (P1, Enter 已收口 `f297dc9`) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 已可通过设置切换为 Ctrl+Enter 发送（`enter_to_send`，`f297dc9`，CI #32648090478）；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
-当前未发现传统远程利用或数据破坏型 P0。G12、DR1、G14、G16 自动化切片、G17 Enter 配置和 G4 均已交付；G10 一般 follow-up 继承已完成 15 项 Grill、覆盖复审和本地实现门。剩余 P1 是 G17 真实屏幕阅读器、视觉对比度和实体手机人工验收；它只能由真实设备/辅助技术证据关闭，不得由自动化冒充。当前没有另一项已授权且可独立实施的产品缺口。
+当前未发现传统远程利用或数据破坏型 P0。G12、DR1、G14、G16 自动化切片、G17 Enter 配置、G4 与 G10 一般 follow-up 继承均已交付。剩余 P1 是 G17 真实屏幕阅读器、视觉对比度和实体手机人工验收；它只能由真实设备/辅助技术证据关闭，不得由自动化冒充。当前没有另一项已授权且可独立实施的产品缺口。
 
 ### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
 
@@ -438,11 +438,11 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 1. ~~G12 ChatTurn cooperative cancellation~~ — 已交付并全门闭合（第 10 节）。
 2. ~~DR1 Deep Research（历史提交标签 `G18 DeepResearch`）~~ — 已交付；扩展 WebLookupRun，不新增第二 run owner（第 11 节）。
 3. ~~G14 临时附件、G17 Enter 配置、G16 会话记忆 ask、G4 历史分页/搜索~~ — 均已交付 main 并取得完整 CI。
-4. ~~G10 follow-up inheritance Grill + 实施~~ — 15 项决策、schema v23、服务端 lineage/重新验证和 UI 真值已完成本地门禁；待本批远程 CI 关闭交付门（第 14 节）。
+4. ~~G10 follow-up inheritance Grill + 实施~~ — 15 项决策、schema v23、服务端 lineage/重新验证和 UI 真值已交付；`dd93fda` 的 CI #32761262084 attempt 2 全绿（第 14 节）。
 5. **唯一下一推进门：G17 人工可访问性验收。** 对比度、真实屏幕阅读器与实体手机只能由人工证据关闭；设备/部署未就绪时保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`，不另起自动化替代真值。
 6. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究连续性缺口，也不得创建第二套真值。
 
-当前阶段：**远程基线仍为 `main=82a1efc`、CI #32718648427 全绿；G10 已完成本地实现和回归，待本批提交/CI。之后唯一下一推进门是 G17 人工可访问性验收；Learner Model 独立 UI NO-GO，GraphRAG、长期画像写回与 Android 产品化未启动。**
+当前阶段：**G10 实现基线 `dd93fda` 的 CI #32761262084 attempt 2 全绿，已完成远程交付。唯一下一推进门是 G17 人工可访问性验收；Learner Model 独立 UI NO-GO，GraphRAG、长期画像写回与 Android 产品化未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -808,7 +808,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 ### 14.7 GO / NO-GO
 
-- **合同冻结：COMPLETE。Implementation：GO / COMPLETE（本地门）。** 14.6 的自动验收已闭合；远程交付门待提交与 CI。
+- **合同冻结：COMPLETE。Implementation / delivery：GO / COMPLETE。** 14.6 的自动验收与远程交付门均已闭合。
 
 ### 14.8 本地交付证据（2026-08-25）
 
@@ -818,3 +818,10 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - 安全 seed 只含来源 identity/assessment 与成功 read 的有界结构化 notes（8 条、单条 1000 字符、总计 8 KB）；fresh canonical URL 命中后仍须 direct read 成功才转为 `revalidated`，失败进入 rejected 且旧 facts 不进 source block。
 - API/恢复卡展示 parent、root 累计 search/read/elapsed/child_count 以及 inherited candidate/revalidated/new/invalid-or-rejected；EvidenceSnapshot selection reason 同步保留 lineage 状态，外发类别仍为既有 `web_results`。
 - 门禁：最终新增专项 8/8、G10/G12 owner 与恢复相关 19/19；最终修改前全量后端 1135/1135，steering/API 补丁后相关回归 19/19；前端最终全量 342/342、TypeScript 与 production build 通过；Ruff 全仓通过；mypy 122/128 且本批新增 0；RAG K1 baseline 通过；detect-secrets 0 finding files；`git diff --check` 通过。
+
+### 14.9 远程交付证据（2026-08-25）
+
+- 实现提交 `dd93fdabaa6f5f2637ef4f03604f43f91a1725c4` 已推送 `main`；推送后本地与 `origin/main` 为 `0/0`。
+- [CI #32761262084 attempt 2](https://github.com/2002yy/study-agent/actions/runs/32761262084) 完整全绿：pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy baseline、前端测试/构建、browser Golden Journeys 与 real-stack browser gates 均实际运行并通过。
+- attempt 1 仅在 narrow Chromium 的既有 complex-content 旅程出现一次 `linkRectCount=0`，其余 52/53 Golden Journeys 与本批 G10 evidence 旅程均通过；未改代码直接重跑后完整通过，因此记录为未复现的浏览器时序偶发，不用无依据产品补丁掩盖。
+- **G10 最终结论：GO / COMPLETE。** 唯一下一推进门仍为 G17 人工可访问性验收；设备或辅助技术证据不可用时保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
