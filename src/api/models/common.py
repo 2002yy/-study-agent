@@ -9,6 +9,9 @@ from .chat import ChatMessage
 
 class SessionListResponse(BaseModel):
     sessions: list[dict]
+    # G4: total matching sessions for the current query, so clients can
+    # page through everything instead of only the newest window.
+    total: int = 0
 
 
 class SessionDetailResponse(BaseModel):

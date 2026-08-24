@@ -621,6 +621,22 @@ export async function loadSessions(): Promise<SessionRow[]> {
   return response.sessions;
 }
 
+// G4: server-side paged + searchable listing so older sessions stay
+// reachable from the navigator.
+export async function searchSessions(options: {
+  query?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ sessions: SessionRow[]; total: number }> {
+  const params = new URLSearchParams();
+  if (options.query) params.set("q", options.query);
+  params.set("limit", String(options.limit ?? 50));
+  params.set("offset", String(options.offset ?? 0));
+  return requestJson<{ sessions: SessionRow[]; total: number }>(
+    `/sessions?${params.toString()}`
+  );
+}
+
 export async function loadSessionDetail(sessionId: string): Promise<SessionDetailResponse> {
   return requestJson<SessionDetailResponse>(`/sessions/${encodeURIComponent(sessionId)}`);
 }

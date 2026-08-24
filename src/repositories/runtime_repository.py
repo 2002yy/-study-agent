@@ -84,14 +84,69 @@ class RuntimeRepository:
             return None
         return _chat_thread_from_row(row)
 
-    def list_chat_threads(self, *, limit: int = 20) -> list[ChatThread]:
+    def list_chat_threads(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        query: str = "",
+    ) -> list[ChatThread]:
+        """List threads, newest first, with G4 server-side paging/search.
+
+        `query` matches thread id, the user's manual title (when present),
+        or any text inside learning_state (task/goal/gap live there), so
+        older sessions stay reachable from the UI.
+        """
         safe_limit = max(1, min(limit, 100))
+        safe_offset = max(0, offset)
+        normalized_query = (query or "").strip()
         with self.database.connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM chat_threads ORDER BY updated_at DESC, id DESC LIMIT ?",
-                (safe_limit,),
-            ).fetchall()
+            if normalized_query:
+                pattern = f"%{normalized_query}%"
+                rows = connection.execute(
+                    """
+                    SELECT t.* FROM chat_threads AS t
+                    LEFT JOIN session_navigation_metadata AS m
+                        ON m.thread_id = t.id
+                    WHERE t.id LIKE ?
+                       OR COALESCE(m.manual_title, '') LIKE ?
+                       OR COALESCE(t.learning_state, '') LIKE ?
+                    ORDER BY t.updated_at DESC, t.id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (pattern, pattern, pattern, safe_limit, safe_offset),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM chat_threads
+                    ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?
+                    """,
+                    (safe_limit, safe_offset),
+                ).fetchall()
         return [_chat_thread_from_row(row) for row in rows]
+
+    def count_chat_threads(self, *, query: str = "") -> int:
+        normalized_query = (query or "").strip()
+        with self.database.connect() as connection:
+            if normalized_query:
+                pattern = f"%{normalized_query}%"
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) FROM chat_threads AS t
+                    LEFT JOIN session_navigation_metadata AS m
+                        ON m.thread_id = t.id
+                    WHERE t.id LIKE ?
+                       OR COALESCE(m.manual_title, '') LIKE ?
+                       OR COALESCE(t.learning_state, '') LIKE ?
+                    """,
+                    (pattern, pattern, pattern),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT COUNT(*) FROM chat_threads"
+                ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def update_chat_thread_settings(
         self,

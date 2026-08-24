@@ -41,10 +41,16 @@ LearnerModelServiceDependency = Annotated[
 def list_sessions(
     service: SessionServiceDependency,
     limit: int = 20,
+    offset: int = 0,
+    q: str = "",
 ) -> SessionListResponse:
-    return SessionListResponse(
-        sessions=service.list_sessions(limit=max(1, min(limit, 100)))
+    """G4: paged, server-side searchable session listing."""
+    rows, total = service.list_sessions_page(
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+        query=q,
     )
+    return SessionListResponse(sessions=rows, total=total)
 
 
 @router.get(

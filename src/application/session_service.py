@@ -57,6 +57,21 @@ class SessionService:
             for thread in self.repository.list_chat_threads(limit=limit)
         ]
 
+    def list_sessions_page(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        query: str = "",
+    ) -> tuple[list[dict[str, Any]], int]:
+        """G4: paged, searchable session rows with a total count."""
+        self._import_legacy_once()
+        threads = self.repository.list_chat_threads(
+            limit=limit, offset=offset, query=query
+        )
+        total = self.repository.count_chat_threads(query=query)
+        return [self._thread_row(thread) for thread in threads], total
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         self._import_legacy_once()
         thread = self.repository.get_chat_thread(session_id)

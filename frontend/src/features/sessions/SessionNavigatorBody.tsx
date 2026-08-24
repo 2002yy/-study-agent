@@ -158,6 +158,11 @@ export function SessionNavigatorBody({
           {navigator.renameError}
         </div>
       ) : null}
+      {navigator.serverError ? (
+        <div className="session-navigation-error" role="status">
+          {navigator.serverError}
+        </div>
+      ) : null}
       <nav aria-label="学习会话" className="session-sidebar-list">
         {navigator.grouped.length ? (
           navigator.grouped.map((group) => (
@@ -182,6 +187,18 @@ export function SessionNavigatorBody({
           </div>
         )}
       </nav>
+      {navigator.hasMore ? (
+        <button
+          className="ghost-action compact session-load-more"
+          disabled={navigator.isServerSearching}
+          onClick={() => void navigator.loadMore()}
+          type="button"
+        >
+          {navigator.isServerSearching
+            ? "加载中…"
+            : `加载更多会话（已显示 ${navigator.grouped.length}/${navigator.serverTotal}）`}
+        </button>
+      ) : null}
     </>
   );
 }
