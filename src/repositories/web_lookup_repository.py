@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 from typing import Any
@@ -63,6 +64,7 @@ class WebLookupRepository:
         self.database.initialize()
 
     def create(self, run: WebLookupRun) -> WebLookupRun:
+        run = replace(run, root_run_id=run.root_run_id or run.id)
         context = _with_operation(
             run.research_context,
             max_items=max(1, min(int(run.max_items), 20)),
@@ -78,8 +80,10 @@ class WebLookupRepository:
                     id, query, stage, status, research_context, query_attempts,
                     selected_sources, rejected_sources, provider_status,
                     stop_reason, answer_confidence, items, source_block,
-                    warnings, error, version, created_at, updated_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    warnings, error, owner_thread_id, parent_run_id, root_run_id,
+                    lineage_depth, create_request_id, version, created_at,
+                    updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run.id,
@@ -97,6 +101,11 @@ class WebLookupRepository:
                     run.source_block,
                     _dump(run.warnings),
                     run.error,
+                    run.owner_thread_id,
+                    run.parent_run_id,
+                    run.root_run_id,
+                    run.lineage_depth,
+                    run.create_request_id,
                     run.version,
                     run.created_at,
                     run.updated_at,
@@ -105,12 +114,145 @@ class WebLookupRepository:
             )
         return self._required(run.id)
 
+    def create_child(
+        self,
+        run: WebLookupRun,
+        *,
+        max_descendants: int = 20,
+    ) -> WebLookupRun:
+        """Atomically validate lineage authority and create one idempotent child."""
+
+        request_id = str(run.create_request_id or "").strip()
+        parent_id = str(run.parent_run_id or "").strip()
+        thread_id = str(run.owner_thread_id or "").strip()
+        if not request_id or not parent_id or not thread_id:
+            raise ValueError(
+                "Follow-up child requires create_request_id, parent_run_id and owner_thread_id"
+            )
+        context = _with_operation(
+            run.research_context,
+            max_items=max(1, min(int(run.max_items), 20)),
+            active_operation_id=run.active_operation_id,
+            active_operation_started_at=run.active_operation_started_at,
+            stage_started_at=run.stage_started_at,
+            cancel_requested_at=run.cancel_requested_at,
+        )
+        created_id = run.id
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM web_lookup_runs WHERE create_request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["query"] != run.query
+                    or existing["parent_run_id"] != parent_id
+                    or existing["owner_thread_id"] != thread_id
+                ):
+                    connection.rollback()
+                    raise ValueError(
+                        f"Research child idempotency conflict: {request_id}"
+                    )
+                created_id = str(existing["id"])
+                connection.commit()
+            else:
+                thread = connection.execute(
+                    "SELECT status FROM chat_threads WHERE id = ?",
+                    (thread_id,),
+                ).fetchone()
+                if thread is None or thread["status"] != "active":
+                    connection.rollback()
+                    raise ValueError(f"Chat thread is not active: {thread_id}")
+                parent_row = connection.execute(
+                    "SELECT * FROM web_lookup_runs WHERE id = ?",
+                    (parent_id,),
+                ).fetchone()
+                if parent_row is None:
+                    connection.rollback()
+                    raise ValueError(f"WebLookupRun parent not found: {parent_id}")
+                parent = _from_row(parent_row)
+                if parent.owner_thread_id != thread_id:
+                    connection.rollback()
+                    raise ValueError("Research parent belongs to another thread")
+                if parent.status not in {"completed", "partial", "failed", "cancelled"}:
+                    connection.rollback()
+                    raise ValueError("Research parent is not terminal")
+                deep = parent.research_context.get("deep")
+                notes = deep.get("notes") if isinstance(deep, dict) else []
+                if parent.status in {"failed", "cancelled"} and not (
+                    parent.selected_sources or (isinstance(notes, list) and notes)
+                ):
+                    connection.rollback()
+                    raise ValueError("Research parent has no persisted checkpoint evidence")
+                root_id = parent.root_run_id or parent.id
+                descendant_row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM web_lookup_runs
+                    WHERE root_run_id = ? AND parent_run_id IS NOT NULL
+                    """,
+                    (root_id,),
+                ).fetchone()
+                descendant_count = int(descendant_row["count"] if descendant_row else 0)
+                if descendant_count >= max(1, int(max_descendants)):
+                    connection.rollback()
+                    raise ValueError("Research lineage descendant limit reached")
+                child = replace(
+                    run,
+                    root_run_id=root_id,
+                    lineage_depth=parent.lineage_depth + 1,
+                )
+                connection.execute(
+                    """
+                    INSERT INTO web_lookup_runs(
+                        id, query, stage, status, research_context, query_attempts,
+                        selected_sources, rejected_sources, provider_status,
+                        stop_reason, answer_confidence, items, source_block,
+                        warnings, error, owner_thread_id, parent_run_id, root_run_id,
+                        lineage_depth, create_request_id, version, created_at,
+                        updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        child.id,
+                        child.query,
+                        child.stage,
+                        child.status,
+                        _dump(context),
+                        _dump(child.query_attempts),
+                        _dump(child.selected_sources),
+                        _dump(child.rejected_sources),
+                        child.provider_status,
+                        child.stop_reason,
+                        child.answer_confidence,
+                        _dump(child.items),
+                        child.source_block,
+                        _dump(child.warnings),
+                        child.error,
+                        child.owner_thread_id,
+                        child.parent_run_id,
+                        child.root_run_id,
+                        child.lineage_depth,
+                        child.create_request_id,
+                        child.version,
+                        child.created_at,
+                        child.updated_at,
+                        child.completed_at,
+                    ),
+                )
+                connection.commit()
+        return self._required(created_id)
+
     def get(self, run_id: str) -> WebLookupRun | None:
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM web_lookup_runs WHERE id = ?", (run_id,)
             ).fetchone()
-        return _from_row(row) if row is not None else None
+        if row is None:
+            return None
+        run = _from_row(row)
+        return replace(run, lineage_summary=self.lineage_summary(run.root_run_id or run.id))
 
     def list(self, *, limit: int = 20) -> list[WebLookupRun]:
         safe_limit = max(1, min(limit, 100))
@@ -122,7 +264,79 @@ class WebLookupRepository:
                 """,
                 (safe_limit,),
             ).fetchall()
-        return [_from_row(row) for row in rows]
+        return [
+            replace(
+                run,
+                lineage_summary=self.lineage_summary(run.root_run_id or run.id),
+            )
+            for row in rows
+            for run in (_from_row(row),)
+        ]
+
+    def list_by_owner_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 20,
+    ) -> builtins.list[WebLookupRun]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM web_lookup_runs
+                WHERE owner_thread_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (thread_id, max(1, min(int(limit), 100))),
+            ).fetchall()
+        return [
+            replace(
+                run,
+                lineage_summary=self.lineage_summary(run.root_run_id or run.id),
+            )
+            for row in rows
+            for run in (_from_row(row),)
+        ]
+
+    def thread_status(self, thread_id: str) -> str | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT status FROM chat_threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+        return str(row["status"]) if row is not None else None
+
+    def lineage_summary(self, root_run_id: str) -> dict[str, int]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT query_attempts, research_context, created_at, completed_at,
+                       parent_run_id
+                FROM web_lookup_runs
+                WHERE root_run_id = ?
+                """,
+                (root_run_id,),
+            ).fetchall()
+        search_count = read_count = elapsed_ms = child_count = 0
+        for row in rows:
+            attempts = json.loads(row["query_attempts"] or "[]")
+            search_count += len(attempts) if isinstance(attempts, list) else 0
+            context = json.loads(row["research_context"] or "{}")
+            summary = context.get("read_summary") if isinstance(context, dict) else {}
+            if isinstance(summary, dict):
+                read_count += int(summary.get("attempted") or 0)
+            started = _parse_timestamp(row["created_at"])
+            ended = _parse_timestamp(row["completed_at"])
+            if started is not None and ended is not None:
+                elapsed_ms += max(0, int((ended - started).total_seconds() * 1000))
+            if row["parent_run_id"]:
+                child_count += 1
+        return {
+            "search_count": search_count,
+            "read_count": read_count,
+            "elapsed_ms": elapsed_ms,
+            "child_count": child_count,
+        }
 
     def list_by_owner_turn(
         self,
@@ -643,6 +857,11 @@ def _from_row(row) -> WebLookupRun:
         active_operation_started_at=operation.get("active_operation_started_at"),
         stage_started_at=operation.get("stage_started_at"),
         cancel_requested_at=operation.get("cancel_requested_at"),
+        owner_thread_id=row["owner_thread_id"],
+        parent_run_id=row["parent_run_id"],
+        root_run_id=row["root_run_id"] or row["id"],
+        lineage_depth=int(row["lineage_depth"] or 0),
+        create_request_id=row["create_request_id"],
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],

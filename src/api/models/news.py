@@ -66,6 +66,23 @@ class NewsLookupRequest(BaseModel):
 class ResearchRunCreateRequest(BaseModel):
     query: str = Field(min_length=1)
     max_items: int = Field(default=8, gt=0, le=20)
+    owner_thread_id: str | None = Field(default=None, max_length=200)
+    parent_run_id: str | None = Field(default=None, max_length=200)
+    create_request_id: str | None = Field(default=None, max_length=200)
+    suggestion_status: str = Field(default="not_checked", max_length=40)
+
+
+class ResearchFollowUpCandidateResponse(BaseModel):
+    available: bool
+    reason: str
+    parent_run_id: str | None = None
+    parent_query: str = ""
+    parent_status: str = ""
+    source_count: int = 0
+    note_count: int = 0
+    overlap_tokens: list[str] = Field(default_factory=list)
+    requires_explicit_confirmation: bool = False
+    steering_required: bool = False
 
 
 class ResearchSteerRequest(BaseModel):
@@ -107,6 +124,12 @@ class WebLookupRunResponse(BaseModel):
     active_operation_started_at: str | None = None
     stage_started_at: str | None = None
     cancel_requested_at: str | None = None
+    owner_thread_id: str | None = None
+    parent_run_id: str | None = None
+    root_run_id: str | None = None
+    lineage_depth: int = 0
+    create_request_id: str | None = None
+    lineage_summary: dict = Field(default_factory=dict)
     version: int
     created_at: str
     updated_at: str

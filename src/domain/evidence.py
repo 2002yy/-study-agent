@@ -291,6 +291,7 @@ def _add_research_run_refs(
             )
             title = _text(assessment.get("title") or item.get("title")) or url
             source_id = _text(assessment.get("source_id"))
+            evidence_state = _text(record.get("evidence_state"))
             evidence_id = _web_id(url=url, title=title) if (url or title) else source_id
             if not evidence_id:
                 continue
@@ -307,12 +308,18 @@ def _add_research_run_refs(
                     lifecycle_status=status,
                     provider_status=provider_status,
                     selection_reason=(
-                        f"research_run:{run_id}"
+                        f"research_{evidence_state}:{run_id}"
+                        if status == "selected" and evidence_state and run_id
+                        else f"research_run:{run_id}"
                         if status == "selected" and run_id
                         else "research_selected" if status == "selected" else ""
                     ),
                     rejection_reason=(
-                        (_text(assessment.get("rejection_reason")) or "research_rejected")
+                        (
+                            _text(assessment.get("rejection_reason"))
+                            or evidence_state
+                            or "research_rejected"
+                        )
                         if status == "rejected"
                         else ""
                     ),

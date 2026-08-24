@@ -147,4 +147,45 @@ describe("ChatResearchRecovery", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("shows parent truth and all four follow-up evidence states", () => {
+    const { container } = render(
+      <ChatResearchRecovery
+        run={{
+          ...run("failed"),
+          status: "completed",
+          stage: "completed",
+          parent_run_id: "research-parent",
+          research_context: {
+            run_kind: "follow_up",
+            lineage: {
+              parent_query: "Python annotations guide",
+              evidence_counts: {
+                inherited_candidate: 0,
+                revalidated: 1,
+                new: 2,
+                invalid_or_rejected: 1,
+              },
+            },
+          },
+          lineage_summary: {
+            search_count: 4,
+            read_count: 3,
+            child_count: 1,
+          },
+        }}
+        isBusy={false}
+        canRetry={false}
+        canResume={false}
+        useInChat
+        onRetry={vi.fn()}
+        onResume={vi.fn()}
+      />,
+    );
+
+    expect(container).toHaveTextContent("已关联父研究");
+    expect(container).toHaveTextContent("已重新验证 1");
+    expect(container).toHaveTextContent("新来源 2");
+    expect(container).toHaveTextContent("已失效/排除 1");
+  });
 });

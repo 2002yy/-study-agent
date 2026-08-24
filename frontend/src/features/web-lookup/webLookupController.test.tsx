@@ -13,6 +13,8 @@ const apiMocks = vi.hoisted(() => ({
   resumeResearchRun: vi.fn(),
   cancelResearchRun: vi.fn(),
   loadResearchRun: vi.fn(),
+  loadResearchFollowUpCandidate: vi.fn(),
+  steerResearchRun: vi.fn(),
 }));
 
 vi.mock("./researchApi", () => apiMocks);
@@ -201,6 +203,140 @@ describe("useWebLookupController", () => {
     expect(result.current.result?.status).toBe("partial");
     expect(result.current.useInChat).toBe(false);
     expect(result.current.canRetry).toBe(true);
+  });
+
+  it("asks before pinning an exact same-thread follow-up parent", async () => {
+    apiMocks.loadResearchFollowUpCandidate.mockResolvedValue({
+      available: true,
+      reason: "deterministic_query_overlap",
+      parent_run_id: "web_lookup_parent",
+      parent_query: "Python annotations guide",
+      parent_status: "completed",
+      source_count: 2,
+      note_count: 1,
+      overlap_tokens: ["python", "annotations"],
+      requires_explicit_confirmation: false,
+      steering_required: false,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    apiMocks.createResearchRun.mockResolvedValue(
+      runPayload({
+        run_id: "web_lookup_child",
+        status: "pending",
+        stage: "planned",
+        news_items: [],
+        source_block: "",
+        parent_run_id: "web_lookup_parent",
+      }),
+    );
+    apiMocks.executeResearchRun.mockResolvedValue(
+      runPayload({ run_id: "web_lookup_child", parent_run_id: "web_lookup_parent" }),
+    );
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "Python annotations best practices",
+        activeThreadId: "thread-1",
+        setOperationError: vi.fn(),
+        setActiveRunId: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.lookup();
+    });
+
+    expect(apiMocks.loadResearchFollowUpCandidate).toHaveBeenCalledWith(
+      "thread-1",
+      "Python annotations best practices",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(apiMocks.createResearchRun).toHaveBeenCalledWith(
+      "Python annotations best practices",
+      8,
+      expect.objectContaining({
+        ownerThreadId: "thread-1",
+        parentRunId: "web_lookup_parent",
+        createRequestId: expect.stringMatching(/^follow-up-/),
+        suggestionStatus: "accepted",
+      }),
+    );
+  });
+
+  it("uses steering instead of spawning a child for a related active run", async () => {
+    apiMocks.loadResearchFollowUpCandidate.mockResolvedValue({
+      available: false,
+      reason: "active_parent_requires_steering",
+      parent_run_id: "web_lookup_active",
+      parent_query: "Python annotations guide",
+      parent_status: "running",
+      source_count: 1,
+      note_count: 0,
+      overlap_tokens: ["python"],
+      requires_explicit_confirmation: false,
+      steering_required: true,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    apiMocks.steerResearchRun.mockResolvedValue(
+      runPayload({
+        run_id: "web_lookup_active",
+        query_text: "Python annotations guide",
+        status: "running",
+        stage: "reading",
+        news_items: [],
+        source_block: "",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "Python annotations best practices",
+        activeThreadId: "thread-1",
+        setOperationError: vi.fn(),
+        setActiveRunId: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.lookup();
+    });
+
+    expect(apiMocks.steerResearchRun).toHaveBeenCalledWith(
+      "web_lookup_active",
+      "Python annotations best practices",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(apiMocks.createResearchRun).not.toHaveBeenCalled();
+    expect(apiMocks.executeResearchRun).not.toHaveBeenCalled();
+  });
+
+  it("falls back to an independent root when candidate lookup is unavailable", async () => {
+    apiMocks.loadResearchFollowUpCandidate.mockRejectedValue(new Error("busy"));
+    apiMocks.createResearchRun.mockResolvedValue(
+      runPayload({ status: "pending", stage: "planned", news_items: [], source_block: "" }),
+    );
+    apiMocks.executeResearchRun.mockResolvedValue(runPayload());
+
+    const { result } = renderHook(() =>
+      useWebLookupController({
+        query: "Python docs",
+        activeThreadId: "thread-1",
+        setOperationError: vi.fn(),
+        setActiveRunId: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.lookup();
+    });
+
+    expect(apiMocks.createResearchRun).toHaveBeenCalledWith(
+      "Python docs",
+      8,
+      expect.objectContaining({
+        ownerThreadId: "thread-1",
+        parentRunId: undefined,
+        suggestionStatus: "unavailable",
+      }),
+    );
+    expect(apiMocks.executeResearchRun).toHaveBeenCalled();
   });
 
   it("does not use a false-positive found run without durable sources", async () => {

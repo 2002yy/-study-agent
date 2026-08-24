@@ -1,6 +1,6 @@
 # Study Agent 项目表达与决策索引
 
-> 更新：2026-08-21
+> 更新：2026-08-25
 > 本文件只用于项目介绍和决策导航，不拥有当前状态、架构或执行顺序。实时结论以 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 为准。
 
 ## 一句话介绍
@@ -32,9 +32,12 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - 推断型长期画像自动写回：延期，只允许用户确认的偏好；
 - Android 实体手机验收：待真实设备与记录，不用自动化冒充；
 - G16 外发真值止血：实现提交 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进交付到 `main`；完整 [CI #32499954659](https://github.com/2002yy/study-agent/actions/runs/32499954659) 全绿，止血交付门关闭。
-- G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结，当前实施门为 GO；按 ChatTurn/operation owner 路线实施 cooperative cancellation，不新增 LocalRagRun。
-- G18 深度调研（DeepResearch）：2026-08-22 Grill 决策 1–16 冻结，实施排期插队 G14 前；扩展 WebLookupRun 多轮迭代管线，仅证据链不写 LearningTruth，运行中转向为元数据注入（修订 G12 决策 10）。合同见 PROJECT_STATUS 第 11 节。
-- G14 临时附件：2026-08-23 Grill 决策 1–16 + 验收门 v2 冻结，实施立即开始；thread 内共享库过滤隔离、随会话存活、一键转正幂等、双层 fail-closed（文本 embedding 跟随策略、vision 默认关）、删除绑定归档成功之后。合同见 PROJECT_STATUS 第 12 节。
+- G12 可取消本地 RAG：最终 Grill 决策 1–24 已冻结并交付；ChatTurn/operation owner、cooperative cancellation、归档队列和真实栈时序门已闭合，不新增 LocalRagRun。
+- DR1 深度调研（历史提交标签 `G18 DeepResearch`）：决策 1–16 已冻结并交付；扩展 WebLookupRun 多轮迭代管线，仅证据链不写 LearningTruth，运行中转向为元数据注入。合同见 PROJECT_STATUS 第 11 节。
+- G14 临时附件：决策 1–16 + 验收门 v2 已冻结并交付；thread 隔离、随会话存活、一键转正幂等、双层 fail-closed、归档成功后删除均已闭合。合同见 PROJECT_STATUS 第 12 节。
+- G16 按会话记忆 ask：决策 1–14 + 验收门 v2 已冻结并交付；三档策略、会话级 CAS 授权/撤销、恢复免问和三态审计已闭合。合同见 PROJECT_STATUS 第 13 节。
+- G4 会话导航：服务端搜索/分页与前端加载更多已交付，较早会话可从 UI 直达。
+- G10 一般 follow-up 继承：决策 1–15、覆盖复审、schema v23、服务端 child/重新验证、active steering 和四态 UI 已完成本地门禁；完整合同与交付证据见 PROJECT_STATUS 第 14 节，待远程 CI 后关闭交付门。
 
 ## 展示边界
 
@@ -44,4 +47,3 @@ P2-D GrillMe 决策 1–49 已经进入稳定合同，不在本文件复制第�
 - 实体手机、视觉对比度和真实屏幕阅读器验收仍需人工证据。
 - “仅当前问题”约束所有回答、教学评估和 embedding 调用；`allow_local_evidence` 不等于允许全量资料云端 embedding。
 - 最新 SHA、CI、缺口和下一步必须从 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 引用，避免本展示材料漂移。
-- G16 按会话记忆 ask：2026-08-23 Grill 决策 1–14 + 验收门 v2 冻结，实施排期立即开始；三档 memory_policy（默认 auto）、会话级 ask、CAS 落库 thread 快照、可撤销徽章、审计三态字段。两轮审计修复 7 个问题（恢复判定/CAS 并发/审计位置/撤销语义/空 bundle/fail-closed/retry）。合同见 PROJECT_STATUS 第 13 节。

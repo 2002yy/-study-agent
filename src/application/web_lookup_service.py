@@ -7,6 +7,7 @@ import os
 import re
 import time
 from typing import Any, Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.domain.runtime_entities import WebLookupRun, new_id, utc_now
 from src.news.digest import format_news_source_block
@@ -36,6 +37,157 @@ class WebLookupGateway(Protocol):
 
 class ResearchCancelled(RuntimeError):
     pass
+
+
+_INHERITED_ITEM_FIELDS = (
+    "title",
+    "url",
+    "link",
+    "href",
+    "published_at",
+    "published",
+    "date",
+    "pubDate",
+)
+_INHERITED_ASSESSMENT_FIELDS = (
+    "source_id",
+    "title",
+    "url",
+    "domain",
+    "source_type",
+    "relevance",
+    "directness",
+    "freshness",
+    "selected",
+    "worth_reading",
+)
+_FOLLOW_UP_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "this",
+        "that",
+        "what",
+        "how",
+        "请问",
+        "继续",
+        "一下",
+        "关于",
+        "这个",
+        "那个",
+        "什么",
+        "如何",
+    }
+)
+
+
+def _canonical_source_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return raw.rstrip("/").lower()
+    query = urlencode(
+        [
+            (key, item)
+            for key, item in parse_qsl(parts.query, keep_blank_values=True)
+            if not key.lower().startswith("utm_")
+            and key.lower() not in {"fbclid", "gclid"}
+        ]
+    )
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path.rstrip("/") or "/",
+            query,
+            "",
+        )
+    )
+
+
+def _follow_up_tokens(value: str) -> set[str]:
+    normalized = str(value or "").lower()
+    latin = {
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9._+-]{1,}", normalized)
+        if token not in _FOLLOW_UP_STOPWORDS
+    }
+    cjk_runs = re.findall(r"[\u3400-\u9fff]+", normalized)
+    cjk = {
+        run[index : index + 2]
+        for run in cjk_runs
+        for index in range(max(0, len(run) - 1))
+        if run[index : index + 2] not in _FOLLOW_UP_STOPWORDS
+    }
+    return latin | cjk
+
+
+def _safe_inherited_source(record: Any) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    raw_item = record.get("item")
+    item: dict[str, Any] = raw_item if isinstance(raw_item, dict) else {}
+    raw_assessment = record.get("assessment")
+    assessment: dict[str, Any] = (
+        raw_assessment if isinstance(raw_assessment, dict) else {}
+    )
+    safe_item = {
+        key: item[key]
+        for key in _INHERITED_ITEM_FIELDS
+        if key in item and isinstance(item[key], (str, int, float, bool, type(None)))
+    }
+    safe_assessment = {
+        key: assessment[key]
+        for key in _INHERITED_ASSESSMENT_FIELDS
+        if key in assessment
+        and isinstance(assessment[key], (str, int, float, bool, type(None)))
+    }
+    if not safe_item and not safe_assessment:
+        return None
+    return {
+        "item": safe_item,
+        "assessment": safe_assessment,
+        "evidence_state": "inherited_candidate",
+    }
+
+
+def _bounded_inherited_notes(parent: WebLookupRun) -> list[dict[str, str]]:
+    deep = parent.research_context.get("deep")
+    raw_notes = deep.get("notes") if isinstance(deep, dict) else []
+    successful_urls = {
+        _canonical_source_url(_source_url(record))
+        for record in parent.selected_sources
+        if isinstance(record.get("read"), dict)
+        and record["read"].get("status") == "read"
+    }
+    notes: list[dict[str, str]] = []
+    used_chars = 0
+    for raw in raw_notes if isinstance(raw_notes, list) else []:
+        if not isinstance(raw, dict) or len(notes) >= 8:
+            continue
+        url = str(raw.get("url") or "").strip()
+        facts = str(raw.get("facts") or "").strip()[:1000]
+        if not facts or _canonical_source_url(url) not in successful_urls:
+            continue
+        remaining = 8000 - used_chars
+        if remaining <= 0:
+            break
+        facts = facts[:remaining]
+        notes.append(
+            {
+                "url": url,
+                "title": str(raw.get("title") or url)[:300],
+                "facts": facts,
+            }
+        )
+        used_chars += len(facts)
+    return notes
 
 
 def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -151,7 +303,16 @@ def _format_research_source_block(
         assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
         title = str(item.get("title") or assessment.get("title") or f"来源 {index}")
         url = str(assessment.get("url") or item.get("url") or item.get("link") or "")
-        read_blocks.append(f"【已读取 {index}】{title}\n{url}\n{excerpt}")
+        inherited_note = ""
+        if record.get("evidence_state") == "revalidated":
+            raw_note = record.get("inherited_note")
+            if isinstance(raw_note, dict):
+                facts = str(raw_note.get("facts") or "").strip()[:1000]
+                if facts:
+                    inherited_note = f"\n经重新验证的既有笔记：{facts}"
+        read_blocks.append(
+            f"【已读取 {index}】{title}\n{url}\n{excerpt}{inherited_note}"
+        )
     if not read_blocks:
         return base
     combined = "\n\n".join(part for part in (base, *read_blocks) if part.strip())
@@ -280,10 +441,23 @@ class WebLookupService:
         owner_turn_id: str | None = None,
         run_kind: str = "standalone",
         research_mode: str = "standard",
+        parent_run_id: str | None = None,
+        create_request_id: str | None = None,
+        suggestion_status: str = "not_checked",
     ) -> WebLookupRun:
         normalized = query.strip()
         if not normalized:
             raise ValueError("Web lookup query is required")
+        if parent_run_id:
+            return self.create_follow_up(
+                normalized,
+                max_items=max_items,
+                owner_thread_id=owner_thread_id,
+                owner_turn_id=owner_turn_id,
+                parent_run_id=parent_run_id,
+                create_request_id=create_request_id,
+                suggestion_status=suggestion_status,
+            )
         context = build_research_context(normalized).to_dict()
         context.update(
             {
@@ -298,6 +472,7 @@ class WebLookupService:
                 },
                 "run_attempt": 0,
                 "run_kind": run_kind,
+                "follow_up_suggestion": suggestion_status,
             }
         )
         if research_mode not in {"standard", "deep"}:
@@ -317,14 +492,150 @@ class WebLookupService:
                 "thread_id": owner_thread_id or "",
                 "turn_id": owner_turn_id or "",
             }
-        return self.repository.create(
+        run = WebLookupRun(
+            query=normalized,
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=max(1, min(int(max_items), 20)),
+            owner_thread_id=owner_thread_id or None,
+            create_request_id=create_request_id or None,
+        )
+        return self.repository.create(run)
+
+    def follow_up_candidate(self, *, thread_id: str, query: str) -> dict[str, Any]:
+        normalized_thread = thread_id.strip()
+        normalized_query = query.strip()
+        if not normalized_thread or not normalized_query:
+            raise ValueError("Thread ID and follow-up query are required")
+        if self.repository.thread_status(normalized_thread) != "active":
+            raise ValueError(f"Chat thread is not active: {normalized_thread}")
+        query_tokens = _follow_up_tokens(normalized_query)
+        if not query_tokens:
+            return {"available": False, "reason": "no_relevance_tokens"}
+        for run in self.repository.list_by_owner_thread(normalized_thread, limit=50):
+            overlap = sorted(query_tokens & _follow_up_tokens(run.query))
+            if not overlap:
+                continue
+            if run.status in {"pending", "running"}:
+                return {
+                    "available": False,
+                    "reason": "active_parent_requires_steering",
+                    "parent_run_id": run.id,
+                    "parent_query": run.query,
+                    "parent_status": run.status,
+                    "source_count": len(run.selected_sources),
+                    "overlap_tokens": overlap[:12],
+                    "steering_required": True,
+                }
+            if run.status not in {"completed", "partial", "failed", "cancelled"}:
+                continue
+            if int(run.lineage_summary.get("child_count") or 0) >= 20:
+                continue
+            deep = run.research_context.get("deep")
+            notes = deep.get("notes") if isinstance(deep, dict) else []
+            if not run.selected_sources and not (isinstance(notes, list) and notes):
+                continue
+            inherited_notes = _bounded_inherited_notes(run)
+            return {
+                "available": True,
+                "reason": "deterministic_query_overlap",
+                "parent_run_id": run.id,
+                "parent_query": run.query,
+                "parent_status": run.status,
+                "source_count": len(run.selected_sources),
+                "note_count": len(inherited_notes),
+                "overlap_tokens": overlap[:12],
+                "requires_explicit_confirmation": run.status in {"failed", "cancelled"},
+            }
+        return {"available": False, "reason": "no_related_terminal_run"}
+
+    def create_follow_up(
+        self,
+        query: str,
+        *,
+        max_items: int,
+        owner_thread_id: str | None,
+        owner_turn_id: str | None,
+        parent_run_id: str,
+        create_request_id: str | None,
+        suggestion_status: str = "accepted",
+    ) -> WebLookupRun:
+        thread_id = str(owner_thread_id or "").strip()
+        request_id = str(create_request_id or "").strip()
+        if not thread_id or not request_id:
+            raise ValueError(
+                "Follow-up child requires owner_thread_id and create_request_id"
+            )
+        parent = self.get(parent_run_id)
+        if (
+            parent.status in {"failed", "cancelled"}
+            and suggestion_status != "accepted"
+        ):
+            raise ValueError(
+                "Failed or cancelled research parent requires explicit confirmation"
+            )
+        safe_sources = [
+            safe
+            for record in parent.selected_sources[:20]
+            if (safe := _safe_inherited_source(record)) is not None
+        ]
+        notes = _bounded_inherited_notes(parent)
+        notes_by_url = {
+            _canonical_source_url(note["url"]): note for note in notes
+        }
+        for source in safe_sources:
+            note = notes_by_url.get(_canonical_source_url(_source_url(source)))
+            if note is not None:
+                source["inherited_note_seed"] = note
+        context = build_research_context(query).to_dict()
+        context.update(
+            {
+                "candidate_items": [],
+                "read_summary": {
+                    "attempted": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "used_chars": 0,
+                    "budget": ResearchReadBudget.from_env().to_dict(),
+                },
+                "run_attempt": 0,
+                "run_kind": "follow_up",
+                "research_mode": "standard",
+                "follow_up_suggestion": suggestion_status,
+                "owner": {
+                    "thread_id": thread_id,
+                    "turn_id": owner_turn_id or "",
+                },
+                "lineage": {
+                    "parent_run_id": parent.id,
+                    "root_run_id": parent.root_run_id or parent.id,
+                    "parent_query": parent.query,
+                    "parent_status": parent.status,
+                    "inherited_candidates": safe_sources,
+                    "inherited_note_count": len(notes),
+                    "evidence_counts": {
+                        "inherited_candidate": len(safe_sources),
+                        "revalidated": 0,
+                        "new": 0,
+                        "invalid_or_rejected": 0,
+                    },
+                },
+            }
+        )
+        return self.repository.create_child(
             WebLookupRun(
-                query=normalized,
+                query=query,
                 stage="planned",
                 status="pending",
                 research_context=context,
                 max_items=max(1, min(int(max_items), 20)),
-            )
+                owner_thread_id=thread_id,
+                parent_run_id=parent.id,
+                create_request_id=request_id,
+            ),
+            max_descendants=20,
         )
 
     def record_tool_trace(
@@ -613,6 +924,46 @@ class WebLookupService:
                     candidate_items,
                     canonical_query=str(context.get("canonical_query") or run.query),
                 )
+                lineage = context.get("lineage")
+                if isinstance(lineage, dict):
+                    raw_inherited = lineage.get("inherited_candidates")
+                    inherited = [
+                        dict(record)
+                        for record in raw_inherited
+                        if isinstance(record, dict)
+                    ] if isinstance(raw_inherited, list) else []
+                    inherited_by_url = {
+                        _canonical_source_url(_source_url(record)): record
+                        for record in inherited
+                        if _canonical_source_url(_source_url(record))
+                    }
+                    matched_urls: set[str] = set()
+                    annotated: list[dict[str, Any]] = []
+                    for record in selected_sources:
+                        current = dict(record)
+                        canonical_url = _canonical_source_url(_source_url(current))
+                        inherited_record = inherited_by_url.get(canonical_url)
+                        if inherited_record is None:
+                            current["evidence_state"] = "new"
+                        else:
+                            matched_urls.add(canonical_url)
+                            current["evidence_state"] = "inherited_candidate"
+                            seed = inherited_record.get("inherited_note_seed")
+                            if isinstance(seed, dict):
+                                current["inherited_note_seed"] = dict(seed)
+                        annotated.append(current)
+                    selected_sources = annotated
+                    for canonical_url, inherited_record in inherited_by_url.items():
+                        if canonical_url in matched_urls:
+                            continue
+                        stale = dict(inherited_record)
+                        stale["evidence_state"] = "invalid_or_rejected"
+                        assessment = dict(stale.get("assessment") or {})
+                        assessment["selected"] = False
+                        assessment["rejection_reason"] = "inherited_source_not_rediscovered"
+                        stale["assessment"] = assessment
+                        stale.pop("inherited_note_seed", None)
+                        rejected_sources.append(stale)
                 items = _selected_items(selected_sources)
                 if candidate_items and not items:
                     reason = "insufficient_valid_sources"
@@ -644,6 +995,7 @@ class WebLookupService:
                         url = _source_url(record)
                         if assessment.get("worth_reading") is not True or not url:
                             selected_sources[index] = {
+                                **record,
                                 "item": dict(record.get("item") or {}),
                                 "assessment": assessment,
                                 "read": {
@@ -663,6 +1015,7 @@ class WebLookupService:
                             or int(summary["used_chars"]) >= budget.max_total_chars
                         ):
                             selected_sources[index] = {
+                                **record,
                                 "item": dict(record.get("item") or {}),
                                 "assessment": assessment,
                                 "read": {
@@ -703,11 +1056,22 @@ class WebLookupService:
                             warnings.append(
                                 f"source read failed ({url}): {type(exc).__name__}: {exc}"
                             )
-                        selected_sources[index] = {
+                        updated_record = {
+                            **record,
                             "item": dict(record.get("item") or {}),
                             "assessment": assessment,
                             "read": read_result,
                         }
+                        if record.get("evidence_state") == "inherited_candidate":
+                            if read_result.get("status") == "read":
+                                updated_record["evidence_state"] = "revalidated"
+                                seed = updated_record.pop("inherited_note_seed", None)
+                                if isinstance(seed, dict):
+                                    updated_record["inherited_note"] = seed
+                            else:
+                                updated_record["evidence_state"] = "invalid_or_rejected"
+                                updated_record.pop("inherited_note_seed", None)
+                        selected_sources[index] = updated_record
                         context["read_summary"] = _read_summary(
                             selected_sources,
                             budget,
@@ -730,6 +1094,27 @@ class WebLookupService:
 
             ensure_active()
             if stage == "synthesizing":
+                invalid_inherited = [
+                    record
+                    for record in selected_sources
+                    if record.get("evidence_state")
+                    in {"inherited_candidate", "invalid_or_rejected"}
+                ]
+                if invalid_inherited:
+                    for record in invalid_inherited:
+                        rejected = dict(record)
+                        rejected["evidence_state"] = "invalid_or_rejected"
+                        assessment = dict(rejected.get("assessment") or {})
+                        assessment["selected"] = False
+                        assessment["rejection_reason"] = "inherited_source_revalidation_failed"
+                        rejected["assessment"] = assessment
+                        rejected_sources.append(rejected)
+                    selected_sources = [
+                        record
+                        for record in selected_sources
+                        if record.get("evidence_state")
+                        not in {"inherited_candidate", "invalid_or_rejected"}
+                    ]
                 items = _selected_items(selected_sources)
                 read_summary = _read_summary(
                     selected_sources,
@@ -767,6 +1152,31 @@ class WebLookupService:
                         else "direct_results_found"
                     )
                 answer_confidence = evidence_confidence(selected_sources)
+                lineage = context.get("lineage")
+                if isinstance(lineage, dict):
+                    lineage["evidence_counts"] = {
+                        "inherited_candidate": sum(
+                            1
+                            for record in selected_sources
+                            if record.get("evidence_state") == "inherited_candidate"
+                        ),
+                        "revalidated": sum(
+                            1
+                            for record in selected_sources
+                            if record.get("evidence_state") == "revalidated"
+                        ),
+                        "new": sum(
+                            1
+                            for record in selected_sources
+                            if record.get("evidence_state") == "new"
+                        ),
+                        "invalid_or_rejected": sum(
+                            1
+                            for record in rejected_sources
+                            if record.get("evidence_state") == "invalid_or_rejected"
+                        ),
+                    }
+                    context["lineage"] = lineage
                 checkpoint()
                 return self.repository.complete(
                     run_id,

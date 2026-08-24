@@ -5,9 +5,11 @@ import {
   cancelResearchRun,
   createResearchRun,
   executeResearchRun,
+  loadResearchFollowUpCandidate,
   loadResearchRun,
   resumeResearchRun,
   retryResearchRun,
+  steerResearchRun,
   type ResearchLookupResponse,
 } from "./researchApi";
 
@@ -16,7 +18,15 @@ type WebLookupControllerOptions = {
   setOperationError: (message: string) => void;
   activeRunId?: string;
   setActiveRunId: (runId?: string) => void;
+  activeThreadId?: string;
 };
+
+function followUpRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `follow-up-${crypto.randomUUID()}`;
+  }
+  return `follow-up-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function isUsable(response: ResearchLookupResponse): boolean {
   return (
@@ -114,7 +124,71 @@ export function useWebLookupController(options: WebLookupControllerOptions) {
 
     setUseInChat(false);
     await runOperation(async (signal) => {
-      const created = await createResearchRun(query, 8, { signal });
+      let parentRunId: string | undefined;
+      let suggestionStatus: "not_checked" | "not_found" | "accepted" | "declined" | "unavailable" =
+        options.activeThreadId ? "not_found" : "not_checked";
+      if (options.activeThreadId) {
+        try {
+          const candidate = await loadResearchFollowUpCandidate(
+            options.activeThreadId,
+            query,
+            { signal },
+          );
+          if (
+            candidate.steering_required &&
+            candidate.parent_run_id &&
+            window.confirm(
+              `相关研究仍在进行：\n“${candidate.parent_query}”\n\n` +
+                "是否把当前问题作为研究转向加入该 Run？选择取消后将创建独立研究，不会派生 child。",
+            )
+          ) {
+            return steerResearchRun(candidate.parent_run_id, query, { signal });
+          }
+          if (candidate.available && candidate.parent_run_id) {
+            const partialWarning = candidate.requires_explicit_confirmation
+              ? "\n注意：上一次研究未完整完成，只会继承已保存的检查点。"
+              : "";
+            const accepted = window.confirm(
+              `发现相关的既有研究：\n“${candidate.parent_query}”\n` +
+                `状态 ${candidate.parent_status}，${candidate.source_count} 个来源、${candidate.note_count} 条有界笔记。` +
+                `${partialWarning}\n\n是否创建明确关联的后续研究？旧来源仍会重新搜索并读取验证。`,
+            );
+            if (accepted) {
+              parentRunId = candidate.parent_run_id;
+              suggestionStatus = "accepted";
+            } else {
+              suggestionStatus = "declined";
+            }
+          }
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+          suggestionStatus = "unavailable";
+        }
+      }
+      let created: ResearchLookupResponse;
+      try {
+        created = await createResearchRun(query, 8, {
+          signal,
+          ownerThreadId: options.activeThreadId,
+          parentRunId,
+          createRequestId: parentRunId ? followUpRequestId() : undefined,
+          suggestionStatus,
+        });
+      } catch (error) {
+        if (
+          !parentRunId ||
+          !window.confirm(
+            "已确认的既有研究当前不再满足继承条件。是否改为创建不继承旧证据的独立研究？",
+          )
+        ) {
+          throw error;
+        }
+        created = await createResearchRun(query, 8, {
+          signal,
+          ownerThreadId: options.activeThreadId,
+          suggestionStatus: "unavailable",
+        });
+      }
       setResult(created);
       options.setActiveRunId(created.run_id);
       return executeResearchRun(created.run_id, { signal });

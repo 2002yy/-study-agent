@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.api.models.news import (
     NewsLookupRequest,
     NewsLookupResponse,
+    ResearchFollowUpCandidateResponse,
     ResearchRunCreateRequest,
     ResearchSteerRequest,
     WebLookupRunListResponse,
@@ -88,9 +89,37 @@ def create_research_run(
     service: WebLookupServiceDependency,
 ) -> WebLookupRunResponse:
     try:
-        return _response(service.create(request.query, max_items=request.max_items))
+        return _response(
+            service.create(
+                request.query,
+                max_items=request.max_items,
+                owner_thread_id=request.owner_thread_id,
+                parent_run_id=request.parent_run_id,
+                create_request_id=request.create_request_id,
+                suggestion_status=request.suggestion_status,
+            )
+        )
     except ValueError as exc:
+        if request.parent_run_id:
+            raise _not_found_or_conflict(exc) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/sessions/{thread_id}/research-runs/follow-up-candidate",
+    response_model=ResearchFollowUpCandidateResponse,
+)
+def get_research_follow_up_candidate(
+    thread_id: str,
+    query: str,
+    service: WebLookupServiceDependency,
+) -> ResearchFollowUpCandidateResponse:
+    try:
+        return ResearchFollowUpCandidateResponse(
+            **service.follow_up_candidate(thread_id=thread_id, query=query)
+        )
+    except ValueError as exc:
+        raise _not_found_or_conflict(exc) from exc
 
 
 @router.get("/research-runs", response_model=WebLookupRunListResponse)

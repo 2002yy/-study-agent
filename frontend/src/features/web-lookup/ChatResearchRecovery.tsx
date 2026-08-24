@@ -26,6 +26,23 @@ function runDetail(run: ResearchLookupResponse): string {
   return run.stop_reason || stageLabels[run.stage] || run.stage;
 }
 
+function lineageDetails(run: ResearchLookupResponse) {
+  const raw = run.research_context.lineage;
+  const lineage = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const rawCounts = lineage.evidence_counts;
+  const counts = rawCounts && typeof rawCounts === "object"
+    ? (rawCounts as Record<string, unknown>)
+    : {};
+  const count = (key: string) => Number(counts[key] ?? 0);
+  return {
+    parentQuery: String(lineage.parent_query ?? "既有研究"),
+    inherited: count("inherited_candidate"),
+    revalidated: count("revalidated"),
+    added: count("new"),
+    rejected: count("invalid_or_rejected"),
+  };
+}
+
 export function ChatResearchRecovery({
   run,
   progress = null,
@@ -89,6 +106,38 @@ export function ChatResearchRecovery({
               : progress.stop_reason || "联网研究已结束"}
           </span>
         </div>
+      </div>
+    );
+  }
+  if (run?.parent_run_id) {
+    const lineage = lineageDetails(run);
+    const aggregate = run.lineage_summary ?? {};
+    return (
+      <div className={`memory-note ${run.status === "failed" ? "warn" : ""}`} role="status">
+        <div>
+          <strong>后续研究 · 已关联父研究</strong>
+          <span>父研究：“{lineage.parentQuery}”</span>
+          <span>
+            继承候选 {lineage.inherited} · 已重新验证 {lineage.revalidated} · 新来源{" "}
+            {lineage.added} · 已失效/排除 {lineage.rejected}
+          </span>
+          <span>
+            整条研究链累计搜索 {Number(aggregate.search_count ?? 0)} 次、读取{" "}
+            {Number(aggregate.read_count ?? 0)} 次、后续研究 {Number(aggregate.child_count ?? 0)} 个。
+          </span>
+        </div>
+        {canResume ? (
+          <button className="ghost-action compact" disabled={isBusy} onClick={onResume} type="button">
+            {isBusy ? <Loader2 className="spin" size={14} /> : <RotateCcw size={14} />}
+            继续研究
+          </button>
+        ) : null}
+        {canRetry ? (
+          <button className="ghost-action compact" disabled={isBusy} onClick={onRetry} type="button">
+            {isBusy ? <Loader2 className="spin" size={14} /> : <RotateCcw size={14} />}
+            重试研究
+          </button>
+        ) : null}
       </div>
     );
   }

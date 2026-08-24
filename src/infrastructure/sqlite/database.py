@@ -10,7 +10,7 @@ from typing import Callable
 from src.infrastructure.sqlite.learning_semantic_schema import LEARNING_SEMANTIC_MIGRATION_V18
 from src.infrastructure.sqlite.learning_truth_schema import LEARNING_TRUTH_MIGRATION_V17
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -487,6 +487,42 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON session_attachments(thread_id, status);
         CREATE INDEX idx_session_attachments_thread_hash
             ON session_attachments(thread_id, content_hash);
+        """,
+    ),
+    (
+        23,
+        """
+        ALTER TABLE web_lookup_runs ADD COLUMN owner_thread_id TEXT;
+        ALTER TABLE web_lookup_runs ADD COLUMN parent_run_id TEXT;
+        ALTER TABLE web_lookup_runs ADD COLUMN root_run_id TEXT;
+        ALTER TABLE web_lookup_runs
+            ADD COLUMN lineage_depth INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE web_lookup_runs ADD COLUMN create_request_id TEXT;
+
+        UPDATE web_lookup_runs
+        SET root_run_id = id
+        WHERE root_run_id IS NULL OR root_run_id = '';
+
+        UPDATE web_lookup_runs
+        SET owner_thread_id = json_extract(research_context, '$.owner.thread_id')
+        WHERE COALESCE(json_extract(research_context, '$.owner.thread_id'), '') <> ''
+          AND EXISTS (
+              SELECT 1 FROM chat_threads
+              WHERE chat_threads.id = json_extract(
+                  web_lookup_runs.research_context,
+                  '$.owner.thread_id'
+              )
+          );
+
+        CREATE INDEX idx_web_lookup_runs_thread_created
+            ON web_lookup_runs(owner_thread_id, created_at DESC);
+        CREATE INDEX idx_web_lookup_runs_parent
+            ON web_lookup_runs(parent_run_id, created_at ASC);
+        CREATE INDEX idx_web_lookup_runs_root
+            ON web_lookup_runs(root_run_id, lineage_depth, created_at ASC);
+        CREATE UNIQUE INDEX idx_web_lookup_runs_create_request
+            ON web_lookup_runs(create_request_id)
+            WHERE create_request_id IS NOT NULL;
         """,
     ),
 )

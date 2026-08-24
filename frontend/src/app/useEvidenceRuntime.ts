@@ -92,6 +92,7 @@ export function useEvidenceRuntime(options: {
     setOperationError: options.setOperationError,
     activeRunId: webLookupRunId,
     setActiveRunId: setWebLookupRunId,
+    activeThreadId: options.activeChatThreadId,
   });
   const ragController = useRagController({
     settings: ragSettings,

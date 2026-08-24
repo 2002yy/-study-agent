@@ -37,6 +37,12 @@ export type ResearchLookupResponse = NewsLookupResponse & {
   active_operation_started_at?: string | null;
   stage_started_at?: string | null;
   cancel_requested_at?: string | null;
+  owner_thread_id?: string | null;
+  parent_run_id?: string | null;
+  root_run_id?: string | null;
+  lineage_depth?: number;
+  create_request_id?: string | null;
+  lineage_summary?: Record<string, number>;
   version: number;
   created_at: string;
   updated_at: string;
@@ -64,6 +70,12 @@ type ResearchRunPayload = {
   active_operation_started_at?: string | null;
   stage_started_at?: string | null;
   cancel_requested_at?: string | null;
+  owner_thread_id?: string | null;
+  parent_run_id?: string | null;
+  root_run_id?: string | null;
+  lineage_depth?: number;
+  create_request_id?: string | null;
+  lineage_summary?: Record<string, number>;
   version: number;
   created_at: string;
   updated_at: string;
@@ -72,6 +84,23 @@ type ResearchRunPayload = {
 
 type ResearchRequestOptions = {
   signal?: AbortSignal;
+  ownerThreadId?: string;
+  parentRunId?: string;
+  createRequestId?: string;
+  suggestionStatus?: "not_checked" | "not_found" | "accepted" | "declined" | "unavailable";
+};
+
+export type ResearchFollowUpCandidate = {
+  available: boolean;
+  reason: string;
+  parent_run_id?: string | null;
+  parent_query: string;
+  parent_status: string;
+  source_count: number;
+  note_count: number;
+  overlap_tokens: string[];
+  requires_explicit_confirmation: boolean;
+  steering_required: boolean;
 };
 
 type ResearchCancelOptions = ResearchRequestOptions & {
@@ -121,6 +150,12 @@ function toResponse(run: ResearchRunPayload): ResearchLookupResponse {
     active_operation_started_at: run.active_operation_started_at,
     stage_started_at: run.stage_started_at,
     cancel_requested_at: run.cancel_requested_at,
+    owner_thread_id: run.owner_thread_id,
+    parent_run_id: run.parent_run_id,
+    root_run_id: run.root_run_id,
+    lineage_depth: run.lineage_depth,
+    create_request_id: run.create_request_id,
+    lineage_summary: run.lineage_summary,
     version: run.version,
     created_at: run.created_at,
     updated_at: run.updated_at,
@@ -156,8 +191,42 @@ export async function createResearchRun(
   const run = await requestJson<ResearchRunPayload>("/research-runs", {
     method: "POST",
     signal: requestOptions.signal,
-    body: JSON.stringify({ query, max_items: maxItems }),
+    body: JSON.stringify({
+      query,
+      max_items: maxItems,
+      owner_thread_id: requestOptions.ownerThreadId,
+      parent_run_id: requestOptions.parentRunId,
+      create_request_id: requestOptions.createRequestId,
+      suggestion_status: requestOptions.suggestionStatus ?? "not_checked",
+    }),
   });
+  return toResponse(run);
+}
+
+export async function loadResearchFollowUpCandidate(
+  threadId: string,
+  query: string,
+  requestOptions: ResearchRequestOptions = {},
+): Promise<ResearchFollowUpCandidate> {
+  return requestJson<ResearchFollowUpCandidate>(
+    `/sessions/${encodeURIComponent(threadId)}/research-runs/follow-up-candidate?query=${encodeURIComponent(query)}`,
+    { signal: requestOptions.signal },
+  );
+}
+
+export async function steerResearchRun(
+  runId: string,
+  content: string,
+  requestOptions: ResearchRequestOptions = {},
+): Promise<ResearchLookupResponse> {
+  const run = await requestJson<ResearchRunPayload>(
+    `/research-runs/${encodeURIComponent(runId)}/steer`,
+    {
+      method: "POST",
+      signal: requestOptions.signal,
+      body: JSON.stringify({ content }),
+    },
+  );
   return toResponse(run);
 }
 

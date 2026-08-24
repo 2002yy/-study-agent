@@ -1,7 +1,7 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-21
+> 更新：2026-08-25
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -25,7 +25,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证 `main` 基线：`589169b`（[CI #31704003134](https://github.com/2002yy/study-agent/actions/runs/31704003134) 全门禁通过）；G15–G17 核心实现基线 `f69a305` 的 [CI #31703041709](https://github.com/2002yy/study-agent/actions/runs/31703041709) 同样通过 pytest、RAG baseline、ruff、package helper、detect-secrets、mypy baseline、frontend test/build、53 条三浏览器 Golden Journeys 和 14 条 real-stack browser gates。
+当前已验证 `main` 基线：`82a1efc84170c0187a0b2732ea8ae31a1b6892d9`（[CI #32718648427](https://github.com/2002yy/study-agent/actions/runs/32718648427) 全门禁通过），本地与 `origin/main` 为 `0/0`。该基线已经包含 G12 cooperative cancellation、DR1 Deep Research、G14 临时附件、G17 Enter 配置、G16 会话记忆授权和 G4 服务端分页/搜索。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -402,17 +402,17 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G7 UI 聚焦 | COMPLETE | 一级入口已收敛，诊断/来源/设置等进入次级 surface，普通状态不暴露低层 record/provider 参数。 |
 | G8 窄屏可用 | COMPLETE (automation) / MANUAL DEFERRED | 自动化窄屏、三浏览器与 real-stack 门禁已通过；Android 导出/部署未就绪，实体手机记录表仍未填写。 |
 | G9 时效检索 | COMPLETE | 稳定 SearXNG 首选源、结构化 provider 失败、真假 `found`、8/12/20 秒预算和连续超时隔离均已有真实运行与 CI 证据。 |
-| G10 ResearchRun | PARTIAL (P2) | durable run、attempt/source/budget/stop reason、retry/cancel/partial 与证据使用确认已完成；当前明确复用的是同查询 retry/resume，尚无一般 follow-up 继承上一 run 实体/来源的正式合同。 |
+| G10 ResearchRun | COMPLETE (local verified) | follow-up child lineage、服务端安全 seed、本地候选、active Run steering、重新读取门、root aggregate、幂等与四态 EvidenceTrail 已实现；待本批提交及远程 CI 后关闭交付门。 |
 | G11 TaskContract | COMPLETE | task/source/closure 合同在角色、RAG、联网和记忆前确定，并持久化到 route snapshot。 |
-| G12 预回答与取消 | PARTIAL (P1) | 首 token 前状态、ResearchRun/Provider cancel、中断恢复与隔离执行器已落地，取消不会提交 completed 学习真值；但 chat 的 pre-answer preparation 只显式取消 ResearchRun，本地 RAG 检索不接收 cancel signal，RagWriteRun 也没有 cancel endpoint。 |
+| G12 预回答与取消 | COMPLETE | ChatTurn reservation + operation CAS、ResearchRun/本地 RAG/模型生成 cooperative checkpoints、durable cancelled/interrupted、server single writer、归档队列和三 viewport 真实栈时序证据均已交付。RagWriteRun 是独立写入生命周期，不属于本次只读 turn retrieval 取消合同。 |
 | G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
-| G14 导入与来源范围 | PARTIAL (P1) | 长期资料库、server-owned RagRun、来源范围、删除/重建确认已存在；仍缺每文件阶段与单文件重试、当前会话临时附件，以及临时附件的禁联网/禁云端/禁记忆/会话结束删除控制。 |
+| G14 导入与来源范围 | COMPLETE | 长期资料库之外，当前会话临时附件已具备每文件状态/重试、thread 隔离、ready-only 召回、即时删除、归档成功后清理、幂等转正、文本 embedding fail-closed 和默认关闭的 vision 授权；实现至 `c761052`，交付记录 `1a471d4`。 |
 | G15 会话转换 | COMPLETE (automation) / MANUAL VISUAL PENDING | 新建、切换、归档共用一个只读派生 transition guard；覆盖 chat generation、Memory preview/closure、partial ResearchRun 与 RagWrite，逐项说明停止、保留、继续或放弃的真实效果。归档只确认一次；从抽屉触发时先关闭来源抽屉，避免双 `aria-modal`。RagWrite 仍没有服务端取消能力，守卫明确说明其继续到真实终态而不冒充已取消。完整远程浏览器与 real-stack 矩阵已通过。 |
-| G16 外发数据与隐私 | STOP-GATE COMPLETE / DELIVERED (P1) | evaluator 前已阻断 `question_only` / `recent_chat` 的外部语义复核；ChatTurn 按调用记录 purpose/provider/categories/count/result；外部 Chroma query/document embedding 在 provider/client 前 fail closed，RagWriteRun 保留本地激活并记录 `blocked_by_policy`；legacy UI 全部执行事实显示 unknown。实现 `2662cd3` 与浏览器验收修正 `a3f00de` 已交付 `main`，完整 CI #32499954659 全绿。文档/附件级云处理授权仍属于后续 G14/G16 产品切片。 |
+| G16 外发数据与隐私 | COMPLETE (automation) | evaluator 语义复核与外部 embedding 均 fail-closed，ChatTurn 逐调用记录真实 purpose/provider/categories/count/result，legacy 显示 unknown；G14 vision 使用独立默认关闭授权；跨会话记忆具备 off/ask/auto、会话级 CAS 同意/撤销和三态审计。止血、附件授权与 memory ask 均已交付 main。 |
 | G17 首次使用/可访问性 | PARTIAL (P1, Enter 已收口 `f297dc9`) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 已可通过设置切换为 Ctrl+Enter 发送（`enter_to_send`，`f297dc9`，CI #32648090478）；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
-当前未发现传统远程利用或数据破坏型 P0。已确认的 **G16 P1 隐私真实性缺陷** 已完成窄修复、快进交付和完整远程 CI 验证，止血交付门关闭。唯一立即路线现为 G12 pre-answer/RAG cooperative cancellation；随后是 G14 临时附件/每文件恢复、G16 文档级授权产品面与 G17 人工可访问性验收；G4 历史分页和 G10 follow-up 复用仍属 P2。
+当前未发现传统远程利用或数据破坏型 P0。G12、DR1、G14、G16 自动化切片、G17 Enter 配置和 G4 均已交付；G10 一般 follow-up 继承已完成 15 项 Grill、覆盖复审和本地实现门。剩余 P1 是 G17 真实屏幕阅读器、视觉对比度和实体手机人工验收；它只能由真实设备/辅助技术证据关闭，不得由自动化冒充。当前没有另一项已授权且可独立实施的产品缺口。
 
 ### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
 
@@ -435,12 +435,14 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 ### 9.7 后续执行顺序
 
-1. ~~实施 G12 可取消本地 RAG~~ — 已交付并全门闭合（第 10 节）。
-2. **唯一立即步骤：实施已冻结合同的 G18 深度调研（第 11 节），插队 G14 前。** 扩展 WebLookupRun 多轮迭代管线；G14 临时附件合同在 G18 交付后再单独冻结。 明确会话归属、禁联网/禁云端/禁记忆、结束删除、每文件阶段与重试；不得复用长期资料库冒充临时生命周期，也不在取消切片中夹带附件实现。
-3. **G16 其余控制与 G17 剩余人工验收。** 按会话记忆 ask 是剩余的自动化切片（需先 Grill 冻结合同）；文档/附件级云处理授权已随 G14 vision 开关收口；Enter 配置已交付；对比度、屏幕阅读器与实体设备需要用户本人提供独立证据。
-4. **继续延期 Android、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前隐私与主交互缺口，也不得创建第二套真值。
+1. ~~G12 ChatTurn cooperative cancellation~~ — 已交付并全门闭合（第 10 节）。
+2. ~~DR1 Deep Research（历史提交标签 `G18 DeepResearch`）~~ — 已交付；扩展 WebLookupRun，不新增第二 run owner（第 11 节）。
+3. ~~G14 临时附件、G17 Enter 配置、G16 会话记忆 ask、G4 历史分页/搜索~~ — 均已交付 main 并取得完整 CI。
+4. ~~G10 follow-up inheritance Grill + 实施~~ — 15 项决策、schema v23、服务端 lineage/重新验证和 UI 真值已完成本地门禁；待本批远程 CI 关闭交付门（第 14 节）。
+5. **唯一下一推进门：G17 人工可访问性验收。** 对比度、真实屏幕阅读器与实体手机只能由人工证据关闭；设备/部署未就绪时保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`，不另起自动化替代真值。
+6. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究连续性缺口，也不得创建第二套真值。
 
-当前阶段：**G12/G18/G14 已交付 main 全绿；G17 Enter 配置已收口；G16 按会话记忆 ask 已全切片交付 main（合同第 13 节：三档 memory_policy、会话级 CAS 授权、json_patch 合并修复覆写缺陷、三态审计、可撤销徽章，9 专项测试，CI #32651981365 通过）。G16 自动化切片至此收口；G17 剩余对比度/屏幕阅读器/实体手机待用户人工验收。Learner Model UI NO-GO；GraphRAG、长期画像写回与 Android 未启动。**
+当前阶段：**远程基线仍为 `main=82a1efc`、CI #32718648427 全绿；G10 已完成本地实现和回归，待本批提交/CI。之后唯一下一推进门是 G17 人工可访问性验收；Learner Model 独立 UI NO-GO，GraphRAG、长期画像写回与 Android 产品化未启动。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -538,8 +540,8 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **Grill coverage：COMPLETE。** 目标、边界、非目标、恢复、兼容、隐私、失败语义和验收门已冻结，无剩余产品选择要求实现者自行决定。
 - **G16 local implementation/stop gate：GO。** 窄修复和本地全量证据完整；没有发现禁止数据到达测试 provider、legacy 假 false 或本地索引回归。
 - **G16 delivery：GO / COMPLETE。** 实现 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进进入 `main`；完整 CI #32499954659 全绿。
-- **G12 implementation：GO。** 合同完整且唯一前置门已关闭，不再进行产品选择 Grill；实现中若代码反证出现新的 owner、终态或授权矛盾，再带证据回到 Grill。
-- **唯一下一步：**建立窄 G12 ChatTurn cooperative cancellation 切片，先落 reservation/operation CAS、检索 checkpoint 与 durable terminal truth，再接 200 ms UI 确认和慢检索实测上限；通过 G12 门后才进入 G14。
+- **G12 implementation：GO / COMPLETE。** reservation、operation CAS、retrieval checkpoints、durable terminal truth、200 ms UI 自动观测和慢检索真实栈证据已交付。
+- **本节历史下一步：CLOSED。** G10 follow-up inheritance 已完成合同与本地实施；当前路线以 9.7 的 G17 人工门为准。
 
 ### 10.8 G16 窄修复实测证据
 
@@ -600,7 +602,9 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **资产**：`playwright.g12-acceptance.config.ts` + `e2e/g12-acceptance.spec.ts`（六旅程 A–F）+ 测试 server 注入端点；复现入口 `npm run test:e2e:g12`。
 - **仍属人工批次**：真实屏幕阅读器体验、实体手机、视觉对比度评审——沿用既有边界，归 G17 人工验收。
 
-## 11. G18 深度调研（DeepResearch）冻结合同（2026-08-22 Grill，决策 1–16）
+## 11. DR1 深度调研（DeepResearch）冻结合同（2026-08-22 Grill，决策 1–16）
+
+> 历史实现提交使用 `G18 DeepResearch` 标签；为避免与既有 G18 React/Streamlit 迁移编号冲突，当前 owner 统一称为 **DR1**，不改写历史提交信息。
 
 背景：现有联网调研的三条实证痛点——太浅就断、读得太少、不会追问。目标对标 ChatGPT Deep Research 的中度深研形态。Grill 已闭合，16 条决策冻结如下；实施排期插队 G14 前。
 
@@ -641,8 +645,8 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 ### 11.4 GO / NO-GO
 
-- **G18 合同冻结：COMPLETE。** 触发、预算、承载、上下文经济、可视化、分解、转向、审计、失败语义、交付形态全部冻结，无剩余产品选择要求实现者自行决定。
-- **G18 implementation：GO（排期插队 G14 前）。** 实施中若代码反证出现新的 owner、终态或授权矛盾，带证据回到 Grill。
+- **DR1 合同冻结：COMPLETE。** 触发、预算、承载、上下文经济、可视化、分解、转向、审计、失败语义、交付形态全部冻结。
+- **DR1 implementation：GO / COMPLETE。** WebLookupRun 多轮管线、步骤日志、steering、敏感度设置与 G12 取消复用已交付 main。
 
 ## 12. G14 临时附件冻结合同（2026-08-23 Grill，决策 1–16 + 验收门 v2）
 
@@ -667,7 +671,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 1. **每文件状态机：**parsing→chunking→indexing→ready|failed 独立可见可重试；步骤日志按文件展示（对齐决策 12 状态体系）；失败文件的片段绝不进入提问上下文。
 2. **thread 内命中：**召回时 EvidenceTrail 标注文件名+页码/位置；排序优先于长期资料；无关问题不强行引用。
-3. **删除时序（关键修订）：**附件清除绑定「归档/删除成功之后」执行（兼容 G18 归档队列——排队归档的会话其附件在真正归档落盘时删除）；DB 记录与磁盘文件双重验证；归档失败则会话保留时附件一并保留。
+3. **删除时序（关键修订）：**附件清除绑定「归档/删除成功之后」执行（兼容 G12 归档队列——排队归档的会话其附件在真正归档落盘时删除）；DB 记录与磁盘文件双重验证；归档失败则会话保留时附件一并保留。
 4. **手动删除：**单附件删除入口即时生效（索引+文件同步清）。
 5. **转正幂等：**一键转正走 RagWriteRun；内容哈希去重防重复入库；复制模式下临时副本随会话结束清理。
 6. **双层 fail-closed：**文本 embedding 跟随 cloud_context_policy；图片 vision 受独立开关（默认关）控制，开启后逐次记录 image_description 外发。
@@ -683,14 +687,14 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 ### 12.4 GO / NO-GO
 
-- **G18 合同冻结：COMPLETE。实施：GO（立即）。**
-- 实施中若出现新的 owner/终态/授权矛盾，带证据回到 Grill。
+- **G14 合同冻结：COMPLETE。实施：GO / COMPLETE。**
+- owner、终态与授权合同已由 12.5 的实现和门禁证据闭合。
 
 ### 12.5 交付证据（2026-08-23）
 
 - `f4fec33` 合同冻结 → `b4c5ade` G14-a/b（schema v22 `session_attachments` 表、CAS 状态迁移仓储、上传/解析/分块/索引/失败管线、自动重试一次+手动重试、thread 过滤检索、删除/清理/幂等转正）→ `68ec561` G14-c（deepseek-v4-flash-vision-exp 描述管线，独立开关默认关，逐次 image_description 审计）→ `4240707` G14-d1（REST 适配器，404/409/413/400 映射）→ `27b065a` G14-d2（资料面板内本会话附件区：每文件状态徽章+步骤日志+重试/转正/删除；设置面板 vision 开关）→ `c761052` G14-e（chat 检索附件优先合并+provenance 快照、归档成功后才清理且失败不回滚归档）。
 - 验证：后端 pytest 1081 全过（含 17 个 G14 专项测试覆盖验收门 1/3/4/5/7/8）；前端 vitest 337 全过 + tsc 干净；ruff 全过；mypy 基线无新增（122≤128）；CI #32645814002 success。
-- 验收门对照：①每文件状态机✅（stage_history 落库可展开）；②thread 内命中+文件名标注+优先排序✅；③清理绑定归档成功之后✅（archive_session 为唯一汇聚点，兼容 G18 归档队列与启动扫描）；④手动删除即时生效✅；⑤转正幂等（规范化文本哈希去重）✅；⑥双层 fail-closed✅；⑦仅 ready 可召回✅（failed 片段永不入索引）；⑧重名独立+内容去重✅。
+- 验收门对照：①每文件状态机✅（stage_history 落库可展开）；②thread 内命中+文件名标注+优先排序✅；③清理绑定归档成功之后✅（archive_session 为唯一汇聚点，兼容 G12 归档队列与启动扫描）；④手动删除即时生效✅；⑤转正幂等（规范化文本哈希去重）✅；⑥双层 fail-closed✅；⑦仅 ready 可召回✅（failed 片段永不入索引）；⑧重名独立+内容去重✅。
 ## 13. G16 按会话记忆 ask 冻结合同（2026-08-23 Grill，决策 1–14 + 验收门 v2）
 
 背景：跨会话记忆（read_memory_bundle）目前只受 cloud_context_policy==allow_local_evidence 一个门控制，设为 allow 即静默进入每次回答。memory_mode 只管写入不管读取。本合同补上记忆读取的显式授权控制。
@@ -738,11 +742,79 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 ### 13.4 GO / NO-GO
 
-- **合同冻结：COMPLETE。实施：GO（立即）。**
-- 实施中如出现新的 owner/终态矛盾，带证据回到 Grill。
+- **合同冻结：COMPLETE。实施：GO / COMPLETE。**
+- 三档策略、CAS 授权/撤销、恢复与审计合同已由 13.5 的实现和门禁证据闭合。
 ### 13.5 交付证据（2026-08-23）
 
 - `375a2dd` 合同冻结 → `4b64529` 实施：三档 memory_policy（helpers 默认 auto）、decide_external_data 双门、grant/revoke CAS（json_set 只动 consent 键）、acquire_chat_operation 改 json_patch 合并（修复整包覆写吞掉授权键的真实缺陷——即审计警告的并发问题在生产代码中的具体形态）、policy chat 逐轮解析授权 + marker 首次落库 + CAS 失败 fail-closed、external_data_execution.memory_consent 三态审计、revoke 端点、前端 confirm（仅 ask+非空+未授权时出现，向后端 detail 权威校验以满足恢复免问）、可撤销徽章。
 - 验证：后端 pytest 1090 全过（含 9 个 G16 测试覆盖验收门 1–9）；前端 vitest 338 全过 + tsc 干净；ruff 全过；mypy 基线无新增（122≤128）；CI #32651981365 success。
 
+## 14. G10 follow-up inheritance 冻结合同（2026-08-25，决策 1–15）
 
+### 14.1 Grill 起点代码事实（实施前）
+
+- `WebLookupRun` 已拥有 query、context、attempts、selected/rejected sources、read notes、预算、operation CAS、cancel/retry/resume 和 DR1 steering，但没有 `parent_run_id/root_run_id/lineage_depth`。
+- retry/resume 原地继续同一个 Run；普通新查询创建独立 Run，API 只接受 query/max_items。
+- owner 目前只存在于 `research_context.owner` JSON；仓储可按 owner turn 查询，不能按 thread 获取可继承的上一 Run。
+- continuation/retry 会冻结原 ChatTurn 的 ResearchRun evidence owner，禁止客户端切换到另一个 Run；follow-up 因此必须是新 ChatTurn + 新 child Run，不能冒充 retry。
+- `research_sources_snapshot` 已提供不含正文/query 的安全来源投影；当前 source freshness 只有 `reported/unknown`，不能直接证明旧内容仍然有效。
+
+### 14.2 已确认决策（1–5）
+
+1. **Durable identity：**follow-up 创建新 child `WebLookupRun`，记录 `parent_run_id + root_run_id`；父 Run 与历史完成时间不改写。
+2. **触发：**系统只做相关性提示，用户确认后才继承；不得静默把同 thread 的任意下一问挂到旧研究。
+3. **继承范围：**只继承来源 identity/URL/assessment 与有界结构化笔记；不直接把旧 `source_block`/网页正文当成当前事实，使用前重新检查相关性与新鲜度，必要时重读。
+4. **预算：**child Run 获得独立完整预算；对继承来源的重新读取计入 child 的 read/time/token 预算。
+5. **非完整父 Run：**completed/partial 可作为继承候选；failed/cancelled 只能继承已持久 checkpoint 的来源/笔记并要求明确确认，不得把失败候选升级为可信来源。
+
+### 14.3 已确认决策（6–10）
+
+6. **Active parent：**pending/running 父 Run 不创建 child，相关追加继续使用既有 steering；只有 terminal 父 Run 才进入 follow-up 候选。
+7. **Lineage 生命周期：**v1 仅允许同一 active thread 内创建 child；thread 归档后 lineage 保留只读审计，但不得再从归档 thread 创建 child；父子 Run 不级联删除。
+8. **候选与重新验证：**候选由本地确定性实体/token overlap 产生，选择同 thread 最近的 terminal Run；继承来源初始一律是 `inherited_candidate`，只有在 child 中重新搜索/读取成功后才能引用，过期或不可用来源进入 rejected/stale。
+9. **Root 成本：**每个 child 仍有完整独立预算；root 额外累计 search/read/elapsed/child_count 供 UI 与审计展示。异常安全上限为 20 个 descendants，达到上限后只能创建新 root，不静默截断单个 child 的预算。
+10. **UI 与 EvidenceTrail：**明确显示 parent research，并区分 `inherited candidate / revalidated / new / invalid or rejected`；回答只允许引用 revalidated 与 new 来源，不得把候选状态伪装为已验证证据。
+
+### 14.4 已确认决策（11–15）
+
+11. **Server authority：**`owner_thread_id / parent_run_id / root_run_id / lineage_depth` 是数据库显式字段并建立索引；客户端只提交精确 parent id 与新 query，不得提交继承 evidence，服务端验证同 active thread、terminal parent、归档状态与 descendant 上限并构造安全 seed。
+12. **重新验证成功：**fresh search 命中相同 canonical URL 只验证来源 identity 与当前摘要；只有 child 中 direct read 成功，旧 read-note/fact 才能进入回答上下文。read 失败则进入 stale/rejected，旧事实不可引用。
+13. **有界笔记与审计：**仅继承成功 read 产生的结构化 notes，最多 8 条、每条 1000 字符、总计 8 KB；不复制 steering、query attempts、provider payload 或失败读取内容。模型外发仍归既有 `web_results` 类别，EvidenceTrail/provenance 另记 inherited/revalidated/new 数量与来源。
+14. **候选提示降级：**输入停顿或发送前仅做本地确定性候选检查，不调用外部 embedding；检查失败、超时或用户忽略时正常创建独立 root，不阻塞消息发送，并记录 suggestion unavailable。
+15. **确认钉死与幂等：**用户确认钉死精确 `parent_run_id`，服务端不得替换为更新候选；创建请求携带幂等 request id，重复提交返回同一 child。parent 已失效时明确失败，允许重新选择或创建 root。
+
+### 14.5 最后一轮覆盖复审
+
+- **Owner：CLOSED。** parent/root/thread lineage 与 child 构造均归数据库和服务端；客户端不拥有继承 evidence。
+- **状态与竞态：CLOSED。** active parent 只 steering；terminal parent 才可派生；确认钉死 parent；重复创建幂等；parent 失效不静默换绑。
+- **事实与隐私：CLOSED。** inherited candidate 不是可引用事实；旧 facts 只有 direct re-read 后才恢复；外发仍受既有 `web_results` policy/audit 门约束。
+- **生命周期：CLOSED。** v1 同 active thread；归档后 lineage 只读；父子不级联删除；20 descendants 后新建 root。
+- **成本与失败：CLOSED。** child 独立完整预算，root 只累计展示；候选提示是非阻塞增强路径；stale/read failure 不污染回答。
+- **UI 真值：CLOSED。** parent 与 inherited candidate/revalidated/new/rejected 分层显示；不得把 unknown/stale 显示为未使用或已验证。
+- **Grill coverage：COMPLETE。** 未发现仍需用户选择的 API、状态机、恢复、授权或验收分叉。
+
+### 14.6 验收门 v1
+
+1. schema 迁移保留旧 Run；旧记录成为 root，lineage depth 为 0，不伪造 thread owner。
+2. 只有同一 active thread 的 terminal Run 可创建 child；pending/running、归档 thread、跨 thread 与超过 20 descendants 均 fail-closed。
+3. child 创建由服务端派生安全 seed；客户端无法注入 inherited sources/notes；幂等重试返回同一 child。
+4. 候选计算完全本地、确定性且不发起 external embedding；不可用时聊天/独立 root 仍可继续。
+5. inherited source 初态为 candidate；fresh search + direct read 成功后才成为 revalidated 并可进入 source block；失败来源不可引用。
+6. notes 上限 8 条、单条 1000 字符、总计 8 KB，且 steering/query attempts/provider payload/失败读取正文不进入 seed。
+7. child 保持独立 search/read/time/token 预算；root aggregate 正确累计 search/read/elapsed/child_count，但不反向截断 child。
+8. API/UI 明示 parent research、候选确认与四类 evidence 状态；用户忽略/提示失败时不阻塞独立研究。
+9. EvidenceTrail/provenance 能区分 inherited/revalidated/new/rejected；模型外发审计仍为 `web_results`，不新增含义重复的数据类别。
+10. archive/recovery/retry/cancel 回归不改变既有 G12/DR1 真值与 owner 约束。
+
+### 14.7 GO / NO-GO
+
+- **合同冻结：COMPLETE。Implementation：GO / COMPLETE（本地门）。** 14.6 的自动验收已闭合；远程交付门待提交与 CI。
+
+### 14.8 本地交付证据（2026-08-25）
+
+- schema v23 增加显式 `owner_thread_id / parent_run_id / root_run_id / lineage_depth / create_request_id` 与查询/幂等索引；迁移将 legacy Run 保留为 depth 0 root，只从已有且有效的 JSON owner 回填 thread，不制造 owner。
+- `WebLookupRepository.create_child` 在单个 `BEGIN IMMEDIATE` 内验证 active thread、精确 parent、terminal 状态、同 thread、checkpoint、20 descendants 与 request id 幂等；客户端不能提交 inherited evidence。
+- 本地 token/CJK bigram overlap 候选不调用 gateway/embedding；相关 active Run 返回 steering 要求，terminal Run 经确认后才创建 child；提示不可用或拒绝时显式降级独立 root。
+- 安全 seed 只含来源 identity/assessment 与成功 read 的有界结构化 notes（8 条、单条 1000 字符、总计 8 KB）；fresh canonical URL 命中后仍须 direct read 成功才转为 `revalidated`，失败进入 rejected 且旧 facts 不进 source block。
+- API/恢复卡展示 parent、root 累计 search/read/elapsed/child_count 以及 inherited candidate/revalidated/new/invalid-or-rejected；EvidenceSnapshot selection reason 同步保留 lineage 状态，外发类别仍为既有 `web_results`。
+- 门禁：最终新增专项 8/8、G10/G12 owner 与恢复相关 19/19；最终修改前全量后端 1135/1135，steering/API 补丁后相关回归 19/19；前端最终全量 342/342、TypeScript 与 production build 通过；Ruff 全仓通过；mypy 122/128 且本批新增 0；RAG K1 baseline 通过；detect-secrets 0 finding files；`git diff --check` 通过。

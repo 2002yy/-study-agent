@@ -75,7 +75,16 @@ def _safe_record(record: Any) -> dict[str, Any] | None:
     }
     if not safe_item and not safe_assessment:
         return None
-    return {"item": safe_item, "assessment": safe_assessment}
+    safe: dict[str, Any] = {"item": safe_item, "assessment": safe_assessment}
+    evidence_state = record.get("evidence_state")
+    if isinstance(evidence_state, str) and evidence_state in {
+        "inherited_candidate",
+        "revalidated",
+        "new",
+        "invalid_or_rejected",
+    }:
+        safe["evidence_state"] = evidence_state
+    return safe
 
 
 def _object(value: Any) -> dict[str, Any]:

@@ -225,6 +225,12 @@ class WebLookupRun:
     active_operation_started_at: str | None = None
     stage_started_at: str | None = None
     cancel_requested_at: str | None = None
+    owner_thread_id: str | None = None
+    parent_run_id: str | None = None
+    root_run_id: str | None = None
+    lineage_depth: int = 0
+    create_request_id: str | None = None
+    lineage_summary: dict[str, Any] = field(default_factory=dict)
     version: int = 1
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
