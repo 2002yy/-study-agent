@@ -396,7 +396,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G1 LearningClosureRun | COMPLETE | server-owned durable run、正式状态机、幂等 preview、retry/cancel 与可恢复 UI 已存在。 |
 | G2 结构化总结输入 | COMPLETE | closure 读取 committed learning truth、受预算约束的对话、PedagogyEvalRun 与证据引用；未提交/失败回合不冒充已确认理解。 |
 | G3 summary status | COMPLETE | commit 后 summary status、同版本防重复、继续/归档并新建均已分离，且不自动归档。 |
-| G4 会话导航 | PARTIAL (P2) | 标题、任务/阶段/缺口/状态、重命名、搜索和分组已实现；但 `/sessions` 默认只返回最近 20 条，前端没有分页或服务端搜索，较早会话无法从 UI 搜到。 |
+| G4 会话导航 | COMPLETE | 标题、任务/阶段/缺口/状态、重命名、搜索和分组已实现；G4 收口（`4866880`，CI #32717990269）：`/sessions` 支持 q/limit/offset 服务端搜索（id + 手动标题 + learning_state）与分页总数，导航器防抖服务端搜索替换最新窗口集合并提供“加载更多”，较早会话可从 UI 直达。 |
 | G5 去伪精化 | COMPLETE | 主 UI 使用目标、阶段、缺口、下一步和验证状态，不生成 heuristic mastery 百分比。 |
 | G6 恢复卡 | COMPLETE | 新用户入口、durable Resume、研究 partial/interrupted 的继续/重试/放弃均已有正式状态来源。 |
 | G7 UI 聚焦 | COMPLETE | 一级入口已收敛，诊断/来源/设置等进入次级 surface，普通状态不暴露低层 record/provider 参数。 |
