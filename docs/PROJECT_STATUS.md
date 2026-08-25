@@ -441,12 +441,12 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 2. ~~DR1 Deep Research（历史提交标签 `G18 DeepResearch`）~~ — 已交付；扩展 WebLookupRun，不新增第二 run owner（第 11 节）。
 3. ~~G14 临时附件、G17 Enter 配置、G16 会话记忆 ask、G4 历史分页/搜索~~ — 均已交付 main 并取得完整 CI。
 4. ~~G10 follow-up inheritance Grill + 实施~~ — 15 项决策、schema v23、服务端 lineage/重新验证和 UI 真值已交付；`dd93fda` 的 CI #32761262084 attempt 2 全绿（第 14 节）。
-5. **SX1 最小 SearXNG 可复现基线。** 固定 image digest，纳入最小 Compose/config，保留本机 secret/proxy layering，并以 `18080` candidate、真实搜索和可回滚切换闭合；不在此步开放 LAN。
+5. ~~**SX1 最小 SearXNG 可复现基线。**~~ 已按固定 image digest、最小 Compose/config、本机 secret/proxy layering、`18080` candidate、真实搜索与可回滚切换完成，并由远程 CI #32877392793 关闭交付门；未开放 LAN。
 6. **RQ1 有界研究真值与质量修复。** 先止血 candidate-only 语义和 UI，再实现明确研究意图的规划、正文读取、证据家族、主张绑定与双门验收；RQ1 未 GO 时不得把 LAN 结果写成正式 G17 GO。
 7. **G17 人工可访问性与显式 LAN 验收。** 只在 SX1/RQ1 GO 后进入；对比度、真实屏幕阅读器与实体手机仍由人工证据关闭。当前 WLAN 为 Public 且 LAN controller 尚未实现，保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
 8. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究真实性缺口，也不得创建第二套真值。
 
-当前阶段：**远程实现基线 `83961ef` 与 `origin/main` 同步；SX1 已完成本地实现和真实 candidate 切换，尚未提交/取得远程 CI。RQ1 与 G17-LAN 均保持 NO-GO；SX1 交付门闭合前不启动 RQ1。**
+当前阶段：**SX1 实施提交 `1185b63` 已推送 `origin/main`，对应远程 CI #32877392793 全绿；当前唯一允许的新代码切片为 RQ1-A 语义止血。RQ1 整体与 G17-LAN 仍保持 NO-GO，不得提前进入 RQ1-B/C 或 LAN。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -929,10 +929,10 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 ### 15.6 当前门禁结论
 
 - **Grill：GO / COMPLETE。** 可以按 15.5 开始实现，无需再补产品选择。
-- **SX1 implementation：LOCAL GO / DELIVERY PENDING。** 固定 digest、仓库 Compose/config、ignored secret/proxy、备份、`18080` candidate、切换、回滚路径和 retained-container guard 已实现并完成真实切换；尚未提交、推送或取得远程 CI。
+- **SX1 implementation：GO / COMPLETE。** 固定 digest、仓库 Compose/config、ignored secret/proxy、备份、`18080` candidate、切换、回滚路径和 retained-container guard 已实现并完成真实切换；实施提交 `1185b63` 已推送，匹配的远程 CI #32877392793 全绿。
 - **RQ1：NO-GO / IMPLEMENTATION REQUIRED。** 真实 `opus5` Run 已证明 snippet-only 强结论与 UI 真值缺口。
 - **G17-LAN：BLOCKED / AUDIT REQUIRED / Decision: NO-GO。** 当前 WLAN 为 Public，controller/gateway/snapshot/firewall 证据尚不存在；只能在 SX1 与 RQ1 GO 后推进正式验收。
-- **当前唯一允许下一步：闭合 SX1 测试与远程交付门，不夹带 RQ1 或 LAN。**
+- **当前唯一允许下一步：建立 RQ1-A 语义止血窄切片；不夹带 RQ1-B/C 或 LAN。**
 
 ### 15.7 SX1 本地实现证据（2026-08-26）
 
@@ -945,3 +945,10 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - 后端 provider probe 曾返回 `ready / valid_results_returned`；随后一键启动复验正确显示 SearXNG service `ready`，同时因 brave/duckduckgo/startpage/wikipedia 等上游超时将检索能力显示为 `degraded`。该波动没有触发镜像更新或错误回滚，符合第三方降级边界。
 - 正常 `start-study-agent.ps1 -NoBrowser` 成功复用固定版本，显示后端、前端、SearXNG、检索状态和人工检查清单；普通启动不执行 pull/update。
 - 门禁：SX1/搜索相关 pytest 24/24、全量后端 1141/1141、全量 Ruff、前端 Vitest 342/342、TypeScript production build、PowerShell parser、Compose config、现行文档链接与 `git diff --check` 通过；定向 detect-secrets 为 0 findings。对 retained 容器执行带确认的提前删除请求被 7 天门正确拒绝，容器仍存在且保持 stopped。
+
+### 15.8 SX1 远程交付证据（2026-08-26）
+
+- 实施提交：`1185b63ef6784d08046ca4244ee8ce751b549c39`（`feat: pin and manage local SearXNG`），已推送至 `origin/main`。
+- 匹配的远程 [CI #32877392793](https://github.com/2002yy/study-agent/actions/runs/32877392793) 以同一 head SHA 完成，结论为 `success`；pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 test/build、browser Golden Journeys 与 real-stack browser gates 均通过。
+- 交付判断：**SX1 GO / COMPLETE。** 本节证据回写提交自身仍须取得匹配 CI；在该门闭合前不声称最终仓库同步完成，也不启动 RQ1-A 实施。
+- 下一唯一切片：**RQ1-A 语义止血**——禁止零正文读取候选进入 `validated_tool_evidence`，修正“本次使用的来源”和 `3/N` UI，legacy 显示 unknown/candidate，并阻止明确研究意图落入 snippet-only 强结论路径。
