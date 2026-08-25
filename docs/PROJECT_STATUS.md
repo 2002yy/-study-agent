@@ -950,5 +950,5 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 - 实施提交：`1185b63ef6784d08046ca4244ee8ce751b549c39`（`feat: pin and manage local SearXNG`），已推送至 `origin/main`。
 - 匹配的远程 [CI #32877392793](https://github.com/2002yy/study-agent/actions/runs/32877392793) 以同一 head SHA 完成，结论为 `success`；pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 test/build、browser Golden Journeys 与 real-stack browser gates 均通过。
-- 交付判断：**SX1 GO / COMPLETE。** 本节证据回写提交自身仍须取得匹配 CI；在该门闭合前不声称最终仓库同步完成，也不启动 RQ1-A 实施。
+- 交付判断：**SX1 GO / COMPLETE。** 实施及其权威证据均已交付；后续提交/CI 的精确状态以 Git 与 GitHub Actions 为准，不在本文件建立自引用式追记链。
 - 下一唯一切片：**RQ1-A 语义止血**——禁止零正文读取候选进入 `validated_tool_evidence`，修正“本次使用的来源”和 `3/N` UI，legacy 显示 unknown/candidate，并阻止明确研究意图落入 snippet-only 强结论路径。
