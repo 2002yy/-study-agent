@@ -361,6 +361,8 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 
 联网研究真实性与可用性已于 2026-08-12 完成自动验收收口：本机 Docker Desktop 数据盘已迁到 `D:\DockerDesktopData`，本地 `study-agent-searxng` 仅绑定 `127.0.0.1:8080`，SearXNG 为首选搜索源，Bing RSS 与 DuckDuckGo HTML 仅作顺序降级；DuckDuckGo challenge、HTTP/连接/超时以及总搜索预算耗尽均结构化记录，失败/空结果不会标记 `found`，也不会进入模型证据。普通联网问答绕过慢速 LLM 工具规划器，GitHub/PR 专用研究仍保留工具规划；provider 顺序降级共用 8 秒搜索预算，研究总预算维持 12 秒，按请求隔离执行器，连续 5 次超时后第 6 次仍可按预算终止。ResearchRun 只有至少一个带标题和公开 URL 的搜索结果，或搜索已发现 URL 的成功正文读取，才可进入 `found`；失败时首个可见答复明确写明“联网搜索失败，本回答未使用联网来源”，成功时先流出最多 3 个可点击来源，再等待模型综合正文。自动证据：3 个普通查询各返回 5 条来源，分别 3.95 / 1.30 / 2.06 秒；真实 `/chat/stream` 请求在 4.33 秒到达 `completed/found`、持久化 5 个来源，并在 4.34 秒输出首个可见来源结果。全量 pytest 1036/1036、ruff、detect-secrets 0 findings、相关 mypy、前端 Vitest 319/319 与 production build 已通过；提交 `2fac9d4` 的完整远程 CI #31618437026 已实际运行并全绿。
 
+> **2026-08-26 解释修订：**上面的历史证据只证明 provider、预算和基础 `found` 行为，不证明普通 `chat_tool_loop` 已读取正文或具备研究级结论质量。真实“请联网研究：opus5”运行只执行 1 次查询、取得 5 个候选（约 3 个独立内容家族）、正文读取 0 次、无官方一手来源，却把候选标为 `validated_tool_evidence` 并生成确定性价格/能力结论；UI 又只展示前 3 条。因此 G9/G13 的研究级真值门已重开为 RQ1，完整冻结合同与路线见第 15 节。
+
 ### 9.1 全项目文档治理 — COMPLETE
 
 - 扫描 130 份受版本控制的 Markdown / text 文档；区分当前 owner、稳定合同、专项运行文档、历史 archive、changelog、运行内容与测试夹具；
@@ -401,18 +403,18 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 | G6 恢复卡 | COMPLETE | 新用户入口、durable Resume、研究 partial/interrupted 的继续/重试/放弃均已有正式状态来源。 |
 | G7 UI 聚焦 | COMPLETE | 一级入口已收敛，诊断/来源/设置等进入次级 surface，普通状态不暴露低层 record/provider 参数。 |
 | G8 窄屏可用 | COMPLETE (automation) / MANUAL DEFERRED | 自动化窄屏、三浏览器与 real-stack 门禁已通过；Android 导出/部署未就绪，实体手机记录表仍未填写。 |
-| G9 时效检索 | COMPLETE | 稳定 SearXNG 首选源、结构化 provider 失败、真假 `found`、8/12/20 秒预算和连续超时隔离均已有真实运行与 CI 证据。 |
+| G9 时效检索 | PARTIAL / RQ1 REOPENED | SearXNG provider 可用性、结构化失败和快速查询预算已有证据；但明确研究意图仍可落入单查询、零正文读取的 `chat_tool_loop`，不能以候选摘要支撑研究级强结论。 |
 | G10 ResearchRun | COMPLETE | follow-up child lineage、服务端安全 seed、本地候选、active Run steering、重新读取门、root aggregate、幂等与四态 EvidenceTrail 已实现；`dd93fda` 的 CI #32761262084 attempt 2 全门禁通过。 |
 | G11 TaskContract | COMPLETE | task/source/closure 合同在角色、RAG、联网和记忆前确定，并持久化到 route snapshot。 |
 | G12 预回答与取消 | COMPLETE | ChatTurn reservation + operation CAS、ResearchRun/本地 RAG/模型生成 cooperative checkpoints、durable cancelled/interrupted、server single writer、归档队列和三 viewport 真实栈时序证据均已交付。RagWriteRun 是独立写入生命周期，不属于本次只读 turn retrieval 取消合同。 |
-| G13 证据/消息完整性 | COMPLETE | adopted/candidate/read/rejected 分层，联网与本地来源分开；空、失败和无效 URL 不进入引用或模型证据。 |
+| G13 证据/消息完整性 | PARTIAL / RQ1 REOPENED | adopted/candidate/read/rejected 模型已存在，但真实运行发现零读取候选被标为 `validated_tool_evidence`，UI“本次使用的来源”与实际 candidate-only 证据不一致；历史记录必须显示 unknown/candidate，不得伪造已读。 |
 | G14 导入与来源范围 | COMPLETE | 长期资料库之外，当前会话临时附件已具备每文件状态/重试、thread 隔离、ready-only 召回、即时删除、归档成功后清理、幂等转正、文本 embedding fail-closed 和默认关闭的 vision 授权；实现至 `c761052`，交付记录 `1a471d4`。 |
 | G15 会话转换 | COMPLETE (automation) / MANUAL VISUAL PENDING | 新建、切换、归档共用一个只读派生 transition guard；覆盖 chat generation、Memory preview/closure、partial ResearchRun 与 RagWrite，逐项说明停止、保留、继续或放弃的真实效果。归档只确认一次；从抽屉触发时先关闭来源抽屉，避免双 `aria-modal`。RagWrite 仍没有服务端取消能力，守卫明确说明其继续到真实终态而不冒充已取消。完整远程浏览器与 real-stack 矩阵已通过。 |
 | G16 外发数据与隐私 | COMPLETE (automation) | evaluator 语义复核与外部 embedding 均 fail-closed，ChatTurn 逐调用记录真实 purpose/provider/categories/count/result，legacy 显示 unknown；G14 vision 使用独立默认关闭授权；跨会话记忆具备 off/ask/auto、会话级 CAS 同意/撤销和三态审计。止血、附件授权与 memory ask 均已交付 main。 |
 | G17 首次使用/可访问性 | PARTIAL (P1, Enter 已收口 `f297dc9`) | 全局 API/操作错误已有 `alert`，部分故障用 polite `status`；API/部分故障提供重试、设置、详情，不能安全重放的操作错误直接显示完整错误并提供设置、关闭。转换确认复用 focus trap/Escape/焦点返回，首次外发说明不阻塞聊天；移动端真实栈已验证输入区不再遮挡证据操作。Enter/Shift+Enter 已可通过设置切换为 Ctrl+Enter 发送（`enter_to_send`，`f297dc9`，CI #32648090478）；视觉、对比度、真实屏幕阅读器和实体手机未人工复核。 |
 | G18 React/Streamlit 迁移 | COMPLETE | React 19 + Testing Library 已完成，Streamlit 入口、`src/ui` 与依赖已移除。 |
 
-当前未发现传统远程利用或数据破坏型 P0。G12、DR1、G14、G16 自动化切片、G17 Enter 配置、G4 与 G10 一般 follow-up 继承均已交付。剩余 P1 是 G17 真实屏幕阅读器、视觉对比度和实体手机人工验收；它只能由真实设备/辅助技术证据关闭，不得由自动化冒充。当前没有另一项已授权且可独立实施的产品缺口。
+当前未发现传统远程利用或数据破坏型 P0。G12、DR1、G14、G16 自动化切片、G17 Enter 配置、G4 与 G10 一般 follow-up 继承均已交付。2026-08-26 新增两个已授权窄门：SX1 固定 SearXNG 运行基线，以及 RQ1 修复明确研究意图下的候选/已读语义、证据覆盖和分析质量。G17 真实屏幕阅读器、视觉对比度和实体手机仍只能由真实设备/辅助技术证据关闭，不得由自动化冒充；其正式 LAN 验收排在 RQ1 GO 之后。
 
 ### 9.5 Learner Model UI 产品决策 — STANDALONE NO-GO
 
@@ -439,10 +441,12 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 2. ~~DR1 Deep Research（历史提交标签 `G18 DeepResearch`）~~ — 已交付；扩展 WebLookupRun，不新增第二 run owner（第 11 节）。
 3. ~~G14 临时附件、G17 Enter 配置、G16 会话记忆 ask、G4 历史分页/搜索~~ — 均已交付 main 并取得完整 CI。
 4. ~~G10 follow-up inheritance Grill + 实施~~ — 15 项决策、schema v23、服务端 lineage/重新验证和 UI 真值已交付；`dd93fda` 的 CI #32761262084 attempt 2 全绿（第 14 节）。
-5. **唯一下一推进门：G17 人工可访问性验收。** 对比度、真实屏幕阅读器与实体手机只能由人工证据关闭；设备/部署未就绪时保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`，不另起自动化替代真值。
-6. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究连续性缺口，也不得创建第二套真值。
+5. **SX1 最小 SearXNG 可复现基线。** 固定 image digest，纳入最小 Compose/config，保留本机 secret/proxy layering，并以 `18080` candidate、真实搜索和可回滚切换闭合；不在此步开放 LAN。
+6. **RQ1 有界研究真值与质量修复。** 先止血 candidate-only 语义和 UI，再实现明确研究意图的规划、正文读取、证据家族、主张绑定与双门验收；RQ1 未 GO 时不得把 LAN 结果写成正式 G17 GO。
+7. **G17 人工可访问性与显式 LAN 验收。** 只在 SX1/RQ1 GO 后进入；对比度、真实屏幕阅读器与实体手机仍由人工证据关闭。当前 WLAN 为 Public 且 LAN controller 尚未实现，保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
+8. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究真实性缺口，也不得创建第二套真值。
 
-当前阶段：**G10 实现基线 `dd93fda` 的 CI #32761262084 attempt 2 全绿，已完成远程交付。唯一下一推进门是 G17 人工可访问性验收；Learner Model 独立 UI NO-GO，GraphRAG、长期画像写回与 Android 产品化未启动。**
+当前阶段：**远程实现基线 `83961ef` 与 `origin/main` 同步；SX1 已完成本地实现和真实 candidate 切换，尚未提交/取得远程 CI。RQ1 与 G17-LAN 均保持 NO-GO；SX1 交付门闭合前不启动 RQ1。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -541,7 +545,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **G16 local implementation/stop gate：GO。** 窄修复和本地全量证据完整；没有发现禁止数据到达测试 provider、legacy 假 false 或本地索引回归。
 - **G16 delivery：GO / COMPLETE。** 实现 `2662cd3` 与 legacy Golden Journey 验收修正 `a3f00de` 已快进进入 `main`；完整 CI #32499954659 全绿。
 - **G12 implementation：GO / COMPLETE。** reservation、operation CAS、retrieval checkpoints、durable terminal truth、200 ms UI 自动观测和慢检索真实栈证据已交付。
-- **本节历史下一步：CLOSED。** G10 follow-up inheritance 已完成合同与本地实施；当前路线以 9.7 的 G17 人工门为准。
+- **本节历史下一步：CLOSED。** G10 follow-up inheritance 已完成合同与本地实施；2026-08-26 的当前路线以 15.5 为准。
 
 ### 10.8 G16 窄修复实测证据
 
@@ -824,4 +828,120 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - 实现提交 `dd93fdabaa6f5f2637ef4f03604f43f91a1725c4` 已推送 `main`；推送后本地与 `origin/main` 为 `0/0`。
 - [CI #32761262084 attempt 2](https://github.com/2002yy/study-agent/actions/runs/32761262084) 完整全绿：pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy baseline、前端测试/构建、browser Golden Journeys 与 real-stack browser gates 均实际运行并通过。
 - attempt 1 仅在 narrow Chromium 的既有 complex-content 旅程出现一次 `linkRectCount=0`，其余 52/53 Golden Journeys 与本批 G10 evidence 旅程均通过；未改代码直接重跑后完整通过，因此记录为未复现的浏览器时序偶发，不用无依据产品补丁掩盖。
-- **G10 最终结论：GO / COMPLETE。** 唯一下一推进门仍为 G17 人工可访问性验收；设备或辅助技术证据不可用时保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
+- **G10 最终结论：GO / COMPLETE。** 截至该次交付，下一推进门曾为 G17 人工可访问性验收；2026-08-26 的 RQ1 真实反例与新路线见第 15 节。
+
+## 15. SX1 / RQ1 / G17-LAN 冻结合同与新路线（2026-08-26 Grill，决策 1–58）
+
+### 15.1 触发本轮复审的真实证据
+
+- 实测 Run `web_lookup_1769bff566594e7d91bbac20f389b687` 的用户问题为“请联网研究：opus5”，但走的是 `standard / chat_tool_loop`，只执行一次 `web_search(max_results=5)`。
+- 5 个候选均来自中文二手页面，含跨站转载和同源内容；没有 Anthropic 官方来源，实际独立内容家族约 3 个。
+- `read_summary` 为 `attempted=0 / successful=0`，候选却全部以 `validated_tool_evidence` 进入综合；最终回答对发布日期、价格和能力给出确定性判断。
+- 后端即时预览和前端 EvidenceTrail 另有前三条展示上限。因此用户看到的“3”既是 UI 截断，也掩盖了实际只有 5 个候选、零正文读取、来源不独立的问题。
+- 结论：这不是单纯的展示数量缺陷。当前快速路径违反 candidate/read truth、研究意图触发和强结论证据门，正式研究质量判定为 `NO-GO`。
+
+### 15.2 SX1 与 G17-LAN 冻结决策（1–29）
+
+1. 仓库纳入最小 SearXNG Compose 与安全配置基线，镜像固定到 digest；公开拓扑归仓库，机器 secret/proxy 使用 ignored layering。
+2. SearXNG secret 保存在 ignored 本地文件；变更前同目录时间戳备份，不自动轮换。
+3. 禁止自动更新镜像；升级必须显式执行备份、candidate 测试并提交新 digest。
+4. candidate 先在 `127.0.0.1:18080` 验证，再切换 `8080`；旧容器停止保留 7 天以便回滚。
+5. 基线只包含单个 SearXNG，不引入 Valkey、公共 limiter 或 image proxy。
+6. LAN 验收使用 production build 和绑定选定私有 IPv4 的专用 gateway；后端与 SearXNG 保持 loopback；长期 API token 只由 gateway 持有，绝不进入手机。
+7. 只允许 Windows `Private` 网络，并为精确手机 IP 创建临时防火墙规则。
+8. LAN session 默认 90 分钟，只允许一次显式延长；Ctrl+C、超时和异常均触发清理。
+9. 原“真实数据库 + 专用 G17 thread”提案已由决策 26 替代；不得把 acceptance 写入生产学习真值。
+10. 正式证据包含 machine-readable manifest 与人工 P/F/N/A；实体手机、真实屏幕阅读器和视觉对比度记录齐全前，G17 不得 GO。
+11. 可信 Private LAN 上只使用 HTTP，但必须显式提示明文风险；Public 网络 fail-closed，不引入 HTTPS/tunnel。
+12. 防火墙和会话绑定精确手机 IP；地址变化立即失效并要求重新授权，不回退子网范围。
+13. 防火墙规则以 acceptance session 命名；正常退出清理，每次启动先清理本工具遗留规则，监听器身份不符即失败关闭。
+14. raw JSON 可在 ignored artifact 中保存精确私有 IP；可提交 Markdown 必须清除 IP、SSID、MAC、token、secret 和 proxy。
+15. Private 网络、物理适配器/IP、防火墙、production build、gateway 或 backend identity 任一失败均 fail-closed。SearXNG 上游 CAPTCHA/限流可降级，但搜索验收项为 BLOCKED/FAIL，G17 不能 GO。
+16. 只通过窄权限 elevated firewall watchdog 触发一次 UAC；应用、gateway 和 backend 保持非管理员运行。
+17. 精确 IP + 5 分钟单次随机码交换 `HttpOnly; SameSite=Strict` session cookie；随机码不进入 manifest。
+18. 新建独立 `start-lan-acceptance.bat`；正常一键启动始终保持 loopback-only。
+19. `docs/G17_ACCESSIBILITY_ACCEPTANCE.md` 负责流程与脱敏运行记录，并引用现有 `MOBILE_ACCEPTANCE_D4D.md`；`PROJECT_STATUS.md` 仍是唯一 GO/NO-GO owner。
+20. 停止 LAN 不自动归档或删除 durable session；验收快照按 artifact policy 保留，不合并回生产。
+21. 只接受物理 Private Wi-Fi/Ethernet RFC1918 地址；排除 Hyper-V、Docker、WSL、VPN 和 loopback。当前 WLAN 为 Public，启动条件不满足；脚本不得自动修改网络类别。
+22. “重新授权同一手机”生成新随机码并使旧 cookie/session 失效，不延长原 TTL；QR 只在本机内存生成，不调用外部服务、不保存含码图片。
+23. health/config/JSON/backend-connectivity 等确定性 candidate 故障自动回滚；第三方 CAPTCHA/限流不触发回滚循环。切换前至少一次有效搜索，旧容器 7 天后仍需显式删除。
+24. raw artifacts 位于 ignored `artifacts/g17/<session-id>/`，默认保留 30 天；清理前预览精确路径、大小和脱敏记录存在性，并要求确认。
+25. 如果无法证明 token 未到手机、精确物理 Private 单设备范围、TTL/listener/firewall 清理，或必须暴露 backend/SearXNG，则 LAN 保持 NO-GO；USB 转发、屏幕镜像或正式部署必须另行 Grill。
+26. 使用 SQLite online backup，并复制本轮所需 RAG/附件目录到时间戳 acceptance snapshot；专用 acceptance backend 只操作快照，永不合并回生产。
+27. 正式证据要求 tracked worktree clean、build SHA 等于 `HEAD`，manifest 记录 SHA 与 frontend artifact hash；dirty run 只能是 `NON-FORMAL / Decision: NO-GO`。allowlisted 无关 untracked 文件不阻塞。
+28. gateway 正式预检必须覆盖 SSE 不缓冲、断连传播、取消 durable 终态、JSON、multipart、错误 header/status、大响应和超时；任一失败即正式 LAN NO-GO。
+29. LAN operation/session 只有一个 controller owner；只停止它启动的 acceptance backend/gateway/firewall，不影响既有 desktop/SearXNG。睡眠、网络/profile/IP 或 watchdog 丢失时持久化 `interrupted`，关闭 listener、移除规则、保留 snapshot；恢复必须新建授权 session。
+
+### 15.3 RQ1 有界研究质量冻结决策（30–58）
+
+30. “研究/调查/验证/比较/综合分析”等明确意图自动进入有界研究层；快速事实查询保留快速路径，完整 DR1 深研仍是独立层。
+31. 强事实原则上至少需要 1 个已读取一手来源和 2 个独立已读取佐证；无法取得一手来源时明确降级，不输出确定性结论。
+32. 默认规划 3–5 个查询角度、最多 20 个候选、读取 5–8 页、约 40k 字符，45 秒软时限；范围按问题面与独立证据计算，不按 URL 数量凑数。
+33. 回答至少包含结论、研究范围、逐项判断、证据、冲突、未知/限制、置信度和实际含义；重要主张可追溯到已读来源。
+34. UI 显示查询/候选/已读/一手/独立佐证/淘汰计数；前三条只能作为“3/N”折叠预览，candidate/read/cited/failed 必须分开。“本次使用的来源”只用于已读且参与结论的页面。
+35. 来源可信度按主张类型和证据角色判断：官方适合产品事实，可复现实测适合能力比较，独立报道适合事件佐证，社区内容只作线索/体验。
+36. 通过 canonical URL、标题/正文指纹、原始出处和引用链识别内容家族；同源转载只算一次独立证据，副本只作访问备份。
+37. 冲突按证据角色、日期、版本和方法解释；关键冲突无法解决时降低置信度并禁止确定性结论。
+38. 回答标注截至日期；价格、可用性、当前产品线等易变事实须本轮实时读取，基准结果必须绑定版本、日期和方法。
+39. 证据不足时返回部分研究，列明已确认、未确认、冲突和失败原因；不得用搜索摘要补足强结论。
+40. 双门验收：确定性测试覆盖真值链路；至少 12 个真实联网案例覆盖多类来源与失败情形，真实性硬门全部通过且至少 10/12 获得人工“范围充分、分析有实质增量”。
+41. 顺序冻结为 SX1 最小可复现基线 → RQ1 研究质量 → G17-LAN；禁止把三者合成大切片。
+42. RQ1 是独立窄门，由本文件持有 GO/NO-GO；RQ1 未 GO 时 LAN 只能非正式调试，不能获得正式 G17 GO。
+43. 规划、每次搜索/读取、去重、综合和补缺均设 cooperative checkpoint；ChatTurn 持有 `cancelled/interrupted` 终态，ResearchRun 只保留部分证据，不成为第二 owner，也不自动生成部分答案。
+44. 45 秒后停止发起新查询/读取；在途单次调用受独立 timeout 约束，整轮 60 秒硬上限。超限只用已读证据返回部分研究，不能降级引用摘要。
+45. 每次逻辑搜索记录授权、最小化查询、计划引擎和实际来源；网页读取与外部答案生成分别审计。无法证明的底层引擎显示 unknown，不伪造逐调用事实。
+46. 真实案例的预期事实、必需来源、冲突点和评分规则不得进入研究提示词；独立评估器和人工在运行后评分，并保留 holdout。
+47. 查询由需要证明的主张/问题面产生；首轮后只允许一次由明确证据缺口驱动的补充规划，并记录追加原因。
+48. 官方身份通过可信域名注册表、交叉链接、canonical、发布者身份等验证；品牌词或搜索排名不能证明官方，证据不足显示“疑似官方/未验证”。
+49. 首切只允许受限静态 HTTP(S) 读取：每次解析/重定向阻断私网和保留地址，限制大小、类型、解压比例和时间，剥离脚本/隐藏内容，并把网页指令视为不可信数据；动态浏览器另行安全切片。
+50. 重要结论拆为原子主张，绑定短证据片段、来源角色和读取时间；独立蕴含检查失败时删除、降级为推断或标记未知。UI 可展开有限上下文。
+51. 有界研究默认约 1500–3000 中文字符，但以内容覆盖为硬门：至少三个相关分析维度，并包含证据、反证/局限、冲突、未知和实际含义；不以重复内容凑字数。
+52. 回答语言跟随用户，搜索语言跟随证据所在地；国际主题同时覆盖英文原始资料和中文资料，中国本地主题优先中文一手来源，翻译主张仍链接原文。
+53. 程序拥有预算、抓取、去重和状态机；模型阶段化负责规划、证据提取和综合；引用验证独立执行。可复用同一已授权模型，但输入隔离、逐调用审计，综合阶段只见清洗后证据。
+54. 只在缺一手来源、独立证据不足、关键冲突未解释或问题面无证据时触发唯一一次补充搜索；不得仅因数量不足盲目扩展。
+55. 长期只保存 URL、元数据、读取时间、内容哈希、来源角色和有限证据片段；完整响应仅在 ignored 临时缓存保留 24 小时，不进入 Git、长期记忆或 RAG。
+56. 缓存按 canonical URL、内容哈希、读取策略版本和时间建立，仅用于性能；易变事实必须重验。网页不得自动进入用户长期资料，只有用户显式“采纳为资料”才可写入。
+57. 旧记录不伪造读取也不改写为 rejected；缺少正文读取证据时派生显示 `legacy candidate / 历史验证状态未知`。
+58. GO 要求确定性真值/安全测试全过、12 个真实案例留存脱敏清单、真实性 12/12、质量至少 10/12、无摘要冒充/转载冒充/无绑定强结论/评估泄漏；取消 UI 200ms 确认，慢调用记录实测终止上限，逐调用授权审计与 45/60 秒预算可重复验证。任一真实性、安全或隐私硬门失败均为 NO-GO。
+
+### 15.4 最终矛盾复审
+
+- **DR1 与 RQ1：CLOSED。** DR1 保留 3–10 分钟、3–5 轮、10–20 页的完整深研；RQ1 是明确研究意图的 45/60 秒有界层；旧 12/20 秒路径只承担快速查询。三层预算和交付形态互不冒充。
+- **Owner：CLOSED。** 两个研究层都扩展现有 WebLookupRun/ResearchRun 证据承载，ChatTurn/operation CAS 继续拥有 turn 终态；不新增第二 run truth。
+- **取消与部分证据：CLOSED。** DR1 和 RQ1 都可保留证据链；用户取消不自动生成部分答案，基础设施中断为 `interrupted`，与 G12 一致。
+- **来源门与无官方主题：CLOSED。** 一手来源门在可验证一手材料存在时是硬门；不存在或不可访问时由决策 39 诚实降级，不以二手数量补齐。
+- **时间与读取预算：CLOSED。** 5–8 次读取是上限范围，不保证凑满；45 秒停止扩展、60 秒硬收口优先。未达到证据门时返回部分研究。
+- **存储与可审计性：CLOSED。** 有限短片段 + 内容哈希支持引用审计，完整网页仅临时保留；不把第三方网页自动注入长期 RAG。
+- **隐私审计：CLOSED。** 应用、SearXNG engine provenance、网页读取和模型调用分层记录；底层事实不可见时为 unknown，不制造完整性假象。
+- **G17 命名：CLOSED。** G17 继续只指首次使用/可访问性；历史 `G18 DeepResearch` 统一称 DR1；新质量门称 RQ1，SearXNG 可复现基线称 SX1。
+- **历史 COMPLETE：REVISED, NOT ERASED。** 2026-08-12 的 CI 仍证明当时 provider、预算和基础 `found` 行为；它不再被解释为研究级正文证据/分析质量已完成。G9/G13 因真实反例重开为 PARTIAL。
+- **Grill coverage：COMPLETE。** 1–58 已覆盖范围、非目标、身份、状态、取消、恢复、隐私、缓存、失败、兼容、UI 和验收，不剩需要实现者自行决定的高影响产品分叉。
+
+### 15.5 冻结实施路线
+
+1. **SX1（下一唯一代码切片）：**纳入固定 digest 的最小 Compose/config 与 ignored secret layering；实现备份、`18080` candidate、有效搜索、切换、确定性回滚和 7 天保留；正常启动仍只复用 loopback SearXNG，不开放 LAN。
+2. **RQ1-A 语义止血：**禁止零正文读取候选成为 `validated_tool_evidence`；修正“本次使用的来源”和 `3/N` UI；legacy 显示 unknown/candidate；明确研究意图不再落入 snippet-only 强结论路径。
+3. **RQ1-B 有界研究：**实现问题面规划、多语言查询、安全读取、内容家族去重、来源角色、一次缺口补搜、原子主张/证据绑定、结构化综合和 45/60 秒取消/预算。
+4. **RQ1-C 双门验收：**确定性测试 + 12 个无泄漏真实案例 + 慢搜索/慢读取取消实测 + 逐调用审计；全部硬门闭合后才能将 RQ1 标为 GO。
+5. **G17-LAN：**在 production snapshot、单设备 Private LAN、gateway token isolation、watchdog/firewall cleanup 和 raw/sanitized artifact 合同下实现；最后由实体手机、真实屏幕阅读器与对比度人工记录决定 G17 GO/NO-GO。
+6. **明确延期：**动态浏览器读取、HTTPS/tunnel、公共或子网 LAN、自动镜像升级、Valkey/公共限流、USB/镜像替代验收、Android 产品化、GraphRAG 和长期画像写回均不进入上述切片。
+
+### 15.6 当前门禁结论
+
+- **Grill：GO / COMPLETE。** 可以按 15.5 开始实现，无需再补产品选择。
+- **SX1 implementation：LOCAL GO / DELIVERY PENDING。** 固定 digest、仓库 Compose/config、ignored secret/proxy、备份、`18080` candidate、切换、回滚路径和 retained-container guard 已实现并完成真实切换；尚未提交、推送或取得远程 CI。
+- **RQ1：NO-GO / IMPLEMENTATION REQUIRED。** 真实 `opus5` Run 已证明 snippet-only 强结论与 UI 真值缺口。
+- **G17-LAN：BLOCKED / AUDIT REQUIRED / Decision: NO-GO。** 当前 WLAN 为 Public，controller/gateway/snapshot/firewall 证据尚不存在；只能在 SX1 与 RQ1 GO 后推进正式验收。
+- **当前唯一允许下一步：闭合 SX1 测试与远程交付门，不夹带 RQ1 或 LAN。**
+
+### 15.7 SX1 本地实现证据（2026-08-26）
+
+- 新增 `infra/searxng/compose.yml`，只包含单个 SearXNG 服务，固定 `docker.io/searxng/searxng@sha256:c2dc2d9e6b910653e8628361c23443222490e4cabbb9e02667b7847143db843b`；host port 严格绑定 `127.0.0.1`，没有 Valkey、公共 limiter 或 image proxy。
+- `infra/searxng/settings.yml` 启用 HTML/JSON，关闭 debug/metrics/limiter/public-instance/image-proxy；secret 与既有容器代理被写入 ignored `.env.local`，已有 secret 不自动轮换。
+- 迁移前将仓库外设置备份为 `D:\DockerDesktopData\searxng\settings.yml.backup-20260825T163030Z`；备份存在性已复核，原文件未被覆盖。
+- 显式 upgrade 在 `127.0.0.1:18080` 创建隔离 candidate；exact image/config/loopback/secret 检查和 `/healthz` 通过，真实查询返回 10 条有效标题/URL 后才允许切换。
+- 新 active `study-agent-searxng` 已在 `127.0.0.1:8080` 运行固定 digest，配置 mount 为仓库 `settings.yml:ro`，label 为 `sx1`；切换后的独立真实搜索再次返回 10 条结果。
+- 旧 `searxng/searxng:latest` 容器已停止并保留为 `study-agent-searxng-retained-20260825T163036Z`；candidate 容器、网络和临时 volume 已删除。retained 删除要求精确名称、显式 `-ConfirmRemoval` 且满 7 天，脚本不提供提前删除旁路。
+- 后端 provider probe 曾返回 `ready / valid_results_returned`；随后一键启动复验正确显示 SearXNG service `ready`，同时因 brave/duckduckgo/startpage/wikipedia 等上游超时将检索能力显示为 `degraded`。该波动没有触发镜像更新或错误回滚，符合第三方降级边界。
+- 正常 `start-study-agent.ps1 -NoBrowser` 成功复用固定版本，显示后端、前端、SearXNG、检索状态和人工检查清单；普通启动不执行 pull/update。
+- 门禁：SX1/搜索相关 pytest 24/24、全量后端 1141/1141、全量 Ruff、前端 Vitest 342/342、TypeScript production build、PowerShell parser、Compose config、现行文档链接与 `git diff --check` 通过；定向 detect-secrets 为 0 findings。对 retained 容器执行带确认的提前删除请求被 7 天门正确拒绝，容器仍存在且保持 stopped。

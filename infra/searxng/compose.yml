@@ -1,0 +1,36 @@
+name: study-agent-searxng
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng@sha256:c2dc2d9e6b910653e8628361c23443222490e4cabbb9e02667b7847143db843b
+    container_name: ${SEARXNG_CONTAINER_NAME:-study-agent-searxng}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SEARXNG_HOST_PORT:-8080}:8080"
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env.local}
+      SEARXNG_BASE_URL: ${SEARXNG_PUBLIC_URL:-http://127.0.0.1:8080/}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-data:/var/cache/searxng
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    labels:
+      com.study-agent.component: searxng
+      com.study-agent.config-version: sx1
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+
+volumes:
+  searxng-data:
+    name: ${SEARXNG_DATA_VOLUME:-study-agent-searxng-data}

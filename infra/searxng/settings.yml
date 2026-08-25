@@ -1,0 +1,23 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Study Agent SearXNG"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  # Loopback exposure is enforced by the Compose host-port binding. The
+  # container process must listen on its container interface for NAT to work.
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  # SEARXNG_SECRET from ignored .env.local overrides this non-production value.
+  secret_key: "overridden-by-SEARXNG_SECRET"

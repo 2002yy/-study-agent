@@ -39,6 +39,35 @@ SQLite durable entities
 
 详细 owner 边界见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
+## 一键启动与人工验收
+
+Windows 下可直接双击 [`tools/start-study-agent.bat`](tools/start-study-agent.bat)，或在仓库根目录运行：
+
+```powershell
+.\tools\start-study-agent.bat
+```
+
+启动器会：
+
+1. 读取 `.env`，在首次运行时创建 `.venv` 并按需安装前后端依赖；
+2. 启动 Docker Desktop（若需要），并通过仓库固定 digest 的 Compose 基线复用/恢复仅绑定 `127.0.0.1:8080` 的 `study-agent-searxng`；
+3. 启动 FastAPI `127.0.0.1:8000` 与 React/Vite `127.0.0.1:5173`；
+4. 验证服务身份，显示后端、前端、SearXNG 和真实检索探针状态；
+5. 输出桌面、窄屏、屏幕阅读器、对比度和实体手机人工检查清单，然后打开浏览器。
+
+如果 Docker/SearXNG 暂时不可用，学习工作台仍会启动并明确显示联网研究降级；如果 `8080` 被非 SearXNG 服务占用，启动器会 fail-closed。普通启动不会更新或拉取镜像；首次迁移或未来 digest 升级必须显式运行 `tools\upgrade-searxng.bat`，由 `18080` candidate 通过健康与真实搜索后再切换。实体手机验收需要另行部署手机可达地址，并按 [`docs/MOBILE_ACCEPTANCE_D4D.md`](docs/MOBILE_ACCEPTANCE_D4D.md) 留下人工记录；本机一键启动不会冒充这项证据。
+
+可选参数：
+
+```powershell
+.\tools\start-study-agent.bat -Install   # 强制刷新依赖
+.\tools\start-study-agent.bat -NoBrowser # 启动但不自动打开浏览器
+.\tools\manage-searxng.bat -Action Status -ProbeSearch # 查看固定版本与真实搜索状态
+.\tools\upgrade-searxng.bat # 显式 candidate 升级；不会自动删除旧容器
+```
+
+SearXNG 的仓库配置、ignored secret/proxy layering、备份、回滚与 7 天 retained-container 清理流程见 [`docs/WEB_SEARCH_SETUP.md`](docs/WEB_SEARCH_SETUP.md)。
+
 ## 已完成的核心学习闭环
 
 P2-D 源码学习与验证、P2-E 自动化验收均已进入 `main`。核心原则：
@@ -99,4 +128,4 @@ P2-D 源码学习与验证、P2-E 自动化验收均已进入 `main`。核心原
 
 ## 当前开发状态
 
-P2-D 与 P2-E 自动化批次已经完成；实体手机验收因 Android 导出/部署配置未就绪而延期。Learner Model 目前只有只读派生 API，没有 UI 或长期画像写回。联网研究已完成真实性、来源展示与 20 秒首个可见答复预算的自动验收。实时基线、证据和下一切片只看 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
+P2-D 与 P2-E 自动化批次已经完成；实体手机、真实屏幕阅读器与视觉对比度仍待人工验收。Learner Model 目前只有只读派生 API，没有 UI 或长期画像写回。联网 provider 与快速查询预算已有自动证据，但 2026-08-26 实测发现明确研究意图仍可能落入零正文读取的摘要路径；当前按 SX1 → RQ1 → G17-LAN 顺序修复。实时基线、证据和下一切片只看 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。

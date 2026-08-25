@@ -50,9 +50,10 @@ WEB_ENABLE_DUCKDUCKGO=true
 WEB_TOOL_TOTAL_BUDGET_SECONDS=12
 ```
 
-The search budget is shared across sequential provider fallbacks. The whole research run must
-reach a terminal state within 12 seconds, and the chat path must show sources or an explicit
-“联网搜索失败，本回答未使用联网来源” response within 20 seconds.
+The search budget is shared across sequential provider fallbacks. These 12/20-second limits now
+describe the quick-query path only. Explicit “研究/调查/验证/比较” intent is being repaired under
+RQ1 as a separate 45/60-second bounded-research tier; current evidence and its NO-GO status remain
+owned by `PROJECT_STATUS.md`.
 
 ### NewsRun
 
@@ -136,7 +137,48 @@ NEWS_ENABLE_JINA_READER=true
 
 Jina fallback is attempted only after local extraction fails and, if enabled, after Firecrawl fallback fails.
 
-## 3. SearXNG Runtime Check
+## 3. Repository-managed SearXNG (SX1)
+
+The loopback instance is defined by:
+
+- `infra/searxng/compose.yml`: a single SearXNG service pinned to an image digest;
+- `infra/searxng/settings.yml`: JSON enabled, limiter/public-instance/image-proxy disabled;
+- ignored `infra/searxng/.env.local`: the machine secret and optional proxy values.
+
+Normal startup never pulls or updates an image. It can recreate the service only from the pinned
+image already present locally. Run the explicit upgrade entrypoint for first migration or after a
+reviewed digest change:
+
+```powershell
+.\tools\upgrade-searxng.bat
+```
+
+The upgrade performs these operations in order:
+
+1. create the ignored local env once; an existing secret is never rotated automatically;
+2. make a timestamped same-directory backup of the active `settings.yml`;
+3. pull only the digest already pinned in the tracked Compose file;
+4. start an isolated candidate on `127.0.0.1:18080`;
+5. require `/healthz`, exact image/config identity, and at least one valid real search;
+6. stop and rename the old active container, then start the candidate configuration on `8080`;
+7. automatically restore the old container if the new active fails deterministic identity/health checks;
+8. remove the temporary candidate while retaining the stopped old container for at least seven days.
+
+Inspect the active and retained containers without exposing the local secret:
+
+```powershell
+.\tools\manage-searxng.bat -Action Status -ProbeSearch
+.\tools\manage-searxng.bat -Action ListRetained
+```
+
+Retained containers are never deleted automatically. After seven days, deletion requires the
+exact timestamped name and `-ConfirmRemoval`; the command refuses early deletion. Upstream CAPTCHA,
+rate limiting, or engine timeouts can make the live search probe `degraded` without changing the
+fixed-image/config identity or triggering an update loop.
+
+This SX1 surface remains loopback-only. It does not implement the separately frozen G17 LAN mode.
+
+## 4. SearXNG Runtime Check
 
 Start SearXNG, then open:
 
@@ -167,7 +209,7 @@ The response distinguishes `enabled`, `configured`, service `reachable` and
 Fallback switches are reported as unprobed and never promoted to reachable without an actual
 search.
 
-## 4. Quick Firecrawl-compatible Check
+## 5. Quick Firecrawl-compatible Check
 
 The adapter assumes a Firecrawl-compatible scrape endpoint:
 
@@ -187,7 +229,7 @@ With a body similar to:
 
 The adapter reads `data.markdown`, `markdown`, `data.content`, or `content` from the JSON response.
 
-## 5. Safety Boundaries
+## 6. Safety Boundaries
 
 - SearXNG is disabled unless `NEWS_ENABLE_SEARXNG=true`.
 - Firecrawl is disabled unless `NEWS_ENABLE_FIRECRAWL_READER=true`.
@@ -197,7 +239,7 @@ The adapter reads `data.markdown`, `markdown`, `data.content`, or `content` from
 - `file://`, localhost, loopback, private IP, and unsafe targets are rejected before hosted reader calls.
 - Login/account/auth pages are filtered by domain policy before article reading.
 
-## 6. Test Commands
+## 7. Test Commands
 
 ```bash
 ruff check src/ tests/
@@ -207,7 +249,7 @@ pytest tests/test_web_query_normalizer.py tests/test_persistent_web_agent.py tes
 pytest tests/ -v
 ```
 
-## 7. Suggested Validation Queries
+## 8. Suggested Validation Queries
 
 Use these to compare source quality:
 

@@ -3,6 +3,7 @@
 !.env.example
 *.env
 *.env.*
+!infra/searxng/.env.local.example
 __pycache__/
 *.pyc
 *.tsbuildinfo
@@ -31,11 +32,13 @@ backups/
 output/
 *.bak
 *.bak-*
+*.backup-*
 *.tmp
 /chat/
 memory/
 !memory/.gitkeep
 .codex-pet-runs/
+infra/searxng/.env.local
 
 # packaging
 /release/
