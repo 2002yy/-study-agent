@@ -1596,4 +1596,4 @@ Shadow/Benchmark after
 
 ---
 
-**当前执行点：A0–B3 已由提交 `2afea76` 交付远程（CI success）；C1–C4 已本地通过、尚未提交（`docs/PROJECT_STATUS.md` 15.19–15.22），C4 生成诊断报告 `docs/research_quality/P0_SHADOW_REPORT.md`。以 `docs/PROJECT_STATUS.md` 顶部 Current Handoff 与最后一个 RQCE Stop report 为准，下一动作是提交本轮累计并触发远程 CI；RQCE-P1 需人工确认 P0 报告后方可开始。已完成 batch 不得重复执行。**
+**当前执行点：A0–B3 由 `2afea76`、C1–C4 由 `680c5a6` 交付远程（CI #32974470552 success）；C4 生成诊断报告 `docs/research_quality/P0_SHADOW_REPORT.md`。以 `docs/PROJECT_STATUS.md` 顶部 Current Handoff 与最后一个 RQCE Stop report 为准，下一动作是人工确认 P0 报告；RQCE-P1 需人工确认后方可开始，且须先解决 C4 定位的 3 个数据结构缺口。已完成 batch 不得重复执行。**

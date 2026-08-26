@@ -10,15 +10,14 @@
 
 > 新窗口 / 新 Agent 冷启动时先读本节，再按链接读取本轮所需合同；历史章节保留证据与决策时间语义，不拥有比本节更新的“当前下一步”。
 
-- **Current HEAD：**`1c29fa6`（`main`，远程同步）；foundation 代码 checkpoint 为 `2afea76`。
-- **Remote CI：**[#32955918199](https://github.com/2002yy/study-agent/actions/runs/32955918199) 已完成，结论 `success`（head SHA `2afea76`）；其后仅有 docs-only 提交。
+- **Current HEAD：**`680c5a6`（`main`，远程同步）；foundation 代码 checkpoint 为 `2afea76`，RQCE-P0-C1–C4 由 `680c5a6` 交付。
+- **Remote CI：**[#32974470552](https://github.com/2002yy/study-agent/actions/runs/32974470552) 已完成，结论 `success`（head SHA `680c5a6`）；其前 foundation checkpoint 为 [#32955918199](https://github.com/2002yy/study-agent/actions/runs/32955918199)（`2afea76`，`success`）。
 - **Current initiative：**Research Quality Claim Engine（RQCE）/ Shared Research Quality Engine；C1–C100 已冻结，服务 quick / bounded / deep 三个 preset，不新增第四条 research pipeline。
-- **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0-A0 contract audit；A1 contracts；A2 durable `research_context["claim_engine"]` state；A3 research trace；B1 evidence requirement policy；B2 deterministic Evidence Gate；B3 shadow stop decision。
-- **本地累计（未提交）：**RQCE-P0-C1（15.19）、C2（15.20）、C3（15.21）、C4（15.22）已本地通过；C4 生成诊断报告 `docs/research_quality/P0_SHADOW_REPORT.md`。按用户 2026-08-26 授权连续本地累计、大批改动统一提交，未 commit / 未 push / 未触发远程 CI。
+- **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0-A0 contract audit；A1 contracts；A2 durable `research_context["claim_engine"]` state；A3 research trace；B1 evidence requirement policy；B2 deterministic Evidence Gate；B3 shadow stop decision；C1 benchmark/eval schema；C2 20 个陷阱题；C3 shadow runner；C4 baseline vs shadow 报告（`docs/research_quality/P0_SHADOW_REPORT.md`）。
 - **Runtime status：**legacy 用户可见联网研究行为仍是 production truth；Claim Engine **尚未 production-active**；尚未接 `WebLookupService` shadow observer；尚无 legacy-output-to-ClaimState projection；不得把 B3 的纯 decision 层、C3 harness 构造的 shadow state 或 C4 合成 transcript 误解为 runtime 已启用。
-- **GO / NO-GO：**foundation checkpoint（A0–B3）为 **REMOTE GO / DELIVERED**；RQCE-P0-C1 至 C4 为 **LOCAL GO / REMOTE NOT STARTED**；RQCE-P0 整体 Exit Gate **待人工确认 C4 报告后通过**；RQ1 bounded production activation 仍 **NO-GO**；G17-LAN 仍 **NO-GO / BLOCKED**。
-- **唯一下一 batch：**提交本轮 C1–C4 累计改动并触发远程 CI（用户已授权大批统一提交）；远程 GO 后 RQCE-P1（Gap + CandidatePool 调度器，仍 shadow）需人工确认 P0 报告后方可开始。
-- **RQCE-P1 前置：**不得自动进入；必须先人工确认 `docs/research_quality/P0_SHADOW_REPORT.md`，且 P1 必须先解决 C4 定位的 3 个数据结构缺口（freshness 进 gate、gold.known_conflicts 注入 shadow state、live 10 题真实 web 运行计划）。
+- **GO / NO-GO：**foundation + RQCE-P0-C1–C4 为 **REMOTE GO / DELIVERED**；RQCE-P0 整体 Exit Gate **待人工确认 C4 报告后通过**；RQ1 bounded production activation 仍 **NO-GO**；G17-LAN 仍 **NO-GO / BLOCKED**。
+- **唯一下一步：**人工审阅 `docs/research_quality/P0_SHADOW_REPORT.md`；确认后 RQCE-P1（Gap + CandidatePool 调度器，仍 shadow）可开始，且 P1 必须先解决 C4 定位的 3 个数据结构缺口（freshness 进 gate、gold.known_conflicts 注入 shadow state、live 10 题真实 web 运行计划）。
+- **RQCE-P1 前置：**不得自动进入；必须先人工确认 P0 报告。
 - **权威设计合同：**[`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)。
 - **OpenCode 小批施工协议：**[`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)。
 - **状态读取规则：**若本文件历史段落中的旧 HEAD、旧“下一步”或旧 LOCAL/REMOTE 状态与本节冲突，以本节 + Git/GitHub 当前事实为准；实现者应修正文档，不得自行重开已冻结架构选择。
