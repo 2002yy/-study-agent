@@ -8,7 +8,7 @@ server-owned by :mod:`src.domain.evidence`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import isfinite
 from typing import Any, Iterable, Literal, Mapping
 
@@ -134,6 +134,8 @@ class EvidenceRequirement:
     min_independent_sources: int = 1
     requires_primary_source: bool = False
     requires_successful_read: bool = True
+    max_age_days: int | None = None
+    requires_dated_evidence: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +143,8 @@ class EvidenceRequirement:
             "min_independent_sources": self.min_independent_sources,
             "requires_primary_source": self.requires_primary_source,
             "requires_successful_read": self.requires_successful_read,
+            "max_age_days": self.max_age_days,
+            "requires_dated_evidence": self.requires_dated_evidence,
         }
 
 
@@ -183,6 +187,7 @@ class ResearchEvidence:
     anchored_spans: tuple[str, ...] = ()
     lifecycle_status: EvidenceLifecycleStatus = "candidate"
     extraction_status: ResearchEvidenceExtractionStatus = "not_attempted"
+    published_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -191,6 +196,7 @@ class ResearchEvidence:
             "anchored_spans": list(self.anchored_spans),
             "lifecycle_status": self.lifecycle_status,
             "extraction_status": self.extraction_status,
+            "published_at": self.published_at,
         }
 
 
@@ -372,6 +378,7 @@ class ResearchState:
     budget: ResearchBudget
     trace: tuple[ResearchTraceEvent, ...] = ()
     brief: ResearchBrief | None = None
+    reference_date: str = ""
     schema_version: str = RESEARCH_STATE_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -388,6 +395,7 @@ class ResearchState:
             "budget": self.budget.to_dict(),
             "trace": [item.to_dict() for item in self.trace],
             "brief": self.brief.to_dict() if self.brief else None,
+            "reference_date": self.reference_date,
         }
 
     @classmethod
@@ -413,6 +421,7 @@ class ResearchState:
                 "budget",
                 "trace",
                 "brief",
+                "reference_date",
             },
             "research state",
         )
@@ -439,6 +448,7 @@ class ResearchState:
             budget=_parse_budget(data.get("budget")),
             trace=[_parse_trace(item) for item in _sequence(data, "trace")],
             brief=_parse_brief(brief_raw) if brief_raw is not None else None,
+            reference_date=_optional_date(data.get("reference_date"), "reference date"),
             known_evidence_ids=known_evidence_ids,
         )
 
@@ -457,6 +467,7 @@ def build_research_state(
     known_evidence_ids: Iterable[str],
     trace: Iterable[ResearchTraceEvent] = (),
     brief: ResearchBrief | None = None,
+    reference_date: str = "",
 ) -> ResearchState:
     """Validate and deterministically order a research-state projection."""
 
@@ -611,6 +622,7 @@ def build_research_state(
         budget=checked_budget,
         trace=checked_trace,
         brief=checked_brief,
+        reference_date=_optional_date(reference_date, "reference date"),
     )
 
 
@@ -636,6 +648,8 @@ def _parse_requirement(raw: Any) -> EvidenceRequirement:
             "min_independent_sources",
             "requires_primary_source",
             "requires_successful_read",
+            "max_age_days",
+            "requires_dated_evidence",
         },
         "evidence requirement",
     )
@@ -650,6 +664,13 @@ def _parse_requirement(raw: Any) -> EvidenceRequirement:
             ),
             requires_successful_read=_boolean(
                 data.get("requires_successful_read"), "requires successful read"
+            ),
+            max_age_days=_optional_non_negative_int(
+                data.get("max_age_days"), "max evidence age days"
+            ),
+            requires_dated_evidence=_boolean(
+                data.get("requires_dated_evidence", False),
+                "requires dated evidence",
             ),
         )
     )
@@ -701,6 +722,7 @@ def _parse_evidence(raw: Any) -> ResearchEvidence:
             "anchored_spans",
             "lifecycle_status",
             "extraction_status",
+            "published_at",
         },
         "research evidence",
     )
@@ -724,6 +746,7 @@ def _parse_evidence(raw: Any) -> ResearchEvidence:
                 _EXTRACTION_STATES,
                 "evidence extraction status",
             ),
+            published_at=_optional_date(data.get("published_at"), "evidence published at"),
         )
     )
 
@@ -969,6 +992,12 @@ def _validate_requirement(value: EvidenceRequirement) -> EvidenceRequirement:
         requires_successful_read=_boolean(
             value.requires_successful_read, "requires successful read"
         ),
+        max_age_days=_optional_non_negative_int(
+            value.max_age_days, "max evidence age days"
+        ),
+        requires_dated_evidence=_boolean(
+            value.requires_dated_evidence, "requires dated evidence"
+        ),
     )
 
 
@@ -1008,6 +1037,7 @@ def _validate_evidence(value: ResearchEvidence) -> ResearchEvidence:
             _EXTRACTION_STATES,
             "evidence extraction status",
         ),
+        published_at=_optional_date(value.published_at, "evidence published at"),
     )
 
 
@@ -1224,6 +1254,25 @@ def _number(raw: Any, label: str) -> float:
     if not isfinite(value):
         raise ValueError(f"{label} must be finite")
     return value
+
+
+def _optional_non_negative_int(raw: Any, label: str) -> int | None:
+    if raw is None:
+        return None
+    value = _integer(raw, label)
+    if value < 0:
+        raise ValueError(f"{label} cannot be negative")
+    return value
+
+
+def _optional_date(raw: Any, label: str) -> str:
+    if raw is None or raw == "":
+        return ""
+    value = _text(raw, label, 100)
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO-8601 date") from exc
 
 
 def _timestamp(raw: Any) -> str:

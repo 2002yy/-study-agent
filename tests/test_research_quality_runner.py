@@ -2,6 +2,7 @@
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from src.evals.research_quality import (
 )
 from src.evals.research_quality_runner import (
     ResearchRunTranscript,
+    ProjectedClaim,
+    ProjectedClaimEvidence,
     RunReadRecord,
     evaluate_research_run,
     evaluate_research_runs,
@@ -41,6 +44,38 @@ def _transcript(
     closed: bool = True,
     reference_date: str = "2026-08-01",
 ) -> ResearchRunTranscript:
+    profile_by_case = {
+        "trap-secondary-only-frozen": "official_statement",
+        "trap-duplicate-source-frozen": "current_fact",
+        "trap-old-primary-frozen": "official_statement",
+        "trap-conflicting-primary-frozen": "official_statement",
+        "trap-unanswerable-frozen": "current_fact",
+        "trap-simple-factual-frozen": "official_statement",
+    }
+    projected_claims = (
+        (
+            ProjectedClaim(
+                surface=addressed[0],
+                kind="factual",
+                priority="critical",
+                state="searching",
+                evidence_policy_profile=profile_by_case.get(case_id, "current_fact"),  # type: ignore[arg-type]
+                max_age_days=180 if case_id == "trap-old-primary-frozen" else None,
+                requires_dated_evidence=case_id == "trap-old-primary-frozen",
+            ),
+        )
+        if addressed
+        else ()
+    )
+    projected_links = tuple(
+        ProjectedClaimEvidence(
+            claim_surface=addressed[0],
+            doc_id=doc_id,
+            relation="supports",
+        )
+        for doc_id in cited
+        if addressed
+    )
     return ResearchRunTranscript(
         case_id=case_id,
         reference_date=reference_date,
@@ -52,6 +87,9 @@ def _transcript(
         ),
         cited_doc_ids=cited,
         addressed_claim_surfaces=addressed,
+        question_surface=f"Recorded question for {case_id}" if addressed else "",
+        projected_claims=projected_claims,
+        projected_claim_evidence=projected_links,
         llm_calls=2,
         elapsed_seconds=10.0,
         closed=closed,
@@ -99,6 +137,49 @@ def test_runner_allows_correct_primary_read_closure() -> None:
     assert evaluation.useful_read_ratio == 1.0
     assert evaluation.shadow_would_pass
     assert evaluation.shadow_status == "pass"
+
+
+def test_useful_reads_and_coverage_require_recorded_evidence_contribution() -> None:
+    case = _load_case("trap-simple-factual-frozen")
+    transcript = _transcript(
+        case.id,
+        reads=(("project-history", "success", True),),
+        cited=("project-history",),
+        addressed=(
+            "The library's initial public release year is documented.",
+        ),
+    )
+    background_only = replace(
+        transcript,
+        projected_claim_evidence=(
+            replace(transcript.projected_claim_evidence[0], relation="background"),
+        ),
+    )
+
+    evaluation = evaluate_research_run(case, background_only)
+
+    assert evaluation.successful_read_count == 1
+    assert evaluation.useful_read_count == 0
+    assert evaluation.useful_read_ratio == 0.0
+    assert evaluation.covered_critical_claim_count == 0
+    assert evaluation.critical_claim_coverage == 0.0
+
+
+def test_legacy_v1_transcript_without_projection_is_explicitly_unavailable() -> None:
+    case = _load_case("trap-simple-factual-frozen")
+    transcript = ResearchRunTranscript(
+        case_id=case.id,
+        reference_date="2026-08-01",
+        reads=(RunReadRecord("project-history", "success", True),),
+        cited_doc_ids=("project-history",),
+        closed=True,
+    )
+
+    evaluation = evaluate_research_run(case, transcript)
+
+    assert evaluation.shadow_status == "unavailable"
+    assert evaluation.shadow_would_block is False
+    assert evaluation.shadow_reasons == ("shadow_projection_missing",)
 
 
 def test_runner_detects_duplicate_cluster_trap() -> None:
@@ -153,6 +234,40 @@ def test_runner_detects_conflicting_primary_trap() -> None:
     evaluation = evaluate_research_run(case, transcript)
     assert evaluation.false_closure
     assert "conflict_unresolved" in evaluation.violated_closure_conditions
+
+
+def test_shadow_decision_is_invariant_when_only_gold_changes() -> None:
+    case = _load_case("trap-secondary-only-frozen")
+    transcript = _transcript(
+        case.id,
+        reads=(("blog-secondary-1", "success", True),),
+        cited=("blog-secondary-1",),
+        addressed=(
+            "StreamQueue supports a specific maximum message size published by the vendor.",
+        ),
+    )
+    original = evaluate_research_run(case, transcript)
+    mutated = replace(
+        case,
+        gold=replace(
+            case.gold,
+            primary_exists=False,
+            required_source_roles=("community",),
+            forbidden_closure_conditions=(),
+        ),
+    )
+    changed_gold = evaluate_research_run(mutated, transcript)
+
+    assert changed_gold.false_closure is False
+    assert (
+        changed_gold.shadow_status,
+        changed_gold.shadow_would_block,
+        changed_gold.shadow_reasons,
+    ) == (
+        original.shadow_status,
+        original.shadow_would_block,
+        original.shadow_reasons,
+    )
 
 
 def test_runner_unanswerable_closure_is_false_closure() -> None:
@@ -317,7 +432,9 @@ def test_runner_batch_and_summary() -> None:
         simple_case.id,
         reads=(),
         cited=("project-history",),
-        addressed=(),
+        addressed=(
+            "The library's initial public release year is documented.",
+        ),
         closed=True,
     )
     evaluations = evaluate_research_runs(

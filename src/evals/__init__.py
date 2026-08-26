@@ -26,7 +26,10 @@ from src.evals.research_quality import (
     research_quality_eval_case_to_dict,
 )
 from src.evals.research_quality_runner import (
+    LEGACY_RESEARCH_QUALITY_RUN_SCHEMA_VERSION,
     RESEARCH_QUALITY_RUN_SCHEMA_VERSION,
+    ProjectedClaim,
+    ProjectedClaimEvidence,
     ResearchRunTranscript,
     RunEvaluation,
     RunReadRecord,
@@ -61,6 +64,9 @@ __all__ = [
     "research_quality_eval_case_from_dict",
     "research_quality_eval_case_to_dict",
     "RESEARCH_QUALITY_RUN_SCHEMA_VERSION",
+    "LEGACY_RESEARCH_QUALITY_RUN_SCHEMA_VERSION",
+    "ProjectedClaim",
+    "ProjectedClaimEvidence",
     "ResearchRunTranscript",
     "RunEvaluation",
     "RunReadRecord",

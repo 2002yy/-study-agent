@@ -13,7 +13,7 @@ construction from fixture inputs, not a projection of a real user run.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Iterable, Literal, Mapping
 
@@ -25,25 +25,55 @@ from src.evals.research_quality import (
 from src.web.research.contracts import (
     EvidenceCluster,
     EvidenceGap,
-    EvidenceRequirement,
+    ClaimEvidenceRelation,
     ResearchBudget,
     ResearchClaim,
     ResearchClaimEvidenceLink,
+    ResearchClaimKind,
+    ResearchClaimPriority,
+    ResearchClaimState,
     ResearchEvidence,
     ResearchQuestion,
     build_research_state,
+)
+from src.web.research.policy import (
+    EvidencePolicyProfile,
+    evidence_policy_for_claim,
 )
 from src.web.research.stop_gate import (
     ShadowStopDecision,
     evaluate_shadow_stop,
 )
 
-RESEARCH_QUALITY_RUN_SCHEMA_VERSION = "research-quality-run-v1"
+RESEARCH_QUALITY_RUN_SCHEMA_VERSION = "research-quality-run-v2"
+LEGACY_RESEARCH_QUALITY_RUN_SCHEMA_VERSION = "research-quality-run-v1"
 
 RunReadOutcome = Literal["success", "failed"]
 ReadState = Literal["read_ok", "read_failed", "extraction_failed", "snippet_only"]
 
 _RUN_READ_OUTCOMES = {"success", "failed"}
+_CLAIM_KINDS = {"research_question", "hypothesis", "factual", "analytical"}
+_CLAIM_PRIORITIES = {"critical", "major", "context"}
+_CLAIM_STATES = {
+    "pending",
+    "searching",
+    "satisfied",
+    "partially_satisfied",
+    "unresolved",
+    "unavailable",
+    "contested",
+}
+_POLICY_PROFILES = {
+    "official_statement",
+    "current_fact",
+    "quantitative_claim",
+    "causal_analysis",
+    "community_sentiment",
+    "exploratory_hypothesis",
+}
+_EVIDENCE_RELATIONS = {"supports", "contradicts", "qualifies", "background", "lead"}
+_USEFUL_RELATIONS = {"supports", "contradicts", "qualifies", "lead"}
+_COVERAGE_RELATIONS = {"supports", "contradicts", "qualifies"}
 _LINK_STRENGTH = 0.9
 _BOUNDED_MAX_CANDIDATES = 20
 _BOUNDED_MAX_READS = 8
@@ -66,6 +96,48 @@ class RunReadRecord:
 
 
 @dataclass(frozen=True)
+class ProjectedClaim:
+    """Claim emitted by the recorded legacy projection, never by eval gold."""
+
+    surface: str
+    kind: ResearchClaimKind
+    priority: ResearchClaimPriority
+    state: ResearchClaimState
+    evidence_policy_profile: EvidencePolicyProfile
+    max_age_days: int | None = None
+    requires_dated_evidence: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "surface": self.surface,
+            "kind": self.kind,
+            "priority": self.priority,
+            "state": self.state,
+            "evidence_policy_profile": self.evidence_policy_profile,
+            "max_age_days": self.max_age_days,
+            "requires_dated_evidence": self.requires_dated_evidence,
+        }
+
+
+@dataclass(frozen=True)
+class ProjectedClaimEvidence:
+    """Recorded projection of one evidence contribution to one claim."""
+
+    claim_surface: str
+    doc_id: str
+    relation: ClaimEvidenceRelation
+    strength: float = _LINK_STRENGTH
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "claim_surface": self.claim_surface,
+            "doc_id": self.doc_id,
+            "relation": self.relation,
+            "strength": self.strength,
+        }
+
+
+@dataclass(frozen=True)
 class ResearchRunTranscript:
     case_id: str
     reference_date: str
@@ -74,6 +146,9 @@ class ResearchRunTranscript:
     reads: tuple[RunReadRecord, ...] = ()
     cited_doc_ids: tuple[str, ...] = ()
     addressed_claim_surfaces: tuple[str, ...] = ()
+    question_surface: str = ""
+    projected_claims: tuple[ProjectedClaim, ...] = ()
+    projected_claim_evidence: tuple[ProjectedClaimEvidence, ...] = ()
     llm_calls: int = 0
     elapsed_seconds: float = 0.0
     closed: bool = False
@@ -87,6 +162,11 @@ class ResearchRunTranscript:
             "reads": [record.to_dict() for record in self.reads],
             "cited_doc_ids": list(self.cited_doc_ids),
             "addressed_claim_surfaces": list(self.addressed_claim_surfaces),
+            "question_surface": self.question_surface,
+            "projected_claims": [claim.to_dict() for claim in self.projected_claims],
+            "projected_claim_evidence": [
+                link.to_dict() for link in self.projected_claim_evidence
+            ],
             "llm_calls": self.llm_calls,
             "elapsed_seconds": self.elapsed_seconds,
             "closed": self.closed,
@@ -101,9 +181,14 @@ class RunEvaluation:
     closed: bool
     false_closure: bool
     violated_closure_conditions: tuple[str, ...]
+    primary_required: bool
     primary_retrieval: bool
+    successful_read_count: int
+    useful_read_count: int
     useful_read_ratio: float
     independent_cluster_count: int
+    critical_claim_count: int
+    covered_critical_claim_count: int
     critical_claim_coverage: float
     citation_entailment: float | None
     search_count: int
@@ -129,9 +214,14 @@ class RunEvaluation:
             "violated_closure_conditions": list(
                 self.violated_closure_conditions
             ),
+            "primary_required": self.primary_required,
             "primary_retrieval": self.primary_retrieval,
+            "successful_read_count": self.successful_read_count,
+            "useful_read_count": self.useful_read_count,
             "useful_read_ratio": self.useful_read_ratio,
             "independent_cluster_count": self.independent_cluster_count,
+            "critical_claim_count": self.critical_claim_count,
+            "covered_critical_claim_count": self.covered_critical_claim_count,
             "critical_claim_coverage": self.critical_claim_coverage,
             "citation_entailment": self.citation_entailment,
             "search_count": self.search_count,
@@ -160,8 +250,14 @@ class ShadowRunSummary:
     caught_false_closures: int
     missed_false_closures: int
     overblocked_correct_closures: int
+    primary_retrieved_cases: int
+    primary_required_cases: int
     primary_retrieval_rate: float
+    useful_read_count: int
+    successful_read_count: int
     mean_useful_read_ratio: float
+    covered_critical_claim_count: int
+    critical_claim_count: int
     mean_critical_claim_coverage: float
     per_category: tuple[tuple[str, int, int, int], ...]
 
@@ -174,8 +270,14 @@ class ShadowRunSummary:
             "caught_false_closures": self.caught_false_closures,
             "missed_false_closures": self.missed_false_closures,
             "overblocked_correct_closures": self.overblocked_correct_closures,
+            "primary_retrieved_cases": self.primary_retrieved_cases,
+            "primary_required_cases": self.primary_required_cases,
             "primary_retrieval_rate": self.primary_retrieval_rate,
+            "useful_read_count": self.useful_read_count,
+            "successful_read_count": self.successful_read_count,
             "mean_useful_read_ratio": self.mean_useful_read_ratio,
+            "covered_critical_claim_count": self.covered_critical_claim_count,
+            "critical_claim_count": self.critical_claim_count,
             "mean_critical_claim_coverage": self.mean_critical_claim_coverage,
             "per_category": [
                 {"category": category, "total": total, "false_closures": false, "caught": caught}
@@ -196,6 +298,9 @@ def research_run_transcript_from_dict(raw: Any) -> ResearchRunTranscript:
             "reads",
             "cited_doc_ids",
             "addressed_claim_surfaces",
+            "question_surface",
+            "projected_claims",
+            "projected_claim_evidence",
             "llm_calls",
             "elapsed_seconds",
             "closed",
@@ -206,6 +311,24 @@ def research_run_transcript_from_dict(raw: Any) -> ResearchRunTranscript:
     if not isinstance(reads_raw, list):
         raise ValueError("research run transcript reads must be a list")
     records = tuple(_parse_read_record(item) for item in reads_raw)
+    claims_raw = data.get("projected_claims", [])
+    if not isinstance(claims_raw, list):
+        raise ValueError("research run transcript projected_claims must be a list")
+    projected_claims = tuple(_parse_projected_claim(item) for item in claims_raw)
+    claim_surfaces = [claim.surface for claim in projected_claims]
+    if len(set(claim_surfaces)) != len(claim_surfaces):
+        raise ValueError("duplicate projected claim surface")
+    links_raw = data.get("projected_claim_evidence", [])
+    if not isinstance(links_raw, list):
+        raise ValueError(
+            "research run transcript projected_claim_evidence must be a list"
+        )
+    projected_links = tuple(_parse_projected_claim_evidence(item) for item in links_raw)
+    link_keys = [
+        (link.claim_surface, link.doc_id, link.relation) for link in projected_links
+    ]
+    if len(set(link_keys)) != len(link_keys):
+        raise ValueError("duplicate projected claim evidence link")
     seen: set[str] = set()
     for record in records:
         if record.doc_id in seen:
@@ -227,6 +350,11 @@ def research_run_transcript_from_dict(raw: Any) -> ResearchRunTranscript:
             data.get("addressed_claim_surfaces", []),
             "transcript addressed_claim_surfaces",
         ),
+        question_surface=_optional_text(
+            data.get("question_surface"), "transcript question_surface", 2000
+        ),
+        projected_claims=projected_claims,
+        projected_claim_evidence=projected_links,
         llm_calls=_non_negative_int(data.get("llm_calls", 0), "transcript llm_calls"),
         elapsed_seconds=elapsed,
         closed=_boolean(data.get("closed", False), "transcript closed"),
@@ -256,6 +384,17 @@ def evaluate_research_run(
     for doc_id in transcript.cited_doc_ids:
         if doc_id not in corpus_by_id:
             raise ValueError(f"transcript cites unknown doc id: {doc_id}")
+    projected_surfaces = {claim.surface for claim in transcript.projected_claims}
+    for link in transcript.projected_claim_evidence:
+        if link.doc_id not in corpus_by_id:
+            raise ValueError(
+                f"projected claim evidence references unknown doc id: {link.doc_id}"
+            )
+        if link.claim_surface not in projected_surfaces:
+            raise ValueError(
+                "projected claim evidence references unknown claim surface: "
+                f"{link.claim_surface}"
+            )
 
     read_states = _read_states(transcript)
     cited_docs = tuple(
@@ -282,17 +421,31 @@ def evaluate_research_run(
         for document in case.corpus
     )
 
-    useful_reads = sum(
-        1 for doc_id in transcript.cited_doc_ids if read_states.get(doc_id) == "read_ok"
-    )
+    useful_doc_ids = {
+        link.doc_id
+        for link in transcript.projected_claim_evidence
+        if link.relation in _USEFUL_RELATIONS
+        and read_states.get(link.doc_id) == "read_ok"
+    }
+    useful_reads = len(useful_doc_ids)
     useful_read_ratio = (
         useful_reads / len(successful_reads) if successful_reads else 0.0
     )
 
-    expected_surfaces = {claim.surface for claim in case.gold.expected_claims}
-    addressed = set(transcript.addressed_claim_surfaces)
+    expected_surfaces = {
+        claim.surface
+        for claim in case.gold.expected_claims
+        if claim.priority == "critical"
+    }
+    evidence_linked_surfaces = {
+        link.claim_surface
+        for link in transcript.projected_claim_evidence
+        if link.relation in _COVERAGE_RELATIONS
+        and read_states.get(link.doc_id) == "read_ok"
+    }
+    covered_surfaces = expected_surfaces & evidence_linked_surfaces
     critical_claim_coverage = (
-        len(expected_surfaces & addressed) / len(expected_surfaces)
+        len(covered_surfaces) / len(expected_surfaces)
         if expected_surfaces
         else 0.0
     )
@@ -306,9 +459,8 @@ def evaluate_research_run(
     )
 
     shadow = _evaluate_shadow(
-        case=case,
+        corpus=case.corpus,
         transcript=transcript,
-        cited_docs=cited_docs,
         read_states=read_states,
     )
 
@@ -319,9 +471,14 @@ def evaluate_research_run(
         closed=transcript.closed,
         false_closure=false_closure,
         violated_closure_conditions=tuple(sorted(violated)),
+        primary_required=case.gold.primary_exists,
         primary_retrieval=primary_retrieval,
+        successful_read_count=len(successful_reads),
+        useful_read_count=useful_reads,
         useful_read_ratio=useful_read_ratio,
         independent_cluster_count=len(cited_clusters),
+        critical_claim_count=len(expected_surfaces),
+        covered_critical_claim_count=len(covered_surfaces),
         critical_claim_coverage=critical_claim_coverage,
         citation_entailment=None,
         search_count=transcript.searches,
@@ -377,18 +534,22 @@ def summarize_run_evaluations(
         for item in evaluations
         if item.closed and not item.false_closure and item.shadow_would_block
     )
-    primary_required = [
-        item for item in evaluations if item.category != "no_primary_exists"
-    ]
+    primary_required = [item for item in evaluations if item.primary_required]
+    primary_retrieved = sum(1 for item in primary_required if item.primary_retrieval)
     primary_rate = (
-        sum(1 for item in primary_required if item.primary_retrieval)
-        / len(primary_required)
+        primary_retrieved / len(primary_required)
         if primary_required
         else 0.0
     )
+    useful_read_count = sum(item.useful_read_count for item in evaluations)
+    successful_read_count = sum(item.successful_read_count for item in evaluations)
     mean_useful = (
         sum(item.useful_read_ratio for item in evaluations) / total if total else 0.0
     )
+    covered_critical_claim_count = sum(
+        item.covered_critical_claim_count for item in evaluations
+    )
+    critical_claim_count = sum(item.critical_claim_count for item in evaluations)
     mean_coverage = (
         sum(item.critical_claim_coverage for item in evaluations) / total
         if total
@@ -420,8 +581,14 @@ def summarize_run_evaluations(
         caught_false_closures=caught,
         missed_false_closures=missed,
         overblocked_correct_closures=overblocked,
+        primary_retrieved_cases=primary_retrieved,
+        primary_required_cases=len(primary_required),
         primary_retrieval_rate=primary_rate,
+        useful_read_count=useful_read_count,
+        successful_read_count=successful_read_count,
         mean_useful_read_ratio=mean_useful,
+        covered_critical_claim_count=covered_critical_claim_count,
+        critical_claim_count=critical_claim_count,
         mean_critical_claim_coverage=mean_coverage,
         per_category=per_category,
     )
@@ -429,15 +596,27 @@ def summarize_run_evaluations(
 
 def _evaluate_shadow(
     *,
-    case: ResearchQualityEvalCase,
+    corpus: tuple[FrozenCorpusDocument, ...],
     transcript: ResearchRunTranscript,
-    cited_docs: tuple[FrozenCorpusDocument, ...],
     read_states: dict[str, str],
 ) -> ShadowStopDecision:
-    gold = case.gold
+    """Evaluate a recorded projection without any access to eval gold."""
+
+    if not transcript.question_surface or not transcript.projected_claims:
+        return ShadowStopDecision(
+            legacy_would_stop=transcript.closed,
+            legacy_should_stop=transcript.closed,
+            shadow_status="unavailable",
+            shadow_would_pass=False,
+            shadow_would_block=False,
+            legacy_would_stop_but_shadow_blocked=False,
+            reasons=("shadow_projection_missing",),
+        )
+
+    corpus_by_id = {document.doc_id: document for document in corpus}
     referenced_ids = {record.doc_id for record in transcript.reads} | set(
         transcript.cited_doc_ids
-    )
+    ) | {link.doc_id for link in transcript.projected_claim_evidence}
     evidence = tuple(
         ResearchEvidence(
             evidence_id=f"ev_{document.doc_id}",
@@ -461,41 +640,45 @@ def _evaluate_shadow(
                     )
                 )
             ),
+            published_at=document.published_at or "",
         )
-        for document in case.corpus
+        for document in corpus
         if document.doc_id in referenced_ids
     )
     known_ids = [item.evidence_id for item in evidence]
 
-    min_independent = (
-        2
-        if "independent_sources_below_minimum" in gold.forbidden_closure_conditions
-        else 1
+    projected_claims = tuple(
+        sorted(transcript.projected_claims, key=lambda claim: claim.surface)
     )
-    requires_primary = (
-        gold.primary_exists and "primary" in gold.required_source_roles
-    )
-    unverifiable = "question_unverifiable" in gold.forbidden_closure_conditions
-    claims = tuple(
-        ResearchClaim(
-            id=f"claim_{index}",
-            question_id="q_eval",
-            text=claim.surface,
-            kind=claim.kind,
-            priority=claim.priority,
-            state="unavailable" if unverifiable else "searching",
-            evidence_requirement=EvidenceRequirement(
-                source_roles=tuple(gold.required_source_roles),
-                min_independent_sources=min_independent,
-                requires_primary_source=requires_primary,
-                requires_successful_read=True,
+    claim_id_by_surface: dict[str, str] = {}
+    claims_list: list[ResearchClaim] = []
+    for index, projected in enumerate(projected_claims):
+        claim_id = f"claim_{index}"
+        claim_id_by_surface[projected.surface] = claim_id
+        policy = evidence_policy_for_claim(
+            kind=projected.kind,
+            priority=projected.priority,
+            profile=projected.evidence_policy_profile,
+        )
+        claims_list.append(
+            ResearchClaim(
+                id=claim_id,
+                question_id="q_eval",
+                text=projected.surface,
+                kind=projected.kind,
+                priority=projected.priority,
+                state=projected.state,
+                evidence_requirement=replace(
+                    policy.requirement,
+                    max_age_days=projected.max_age_days,
+                    requires_dated_evidence=projected.requires_dated_evidence,
+                ),
             ),
         )
-        for index, claim in enumerate(sorted(gold.expected_claims, key=lambda c: c.surface))
-    )
+    claims = tuple(claims_list)
     question = ResearchQuestion(
         id="q_eval",
-        question_surface=gold.question,
+        question_surface=transcript.question_surface,
         priority="critical",
         state="searching",
     )
@@ -504,7 +687,11 @@ def _evaluate_shadow(
             id=f"gap_{claim.id}",
             claim_id=claim.id,
             gap_type="evidence_shortfall",
-            desired_source_role=gold.required_source_roles[0],
+            desired_source_role=(
+                claim.evidence_requirement.source_roles[0]
+                if claim.evidence_requirement.source_roles
+                else ""
+            ),
             priority="critical",
             attempt_count=transcript.searches,
             state="open",
@@ -513,41 +700,28 @@ def _evaluate_shadow(
     )
 
     links: list[ResearchClaimEvidenceLink] = []
-    conflicting_case = bool(gold.known_conflicts)
-    cited_cluster_order: dict[str, FrozenCorpusDocument] = {}
-    for document in cited_docs:
-        cited_cluster_order.setdefault(document.cluster_id, document)
-    clusters_in_order = list(cited_cluster_order.values())
-    for claim in claims:
-        for document in cited_docs:
-            relation = "supports"
-            if (
-                conflicting_case
-                and len(clusters_in_order) >= 2
-                and document is not clusters_in_order[0]
-                and document.cluster_id != clusters_in_order[0].cluster_id
-            ):
-                relation = "contradicts"
-            links.append(
-                ResearchClaimEvidenceLink(
-                    link=ClaimEvidenceLinkV1(
-                        claim_id=claim.id,
-                        evidence_id=f"ev_{document.doc_id}",
-                        support_type=relation,
-                        confidence=_LINK_STRENGTH,
-                    ),
-                    source_role=document.source_role,
-                    source_cluster_id=document.cluster_id,
-                    locator=document.url,
-                )
+    for projected_link in transcript.projected_claim_evidence:
+        document = corpus_by_id[projected_link.doc_id]
+        links.append(
+            ResearchClaimEvidenceLink(
+                link=ClaimEvidenceLinkV1(
+                    claim_id=claim_id_by_surface[projected_link.claim_surface],
+                    evidence_id=f"ev_{document.doc_id}",
+                    support_type=projected_link.relation,
+                    confidence=projected_link.strength,
+                ),
+                source_role=document.source_role,
+                source_cluster_id=document.cluster_id,
+                locator=document.url,
             )
+        )
 
     clusters = tuple(
         EvidenceCluster(
             id=document.cluster_id,
             evidence_ids=tuple(
                 f"ev_{item.doc_id}"
-                for item in case.corpus
+                for item in corpus
                 if item.cluster_id == document.cluster_id
                 and item.doc_id in referenced_ids
             ),
@@ -555,12 +729,12 @@ def _evaluate_shadow(
             independence_key=document.cluster_id,
         )
         for document in sorted(
-            {item.cluster_id: item for item in case.corpus}.values(),
+            {item.cluster_id: item for item in corpus}.values(),
             key=lambda item: item.cluster_id,
         )
         if any(
             item.doc_id in referenced_ids
-            for item in case.corpus
+            for item in corpus
             if item.cluster_id == document.cluster_id
         )
     )
@@ -571,7 +745,7 @@ def _evaluate_shadow(
         soft_timeout_seconds=_BOUNDED_SOFT_TIMEOUT,
         hard_timeout_seconds=_BOUNDED_HARD_TIMEOUT,
         max_total_chars=0,
-        candidates_used=len(case.corpus),
+        candidates_used=len(corpus),
         reads_used=len(transcript.reads),
         elapsed_seconds=transcript.elapsed_seconds,
     )
@@ -586,6 +760,7 @@ def _evaluate_shadow(
         conflict_gaps=(),
         budget=budget,
         known_evidence_ids=known_ids,
+        reference_date=transcript.reference_date,
     )
     return evaluate_shadow_stop(state, legacy_would_stop=transcript.closed)
 
@@ -735,6 +910,63 @@ def _parse_read_record(raw: Any) -> RunReadRecord:
     )
 
 
+def _parse_projected_claim(raw: Any) -> ProjectedClaim:
+    data = _mapping(raw, "projected claim")
+    _only_keys(
+        data,
+        {
+            "surface",
+            "kind",
+            "priority",
+            "state",
+            "evidence_policy_profile",
+            "max_age_days",
+            "requires_dated_evidence",
+        },
+        "projected claim",
+    )
+    return ProjectedClaim(
+        surface=_text(data.get("surface"), "projected claim surface", 2000),
+        kind=_enum(data.get("kind"), _CLAIM_KINDS, "projected claim kind"),
+        priority=_enum(
+            data.get("priority"), _CLAIM_PRIORITIES, "projected claim priority"
+        ),
+        state=_enum(data.get("state"), _CLAIM_STATES, "projected claim state"),
+        evidence_policy_profile=_enum(
+            data.get("evidence_policy_profile"),
+            _POLICY_PROFILES,
+            "projected claim evidence policy profile",
+        ),
+        max_age_days=_optional_non_negative_int(
+            data.get("max_age_days"), "projected claim max_age_days"
+        ),
+        requires_dated_evidence=_boolean(
+            data.get("requires_dated_evidence", False),
+            "projected claim requires_dated_evidence",
+        ),
+    )
+
+
+def _parse_projected_claim_evidence(raw: Any) -> ProjectedClaimEvidence:
+    data = _mapping(raw, "projected claim evidence")
+    _only_keys(
+        data,
+        {"claim_surface", "doc_id", "relation", "strength"},
+        "projected claim evidence",
+    )
+    strength = _number(data.get("strength", _LINK_STRENGTH), "projected link strength")
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("projected link strength must be between 0 and 1")
+    return ProjectedClaimEvidence(
+        claim_surface=_text(
+            data.get("claim_surface"), "projected link claim_surface", 2000
+        ),
+        doc_id=_text(data.get("doc_id"), "projected link doc_id", 200),
+        relation=_enum(
+            data.get("relation"), _EVIDENCE_RELATIONS, "projected link relation"
+        ),
+        strength=strength,
+    )
 def _mapping(raw: Any, label: str) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError(f"{label} must be a JSON object")
@@ -753,6 +985,12 @@ def _text(raw: Any, label: str, max_length: int) -> str:
     if len(raw) > max_length:
         raise ValueError(f"{label} exceeds {max_length} characters")
     return raw
+
+
+def _optional_text(raw: Any, label: str, max_length: int) -> str:
+    if raw is None or raw == "":
+        return ""
+    return _text(raw, label, max_length)
 
 
 def _enum(raw: Any, allowed: set[str], label: str) -> Any:
@@ -782,6 +1020,12 @@ def _non_negative_int(raw: Any, label: str) -> int:
     return raw
 
 
+def _optional_non_negative_int(raw: Any, label: str) -> int | None:
+    if raw is None:
+        return None
+    return _non_negative_int(raw, label)
+
+
 def _string_tuple(raw: Any, label: str) -> tuple[str, ...]:
     if not isinstance(raw, list):
         raise ValueError(f"{label} must be a list")
@@ -804,6 +1048,9 @@ def _publication_date(raw: Any) -> str:
 
 __all__ = [
     "RESEARCH_QUALITY_RUN_SCHEMA_VERSION",
+    "LEGACY_RESEARCH_QUALITY_RUN_SCHEMA_VERSION",
+    "ProjectedClaim",
+    "ProjectedClaimEvidence",
     "ReadState",
     "ResearchRunTranscript",
     "RunEvaluation",

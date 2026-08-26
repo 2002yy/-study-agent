@@ -9,11 +9,13 @@ import pytest
 
 from src.evals.research_quality import load_research_quality_eval_cases
 from src.evals.research_quality_runner import (
+    RESEARCH_QUALITY_RUN_SCHEMA_VERSION,
     evaluate_research_runs,
     summarize_run_evaluations,
 )
 from tools.run_research_quality_shadow_report import (
     DEFAULT_CASES,
+    DEFAULT_LIVE_OBSERVATION,
     DEFAULT_OUTPUT,
     DEFAULT_TRANSCRIPTS,
     load_transcripts,
@@ -90,7 +92,7 @@ def test_no_unknown_evidence_id_bypasses_gate() -> None:
 
 def test_transcript_fixture_uses_correct_schema_version() -> None:
     raw = deepcopy(json.loads(TRANSCRIPTS_FILE.read_text(encoding="utf-8")))
-    assert raw["schema_version"] == "research-quality-run-v1"
+    assert raw["schema_version"] == RESEARCH_QUALITY_RUN_SCHEMA_VERSION
     bad = deepcopy(raw)
     bad["schema_version"] = "research-quality-run-v0"
     with pytest.raises(ValueError, match="schema_version"):
@@ -108,7 +110,7 @@ def _write_temp(payload: dict) -> Path:
 
 def test_report_generator_produces_nonempty_markdown() -> None:
     report = run_report(CASES_FILE, TRANSCRIPTS_FILE)
-    assert report.startswith("# RQCE-P0-C4 Shadow Report")
+    assert report.startswith("# RQCE-P0-C5 Shadow Report")
     assert "聚合指标" in report
     assert "按类别分布" in report
     assert "逐 case 诊断" in report
@@ -116,6 +118,8 @@ def test_report_generator_produces_nonempty_markdown() -> None:
     assert "trap-secondary-only-frozen" in report
     assert "trap-unanswerable-frozen" in report
     assert "missed false closures" in report
+    assert "Live 10 operational observation" in report
+    assert "cases with benchmark-relevant candidates: 2/10" in report
 
 
 def test_default_paths_match_repo_layout() -> None:
@@ -123,3 +127,4 @@ def test_default_paths_match_repo_layout() -> None:
     assert DEFAULT_TRANSCRIPTS == TRANSCRIPTS_FILE
     assert DEFAULT_OUTPUT.name == "P0_SHADOW_REPORT.md"
     assert DEFAULT_OUTPUT.parent.name == "research_quality"
+    assert DEFAULT_LIVE_OBSERVATION.name == "P0_LIVE_OBSERVATION.json"

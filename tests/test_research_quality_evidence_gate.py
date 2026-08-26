@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from src.domain.evidence import ClaimEvidenceLinkV1
 from src.web.research.contracts import (
     EvidenceCluster,
@@ -38,6 +40,9 @@ def _state(
     profile: str = "current_fact",
     budget: ResearchBudget | None = None,
     include_gap: bool = True,
+    max_age_days: int | None = None,
+    requires_dated_evidence: bool = False,
+    reference_date: str = "",
 ) -> ResearchState:
     policy = evidence_policy_for_claim(
         kind="factual",
@@ -55,7 +60,11 @@ def _state(
                 "factual",
                 "critical",
                 claim_state,  # type: ignore[arg-type]
-                policy.requirement,
+                replace(
+                    policy.requirement,
+                    max_age_days=max_age_days,
+                    requires_dated_evidence=requires_dated_evidence,
+                ),
             )
         ],
         evidence=evidence,
@@ -65,6 +74,7 @@ def _state(
         conflict_gaps=(),
         budget=budget or _budget(),
         known_evidence_ids={item.evidence_id for item in evidence},
+        reference_date=reference_date,
     )
 
 
@@ -73,11 +83,13 @@ def _evidence(
     *,
     lifecycle: str = "read",
     extraction: str = "eligible",
+    published_at: str = "",
 ) -> ResearchEvidence:
     return ResearchEvidence(
         evidence_id,
         lifecycle_status=lifecycle,  # type: ignore[arg-type]
         extraction_status=extraction,  # type: ignore[arg-type]
+        published_at=published_at,
     )
 
 
@@ -137,6 +149,47 @@ def test_duplicate_source_cluster_counts_once() -> None:
 
     assert result.status == "block"
     assert "critical:claim1:eligible_support_clusters=1/2" in result.reasons
+
+
+def test_stale_evidence_cannot_satisfy_freshness_requirement() -> None:
+    records = (_evidence("ev_old", published_at="2024-01-01"),)
+    links = (_link("ev_old", cluster="official", role="primary"),)
+    clusters = (EvidenceCluster("official", ("ev_old",)),)
+
+    result = evaluate_evidence_gate(
+        _state(
+            evidence=records,
+            links=links,
+            clusters=clusters,
+            profile="official_statement",
+            max_age_days=180,
+            requires_dated_evidence=True,
+            reference_date="2026-08-01",
+        )
+    )
+
+    assert result.status == "block"
+    assert "critical:claim1:freshness_required" in result.reasons
+
+
+def test_fresh_dated_evidence_can_satisfy_freshness_requirement() -> None:
+    records = (_evidence("ev_current", published_at="2026-07-01"),)
+    links = (_link("ev_current", cluster="official", role="primary"),)
+    clusters = (EvidenceCluster("official", ("ev_current",)),)
+
+    result = evaluate_evidence_gate(
+        _state(
+            evidence=records,
+            links=links,
+            clusters=clusters,
+            profile="official_statement",
+            max_age_days=180,
+            requires_dated_evidence=True,
+            reference_date="2026-08-01",
+        )
+    )
+
+    assert result.status == "pass"
 
 
 def test_two_independent_read_clusters_pass() -> None:

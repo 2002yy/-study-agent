@@ -1596,4 +1596,4 @@ Shadow/Benchmark after
 
 ---
 
-**当前执行点：A0–B3 由 `2afea76`、C1–C4 由 `680c5a6` 交付远程（CI #32974470552 success）；C4 生成诊断报告 `docs/research_quality/P0_SHADOW_REPORT.md`。以 `docs/PROJECT_STATUS.md` 顶部 Current Handoff 与最后一个 RQCE Stop report 为准，下一动作是人工确认 P0 报告；RQCE-P1 需人工确认后方可开始，且须先解决 C4 定位的 3 个数据结构缺口。已完成 batch 不得重复执行。**
+**当前执行点：A0–B3 由 `2afea76`、C1–C4 由 `680c5a6` 交付远程；P0-C5-A gold-blind harness、freshness gate、指标真值与 live 10 operational observation 已在本地完成。原 C4 报告不得确认：它存在 Gold→Shadow 语义泄漏、10/20 冒充完整、primary denominator 与 Useful Read/Critical Coverage 口径错误。P0-C5-B 已冻结为 `1A 2A 3A 4A 5B 6A`：eval-only DeepSeek pro；仅 fixture question/projected claims/公共网页正文；question-only claim projection 后逐页 evidence projection；每页 12,000 字符、每 case 最多 8 页；底层隐藏重试关闭、每逻辑调用显式最多 2 attempts；逐调用无正文审计；失败即 `projection_unavailable`；production relevance 不动。严禁 Gold 注入，严禁关键词关系 fallback；完成 live 10 semantic shadow 与 20-case report 前 RQCE-P1 不得开始。以 `docs/PROJECT_STATUS.md` 顶部 Current Handoff 为准。**

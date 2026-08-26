@@ -142,6 +142,28 @@ def test_round_trip_is_versioned_and_deterministic() -> None:
     ) == state
 
 
+def test_freshness_fields_round_trip_and_invalid_dates_fail_closed() -> None:
+    raw = _state().to_dict()
+    raw["reference_date"] = "2026-08-26"
+    raw["claims"][0]["evidence_requirement"]["max_age_days"] = 30
+    raw["claims"][0]["evidence_requirement"]["requires_dated_evidence"] = True
+    raw["evidence"][0]["published_at"] = "2026-08-20"
+
+    restored = ResearchState.from_dict(
+        raw, known_evidence_ids={"ev_official", "ev_review"}
+    )
+
+    assert restored.reference_date == "2026-08-26"
+    assert restored.claims[0].evidence_requirement.max_age_days == 30
+    assert restored.evidence[0].published_at == "2026-08-20"
+
+    raw["evidence"][0]["published_at"] = "2026/08/20"
+    with pytest.raises(ValueError, match="ISO-8601 date"):
+        ResearchState.from_dict(
+            raw, known_evidence_ids={"ev_official", "ev_review"}
+        )
+
+
 def test_builder_orders_unordered_inputs() -> None:
     state = _state()
     rebuilt = build_research_state(

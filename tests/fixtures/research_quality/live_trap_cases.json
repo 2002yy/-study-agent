@@ -6,11 +6,11 @@
       "category": "secondary_only",
       "mode": "live",
       "gold": {
-        "question": "What is the current official rate limit for the public API of the PayGate service?",
-        "critical_surfaces": ["official rate limit", "current value"],
+        "question": "What is the current official primary rate limit for unauthenticated requests to the GitHub REST API?",
+        "critical_surfaces": ["GitHub REST API", "official rate limit", "current value"],
         "expected_claims": [
           {
-            "surface": "PayGate publishes an official, current rate limit for its public API.",
+            "surface": "GitHub publishes an official, current unauthenticated REST API rate limit.",
             "kind": "factual",
             "priority": "critical"
           }
@@ -33,14 +33,14 @@
       "category": "duplicate_source",
       "mode": "live",
       "gold": {
-        "question": "Which outlets originally reported the announcement, as opposed to republishing wire copy?",
+        "question": "Which independently operated organizations published original technical advisories about CVE-2024-3094, excluding syndicated or copied reports?",
         "critical_surfaces": [
-          "originating outlets",
+          "original CVE-2024-3094 advisories",
           "republication distinction"
         ],
         "expected_claims": [
           {
-            "surface": "Original reporting can be distinguished from syndicated republication.",
+            "surface": "Original CVE-2024-3094 technical advisories can be distinguished from copied reporting.",
             "kind": "analytical",
             "priority": "critical"
           }
@@ -60,11 +60,11 @@
       "category": "old_primary",
       "mode": "live",
       "gold": {
-        "question": "What is the current pricing tier structure for the hosted database service?",
-        "critical_surfaces": ["current pricing tiers"],
+        "question": "Which Node.js release lines currently receive security updates according to the official release schedule?",
+        "critical_surfaces": ["current Node.js release lines", "security support"],
         "expected_claims": [
           {
-            "surface": "The current pricing tiers are published by the vendor.",
+            "surface": "The current Node.js security-supported release lines are published by the project.",
             "kind": "factual",
             "priority": "critical"
           }
@@ -88,11 +88,11 @@
       "category": "conflicting_primary",
       "mode": "live",
       "gold": {
-        "question": "Did the vendor officially confirm or deny the reported data breach?",
-        "critical_surfaces": ["official breach statement"],
+        "question": "What is the current default retention period for GitHub Actions artifacts and logs, and how does the current documentation relate to older official announcements?",
+        "critical_surfaces": ["current GitHub Actions retention", "older official policy"],
         "expected_claims": [
           {
-            "surface": "The vendor has issued an official statement on the breach.",
+            "surface": "GitHub's current artifact and log retention defaults can be reconciled with older official policy announcements.",
             "kind": "factual",
             "priority": "critical"
           }
@@ -101,8 +101,8 @@
         "primary_exists": true,
         "known_conflicts": [
           {
-            "description": "Early statements denied any breach; later statements confirmed limited exposure.",
-            "surfaces": ["breach status"]
+            "description": "Older GitHub announcements and current documentation may describe different retention defaults or configurable ranges.",
+            "surfaces": ["retention default", "policy date"]
           }
         ],
         "freshness_requirement": null,
@@ -117,11 +117,11 @@
       "category": "no_primary_exists",
       "mode": "live",
       "gold": {
-        "question": "What are the undisclosed terms of the settlement between the two companies?",
-        "critical_surfaces": ["settlement terms"],
+        "question": "What are the exact confidential commercial terms of the Microsoft and OpenAI partnership that neither party has publicly disclosed?",
+        "critical_surfaces": ["confidential partnership terms"],
         "expected_claims": [
           {
-            "surface": "The settlement terms have not been disclosed publicly.",
+            "surface": "Some Microsoft and OpenAI partnership terms are not publicly verifiable.",
             "kind": "analytical",
             "priority": "critical"
           }
@@ -141,11 +141,11 @@
       "category": "community_opinion",
       "mode": "live",
       "gold": {
-        "question": "How do users currently feel about the platform's new pricing model?",
-        "critical_surfaces": ["user sentiment", "pricing concerns"],
+        "question": "How do Python developers currently describe their experience with Python 3.13 free-threaded mode?",
+        "critical_surfaces": ["developer sentiment", "free-threaded Python 3.13 experience"],
         "expected_claims": [
           {
-            "surface": "Current user sentiment about the pricing model is identifiable.",
+            "surface": "Current developer sentiment about Python 3.13 free-threaded mode is identifiable from community evidence.",
             "kind": "analytical",
             "priority": "critical"
           }
@@ -162,11 +162,11 @@
       "category": "numerical_original_source",
       "mode": "live",
       "gold": {
-        "question": "What is the exact official unemployment rate published for the most recent quarter?",
-        "critical_surfaces": ["exact published rate"],
+        "question": "What is the exact United States unemployment rate in the most recent Employment Situation release published by the U.S. Bureau of Labor Statistics?",
+        "critical_surfaces": ["latest BLS release", "exact unemployment rate"],
         "expected_claims": [
           {
-            "surface": "The statistical agency publishes an exact quarterly unemployment rate.",
+            "surface": "The U.S. Bureau of Labor Statistics publishes the exact latest unemployment rate.",
             "kind": "factual",
             "priority": "critical"
           }
@@ -189,11 +189,11 @@
       "category": "causal_competing_explanations",
       "mode": "live",
       "gold": {
-        "question": "Why did the data migration partially fail last quarter?",
-        "critical_surfaces": ["migration failure cause", "competing explanations"],
+        "question": "Why did the July 2024 CrowdStrike outage occur, distinguishing the direct technical trigger from contributing deployment and control failures?",
+        "critical_surfaces": ["direct technical trigger", "contributing control failures"],
         "expected_claims": [
           {
-            "surface": "Competing explanations for the migration failure exist.",
+            "surface": "The CrowdStrike outage had a direct technical trigger and potentially distinct contributing control failures.",
             "kind": "analytical",
             "priority": "critical"
           }
@@ -202,8 +202,8 @@
         "primary_exists": true,
         "known_conflicts": [
           {
-            "description": "The engineering postmortem cites schema drift; the vendor support ticket cites a tooling defect.",
-            "surfaces": ["failure cause"]
+            "description": "Sources may distinguish the faulty content update from testing, validation, staged-deployment, and ecosystem resilience factors.",
+            "surfaces": ["technical trigger", "contributing factors"]
           }
         ],
         "freshness_requirement": null,
@@ -218,11 +218,11 @@
       "category": "simple_factual",
       "mode": "live",
       "gold": {
-        "question": "Which open-source license does the project use?",
-        "critical_surfaces": ["project license"],
+        "question": "Which open-source license does the FastAPI project use?",
+        "critical_surfaces": ["FastAPI license"],
         "expected_claims": [
           {
-            "surface": "The project's license is stated in its official repository.",
+            "surface": "FastAPI's license is stated in its official repository.",
             "kind": "factual",
             "priority": "critical"
           }
@@ -239,11 +239,11 @@
       "category": "unanswerable_unverifiable",
       "mode": "live",
       "gold": {
-        "question": "What are the exact private terms of the unannounced partnership agreement?",
-        "critical_surfaces": ["private agreement terms"],
+        "question": "Which exact vulnerabilities will be fixed in the next Node.js security release before the project announces them?",
+        "critical_surfaces": ["unannounced Node.js vulnerabilities"],
         "expected_claims": [
           {
-            "surface": "The private terms of the agreement are not publicly verifiable.",
+            "surface": "The exact vulnerabilities in an unannounced Node.js security release are not publicly verifiable.",
             "kind": "analytical",
             "priority": "critical"
           }

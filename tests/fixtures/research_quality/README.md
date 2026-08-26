@@ -4,6 +4,9 @@
 > `frozen_trap_cases.json`（10 个 frozen，含合成 corpus）+
 > `live_trap_cases.json`（10 个 live metadata-only）。
 > 本目录不得存放 live web 抓取内容；corpus 全部为合成测试数据。
+> P0-C5 已将 live metadata 改为真实、可长期复核的公开问题；真实运行只把
+> bounded provider/search/read metadata 写到
+> `docs/research_quality/P0_LIVE_OBSERVATION.json`，不把网页正文写回 fixture。
 
 ## 文件格式
 
@@ -104,3 +107,5 @@ Gold 不写固定文章，只描述"正确闭环需要什么"：
 - 本 schema 不含 runner、metrics、live web 访问或任何 WebLookupService 集成。
 - `to_dict/from_dict` JSON-safe round-trip；未知字段、未知枚举、重复 ID 均拒绝。
 - C2 的 live case 只是 metadata 定义；真实 live web 运行属 RQCE-P0-C3/C4。
+- P0-C5 的 live observation 不调用模型、不生成 shadow decision；semantic
+  claim/evidence projection 必须另过 external-model authorization gate。

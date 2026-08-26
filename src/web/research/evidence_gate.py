@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 from src.web.research.contracts import (
@@ -61,13 +62,22 @@ def evaluate_evidence_gate(state: ResearchState) -> EvidenceGateResult:
     critical_claims = [claim for claim in state.claims if claim.priority == "critical"]
     for claim in critical_claims:
         claim_links = links_by_claim.get(claim.id, [])
-        eligible_links = [
+        structurally_eligible_links = [
             link
             for link in claim_links
             if _link_is_eligible(
                 claim=claim,
                 link=link,
                 evidence=evidence_by_id.get(link.evidence_id),
+            )
+        ]
+        eligible_links = [
+            link
+            for link in structurally_eligible_links
+            if _link_meets_freshness(
+                claim=claim,
+                evidence=evidence_by_id.get(link.evidence_id),
+                reference_date=state.reference_date,
             )
         ]
         eligible_ids.update(link.evidence_id for link in eligible_links)
@@ -119,6 +129,8 @@ def evaluate_evidence_gate(state: ResearchState) -> EvidenceGateResult:
             )
         if claim.evidence_requirement.requires_primary_source and not has_primary:
             reasons.append(f"critical:{claim.id}:primary_required")
+        if len(eligible_links) < len(structurally_eligible_links):
+            reasons.append(f"critical:{claim.id}:freshness_required")
 
     open_set = set(open_claims)
     active_gaps = [
@@ -172,6 +184,30 @@ def _link_is_eligible(
     if claim.evidence_requirement.requires_successful_read:
         return evidence.lifecycle_status in {"read", "selected"}
     return evidence.lifecycle_status != "rejected"
+
+
+def _link_meets_freshness(
+    *,
+    claim: ResearchClaim,
+    evidence: ResearchEvidence | None,
+    reference_date: str,
+) -> bool:
+    requirement = claim.evidence_requirement
+    if requirement.max_age_days is None and not requirement.requires_dated_evidence:
+        return True
+    if evidence is None or not evidence.published_at:
+        return False
+    try:
+        published = date.fromisoformat(evidence.published_at)
+        reference = date.fromisoformat(reference_date)
+    except ValueError:
+        return False
+    age_days = (reference - published).days
+    if age_days < 0:
+        return False
+    if requirement.max_age_days is not None and age_days > requirement.max_age_days:
+        return False
+    return True
 
 
 def _conflict_for_claim(
