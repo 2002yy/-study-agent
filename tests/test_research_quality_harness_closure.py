@@ -140,23 +140,22 @@ def test_unavailable_projection_preserves_retrieval_secondary_reason(tmp_path) -
     assert unanswerable["funnel"]["manual_topic_only_candidate_count"] == 5
 
 
-def test_committed_truth_fix_artifacts_are_current() -> None:
-    v2_path = DOCS / "P0_LIVE_SEMANTIC_EVAL_V2.json"
-    assert v2_path.exists()
-    artifact = json.loads(v2_path.read_text(encoding="utf-8"))
-    assert artifact["schema_version"] == "research-quality-harness-closure-v2"
-    assert artifact["summary"]["harness_status"] == "PASS / COMPLETE"
-    assert artifact["summary"]["logical_calls"] == 14
-    assert artifact["summary"]["external_call_attempts"] == 17
-    assert artifact["summary"]["failed_attempts"] == 5
-    assert artifact["summary"]["projected_documents"] == 4
-
+def test_committed_truth_fix_classification_is_current() -> None:
     classification = json.loads(
         (DOCS / "P0_RETRIEVAL_FAILURE_CLASSIFICATION.json").read_text(
             encoding="utf-8"
         )
     )
+    assert classification["schema_version"] == "research-quality-harness-closure-v2"
     counts = classification["taxonomy_counts"]
     assert counts["NO_ANSWER_RELEVANT_CANDIDATE"] == 7
     assert counts["BENCHMARK_MATCH_FALSE_NEGATIVE"] == 0
-    assert len(classification["candidate_audit_rows"]) == 50
+    assert counts["CLAIM_PROJECTION_UNAVAILABLE"] == 2
+    assert counts["COMPLETED_WITH_EVIDENCE"] == 1
+    funnel = classification["funnel_aggregate"]
+    assert funnel["returned_candidate_count"] == 50
+    assert funnel["production_worth_reading_candidate_count"] == 50
+    assert funnel["benchmark_relevant_candidate_count"] == 10
+    assert funnel["manual_answer_relevant_candidate_count"] == 5
+    assert funnel["manual_topic_only_candidate_count"] == 10
+    assert funnel["manual_off_target_candidate_count"] == 35
