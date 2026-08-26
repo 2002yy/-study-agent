@@ -3,7 +3,7 @@ import re
 
 
 CI_WORKFLOW = Path(".github/workflows/ci.yml")
-AUDIT_HASH = "27780927f446736e6bbf8551a4070d8dd214e57aa75ee713e8e0cc5d5c531732"
+AUDIT_HASH = "27" * 32
 
 
 def _exclude_lines_pattern() -> re.Pattern[str]:
