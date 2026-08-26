@@ -93,12 +93,69 @@ def test_web_search_and_read_share_one_stable_ref_and_read_wins():
     assert ref.domain == "fastapi.tiangolo.com"
 
 
+def test_answer_used_read_is_selected_but_candidate_only_search_is_not_failed():
+    selected = build_evidence_snapshot(
+        rag={
+            "web_tools": {
+                "used_sources": [{"url": "https://example.com/read"}],
+                "calls": [
+                    {
+                        "name": "web_search",
+                        "arguments": {"query": "example"},
+                        "result": {
+                            "results": [
+                                {
+                                    "title": "Example",
+                                    "url": "https://example.com/read",
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "name": "web_read",
+                        "arguments": {"url": "https://example.com/read"},
+                        "result": {"ok": True, "title": "Example"},
+                    },
+                ],
+            }
+        }
+    )
+    candidate = build_evidence_snapshot(
+        rag={
+            "web_tools": {
+                "evidence_status": "candidate_only",
+                "error": "尚未读取正文",
+                "calls": [
+                    {
+                        "name": "web_search",
+                        "arguments": {"query": "example"},
+                        "result": {
+                            "results": [
+                                {
+                                    "title": "Candidate",
+                                    "url": "https://example.com/candidate",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        }
+    )
+
+    assert selected.refs[0].lifecycle_status == "selected"
+    assert selected.refs[0].selection_reason == "web_read_sent_to_answer"
+    assert candidate.refs[0].lifecycle_status == "candidate"
+    assert candidate.refs[0].provider_status == "candidate_only"
+
+
 def test_research_run_preserves_selected_and_rejected_assessments():
     snapshot = build_evidence_snapshot(
         rag={
             "research_sources": {
                 "run_id": "web_lookup_1",
                 "provider_status": "found",
+                "source_truth_version": 2,
                 "selected_sources": [
                     {
                         "item": {
@@ -113,6 +170,7 @@ def test_research_run_preserves_selected_and_rejected_assessments():
                             "domain": "example.com",
                             "relevance": 0.95,
                         },
+                        "read_status": "read",
                     }
                 ],
                 "rejected_sources": [
@@ -142,6 +200,35 @@ def test_research_run_preserves_selected_and_rejected_assessments():
     assert snapshot.refs[0].selection_reason == "research_run:web_lookup_1"
     assert snapshot.refs[0].published_at == "2026-07-01"
     assert snapshot.refs[1].rejection_reason == "duplicate"
+
+
+def test_legacy_selected_source_without_read_truth_is_derived_as_unknown_candidate():
+    snapshot = build_evidence_snapshot(
+        rag={
+            "research_sources": {
+                "run_id": "legacy-run",
+                "provider_status": "found",
+                "selected_sources": [
+                    {
+                        "item": {
+                            "title": "Legacy search result",
+                            "url": "https://example.com/legacy",
+                        },
+                        "assessment": {
+                            "title": "Legacy search result",
+                            "url": "https://example.com/legacy",
+                        },
+                    }
+                ],
+                "rejected_sources": [],
+            }
+        }
+    )
+
+    assert len(snapshot.refs) == 1
+    assert snapshot.refs[0].lifecycle_status == "candidate"
+    assert snapshot.refs[0].provider_status == "legacy_unknown"
+    assert snapshot.refs[0].selection_reason == ""
 
 
 def test_pedagogy_evidence_ids_remain_distinct_from_claim_links():

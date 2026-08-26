@@ -114,6 +114,18 @@
   overflow-wrap: anywhere;
 }
 
+.web-result-overflow {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.web-result-overflow > summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+}
+
 @media (max-width: 760px) {
   .evidence-trail .evidence-toggle {
     width: 100%;

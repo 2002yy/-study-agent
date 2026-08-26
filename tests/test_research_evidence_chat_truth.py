@@ -79,6 +79,7 @@ def _source_records() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                 "selected": True,
                 "worth_reading": True,
             },
+            "read_status": "read",
         }
     ]
     rejected = [
@@ -123,6 +124,16 @@ def _run(
         selected_sources=selected,
         rejected_sources=rejected,
         query_attempts=[{"query": "private query"}],
+        research_context={
+            "source_truth_version": 2,
+            "read_summary": {
+                "attempted": 1,
+                "successful": 1,
+                "failed": 0,
+                "skipped": 0,
+                "used_chars": 120,
+            },
+        },
     )
 
 

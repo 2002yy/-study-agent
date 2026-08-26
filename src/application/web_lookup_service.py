@@ -21,6 +21,8 @@ from src.web.research_gateway import ResearchWebGateway
 from src.web.source_assessment import assess_sources, evidence_confidence
 from src.web.tool_evidence import (
     diagnostic_tool_calls,
+    evidence_tool_calls,
+    tool_evidence_items,
     trusted_tool_calls,
     tool_call_errors,
     tool_source_items,
@@ -291,7 +293,8 @@ def _format_research_source_block(
     items: list[dict[str, Any]],
     selected_sources: list[dict[str, Any]],
 ) -> str:
-    base = format_news_source_block(query, items)
+    del items  # Candidate metadata alone must never enter synthesis context.
+    read_items: list[dict[str, Any]] = []
     read_blocks: list[str] = []
     for index, record in enumerate(selected_sources, start=1):
         excerpt = _read_excerpt(record)
@@ -299,6 +302,7 @@ def _format_research_source_block(
             continue
         raw_item = record.get("item")
         item = raw_item if isinstance(raw_item, dict) else {}
+        read_items.append(item)
         raw_assessment = record.get("assessment")
         assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
         title = str(item.get("title") or assessment.get("title") or f"来源 {index}")
@@ -314,7 +318,8 @@ def _format_research_source_block(
             f"【已读取 {index}】{title}\n{url}\n{excerpt}{inherited_note}"
         )
     if not read_blocks:
-        return base
+        return ""
+    base = format_news_source_block(query, read_items)
     combined = "\n\n".join(part for part in (base, *read_blocks) if part.strip())
     return combined[:24000]
 
@@ -461,6 +466,7 @@ class WebLookupService:
         context = build_research_context(normalized).to_dict()
         context.update(
             {
+                "source_truth_version": 2,
                 "candidate_items": [],
                 "read_summary": {
                     "attempted": 0,
@@ -591,6 +597,7 @@ class WebLookupService:
         context = build_research_context(query).to_dict()
         context.update(
             {
+                "source_truth_version": 2,
                 "candidate_items": [],
                 "read_summary": {
                     "attempted": 0,
@@ -655,9 +662,24 @@ class WebLookupService:
                 operation_id=operation_id,
                 stage="searching",
             )
-        evidence_calls = trusted_tool_calls(calls)
+        display_calls = trusted_tool_calls(calls)
+        evidence_calls = evidence_tool_calls(calls)
         provider_errors = tool_call_errors(calls)
-        items = tool_source_items(evidence_calls)
+        items = tool_source_items(display_calls)
+        evidence_items = tool_evidence_items(calls)
+        read_urls = {
+            _canonical_source_url(
+                str(
+                    (call.get("result") or {}).get("url")
+                    or (call.get("arguments") or {}).get("url")
+                    or ""
+                )
+            )
+            for call in evidence_calls
+            if call.get("name") == "web_read"
+            and isinstance(call.get("result"), dict)
+            and isinstance(call.get("arguments"), dict)
+        }
         selected_sources = [
             {
                 "item": item,
@@ -665,18 +687,34 @@ class WebLookupService:
                     "url": item.get("url", ""),
                     "title": item.get("title", ""),
                     "worth_reading": True,
-                    "selection_reason": "validated_tool_evidence",
+                    "selection_reason": (
+                        "read_backed_tool_evidence"
+                        if _canonical_source_url(str(item.get("url") or "")) in read_urls
+                        else "structured_tool_evidence"
+                    ),
                 },
+                "read_status": (
+                    "read"
+                    if _canonical_source_url(str(item.get("url") or "")) in read_urls
+                    else "structured"
+                ),
             }
-            for item in items
+            for item in evidence_items
         ]
         context = {
             **run.research_context,
+            "source_truth_version": 2,
             "tool_trace": {
-                "calls": evidence_calls,
+                "calls": display_calls,
+                "evidence_calls": evidence_calls,
+                "evidence_status": (
+                    "read_backed"
+                    if evidence_calls
+                    else "candidate_only" if display_calls else "empty"
+                ),
                 "diagnostic_calls": (
                     diagnostic_tool_calls(calls)
-                    if len(evidence_calls) != len(calls)
+                    if len(display_calls) != len(calls)
                     else []
                 ),
                 "provider_errors": provider_errors,
@@ -694,7 +732,7 @@ class WebLookupService:
         ]
         if self.repository.cancel_requested(run_id, operation_id=operation_id):
             return self.repository.finish_cancel(run_id, operation_id=operation_id)
-        if error or (provider_errors and not evidence_calls):
+        if error or (provider_errors and not display_calls):
             failure = error or "; ".join(provider_errors)
             return self.repository.fail(
                 run_id,
@@ -714,10 +752,16 @@ class WebLookupService:
             query_attempts=attempts,
             selected_sources=selected_sources,
             rejected_sources=[],
-            provider_status="found" if evidence_calls else "empty",
-            stop_reason=(
-                "tool_evidence_found"
+            provider_status=(
+                "found"
                 if evidence_calls
+                else "candidates_only" if display_calls else "empty"
+            ),
+            stop_reason=(
+                "read_backed_tool_evidence_found"
+                if evidence_calls
+                else "search_candidates_only"
+                if display_calls
                 else "providers_returned_no_results"
                 if calls
                 else "no_tool_calls"
@@ -1127,17 +1171,20 @@ class WebLookupService:
                 )
                 had_read_failure = int(read_summary.get("failed") or 0) > 0
                 candidate_items = context.get("candidate_items", [])
-                if items:
+                successful_reads = int(read_summary.get("successful") or 0)
+                if items and successful_reads > 0:
                     provider_status = (
                         "partial"
                         if had_provider_failure or had_read_failure
                         else "found"
                     )
+                elif items:
+                    provider_status = "candidates_only"
                 elif candidate_items:
                     provider_status = "insufficient"
                 else:
                     provider_status = "partial" if had_provider_failure else "empty"
-                if int(read_summary.get("successful") or 0) > 0:
+                if successful_reads > 0:
                     reason = (
                         "sources_partially_read"
                         if had_read_failure
@@ -1145,13 +1192,19 @@ class WebLookupService:
                     )
                 elif had_read_failure:
                     reason = "source_reading_failed"
+                elif provider_status in {"candidates_only", "insufficient"}:
+                    reason = "search_candidates_only"
                 elif not reason:
                     reason = (
                         "providers_returned_no_results"
                         if provider_status == "empty"
                         else "direct_results_found"
                     )
-                answer_confidence = evidence_confidence(selected_sources)
+                answer_confidence = (
+                    evidence_confidence(selected_sources)
+                    if successful_reads > 0
+                    else "none"
+                )
                 lineage = context.get("lineage")
                 if isinstance(lineage, dict):
                     lineage["evidence_counts"] = {
@@ -1643,22 +1696,28 @@ class WebLookupService:
             )
             had_read_failure = int(read_summary.get("failed") or 0) > 0
             candidate_items = context.get("candidate_items", [])
-            if items:
+            successful_reads = int(read_summary.get("successful") or 0)
+            if items and successful_reads > 0:
                 provider_status = (
                     "partial" if had_provider_failure or had_read_failure else "found"
                 )
+            elif items:
+                provider_status = "candidates_only"
             elif candidate_items:
                 provider_status = "insufficient"
             else:
                 provider_status = "partial" if had_provider_failure else "empty"
-            reason = reason or (
-                "sources_partially_read"
-                if had_read_failure
-                else "sources_read"
-                if int(read_summary.get("successful") or 0) > 0
-                else "direct_results_found"
+            if successful_reads > 0:
+                reason = "sources_partially_read" if had_read_failure else "sources_read"
+            elif had_read_failure:
+                reason = "source_reading_failed"
+            elif provider_status in {"candidates_only", "insufficient"}:
+                reason = "search_candidates_only"
+            answer_confidence = (
+                evidence_confidence(selected_sources)
+                if successful_reads > 0
+                else "none"
             )
-            answer_confidence = evidence_confidence(selected_sources)
 
             memo_block = ""
             if memo:

@@ -394,6 +394,14 @@ export type ChatResponse = {
       error?: string;
       run_id?: string;
       provider_errors?: string[];
+      evidence_status?: "read_backed" | "candidate_only" | "empty" | string;
+      candidate_count?: number;
+      read_count?: number;
+      used_sources?: Array<{
+        title?: string;
+        url?: string;
+        source?: string;
+      }>;
     };
     web_context?: {
       used: boolean;

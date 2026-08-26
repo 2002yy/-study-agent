@@ -167,6 +167,67 @@ describe("EvidenceTrail display layering", () => {
     expect(container).toHaveTextContent("duplicate");
   });
 
+  it("labels legacy sources without read truth as unknown candidates", () => {
+    const { container } = render(
+      <EvidenceTrail
+        evidence={{
+          rag: ragWithServerRefs([
+            serverRef("legacy-1", "Legacy source", "candidate", {
+              type: "research",
+              url: "https://example.com/legacy",
+              provider_status: "legacy_unknown",
+            }),
+          ]),
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /证据轨迹/ }));
+    fireEvent.click(screen.getByRole("button", { name: "显示诊断详情" }));
+
+    expect(container).toHaveTextContent("Legacy source");
+    expect(container).toHaveTextContent("legacy candidate · 历史验证状态未知");
+    expect(container.querySelector(".evidence-summary-flag")).toBeNull();
+  });
+
+  it("shows search candidates as an explicit 3/N expandable preview", () => {
+    const results = Array.from({ length: 5 }, (_, index) => ({
+      title: `Candidate ${index + 1}`,
+      url: `https://example.com/${index + 1}`,
+    }));
+    const { container } = render(
+      <EvidenceTrail
+        evidence={{
+          rag: {
+            ...baseRag,
+            web_tools: {
+              enabled: true,
+              used: false,
+              calls: [
+                {
+                  name: "web_search",
+                  arguments: { query: "opus5" },
+                  result: { status: "ok", results },
+                },
+              ],
+              evidence_status: "candidate_only",
+              candidate_count: 5,
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /证据轨迹/ }));
+    fireEvent.click(screen.getByRole("button", { name: "显示诊断详情" }));
+
+    expect(container).toHaveTextContent("候选（预览 3/5）");
+    const overflow = screen.getByText("查看其余 2 条候选").closest("details");
+    expect(overflow).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("查看其余 2 条候选"));
+    expect(overflow).toHaveAttribute("open");
+  });
+
   it("keeps an explicitly referenced pedagogy evidence unit visible even when legacy status is candidate", () => {
     const { container } = render(
       <EvidenceTrail

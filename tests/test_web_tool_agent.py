@@ -102,6 +102,56 @@ def test_web_agent_formats_model_selected_results_as_context():
     assert "https://example.com" in trace.context_block()
 
 
+def test_search_snippets_remain_candidates_until_a_page_is_read():
+    search_call = {
+        "name": "web_search",
+        "arguments": {"query": "Opus 5"},
+        "result": {
+            "status": "ok",
+            "results": [
+                {
+                    "title": "Candidate report",
+                    "url": "https://example.com/report",
+                    "snippet": "unverified search snippet",
+                }
+            ],
+        },
+    }
+    candidate_only = WebToolAgent(
+        gateway=object(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: [search_call],
+    ).resolve("research Opus 5", research_intent=True)
+
+    assert candidate_only.used is False
+    assert candidate_only.context_block() == ""
+    assert candidate_only.to_dict()["evidence_status"] == "candidate_only"
+    assert candidate_only.to_dict()["candidate_count"] == 1
+    assert candidate_only.to_dict()["calls"] == [search_call]
+    assert "尚未读取正文" in candidate_only.to_dict()["error"]
+
+    read_backed = WebToolAgent(
+        gateway=object(),  # type: ignore[arg-type]
+        run_loop=lambda *_args, **_kwargs: [
+            search_call,
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://example.com/report"},
+                "result": {
+                    "ok": True,
+                    "url": "https://example.com/report",
+                    "content": "verified full page body",
+                },
+            },
+        ],
+    ).resolve("research Opus 5", research_intent=True)
+
+    assert read_backed.used is True
+    assert "verified full page body" in read_backed.context_block()
+    assert "unverified search snippet" not in read_backed.context_block()
+    assert read_backed.to_dict()["evidence_status"] == "read_backed"
+    assert read_backed.to_dict()["read_count"] == 1
+
+
 def test_duckduckgo_parser_keeps_only_public_result_links():
     parser = _DuckDuckGoResultsParser()
     parser.feed(

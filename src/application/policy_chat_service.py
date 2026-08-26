@@ -494,6 +494,7 @@ class ExternalDataPolicyChatService(ChatService):
                     ),
                     owner_thread_id=thread.id,
                     owner_turn_id=turn_id,
+                    research_intent=task_contract.task_intent == "research",
                 )
             else:
                 web_tools = WebToolTrace(enabled=False)
@@ -588,11 +589,18 @@ class ExternalDataPolicyChatService(ChatService):
                 context_blocks.append(disclosed.private_context)
             if disclosed.context:
                 context_blocks.append(disclosed.context)
-            if decision.web_allowed and web_tool_error and not web_tools.used:
-                context_blocks.append(
-                    "联网搜索未获得可信来源。必须明确说明本回答未使用联网来源；"
-                    "不得声称已经搜索、查到或依据联网结果。"
-                )
+            if decision.web_allowed and not web_tools.used:
+                if task_contract.task_intent == "research":
+                    context_blocks.append(
+                        "这是明确研究请求，但本轮没有取得任何已读取正文或结构化一手证据。"
+                        "只能报告研究未完成、候选数量和读取缺口；不得依据搜索摘要或模型既有"
+                        "知识输出具体事实、比较、价格、日期、能力判断或确定性结论。"
+                    )
+                elif web_tool_error:
+                    context_blocks.append(
+                        "联网搜索未获得可用于回答的已读来源。必须明确说明本回答未使用联网"
+                        "来源；不得声称已经查证或依据搜索摘要得出结论。"
+                    )
             if continuation_instruction:
                 context_blocks.append(continuation_instruction)
             model_learning_state = (

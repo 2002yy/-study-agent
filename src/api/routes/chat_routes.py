@@ -193,7 +193,11 @@ async def chat_stream_endpoint(
                 and web_tools.get("error")
                 and web_tools.get("used") is not True
             ):
-                notice = "联网搜索失败，本回答未使用联网来源。\n\n"
+                notice = (
+                    "联网搜索获得了候选链接，但尚未读取正文；本回答不将这些候选作为结论来源。\n\n"
+                    if web_tools.get("evidence_status") == "candidate_only"
+                    else "联网搜索失败，本回答未使用联网来源。\n\n"
+                )
                 reply_parts.append(notice)
                 yield sse_event("token", {"text": notice})
             elif isinstance(web_tools, dict) and web_tools.get("used") is True:
@@ -306,42 +310,31 @@ def _research_progress(run: Any) -> dict[str, Any]:
 
 
 def _web_source_preview(web_tools: dict[str, Any]) -> str:
-    """Render an immediate, source-backed result before a slower model stream."""
+    """Render only sources whose page/API payload entered answer context."""
 
     sources: list[tuple[str, str]] = []
     seen: set[str] = set()
-    calls = web_tools.get("calls")
-    if not isinstance(calls, list):
+    used_sources = web_tools.get("used_sources")
+    if not isinstance(used_sources, list):
         return ""
-    for call in calls:
-        if not isinstance(call, dict) or call.get("name") != "web_search":
+    for item in used_sources:
+        if not isinstance(item, dict):
             continue
-        result = call.get("result")
-        if not isinstance(result, dict):
+        title = " ".join(str(item.get("title") or "").split())
+        url = str(item.get("url") or "").strip()
+        if not title or not url.startswith(("https://", "http://")):
             continue
-        items = result.get("results")
-        if not isinstance(items, list):
+        key = url.rstrip("/").casefold()
+        if key in seen:
             continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            title = " ".join(str(item.get("title") or "").split())
-            url = str(item.get("url") or item.get("link") or "").strip()
-            if not title or not url.startswith(("https://", "http://")):
-                continue
-            key = url.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            sources.append((title, url))
-            if len(sources) >= 3:
-                break
-        if len(sources) >= 3:
-            break
+        seen.add(key)
+        sources.append((title, url))
     if not sources:
         return ""
-    lines = ["联网搜索已完成，先给你本次使用的来源："]
-    lines.extend(f"- [{title}]({url})" for title, url in sources)
+    total = len(sources)
+    preview = sources[:3]
+    lines = [f"联网正文读取已完成，本次使用的来源（预览 {len(preview)}/{total}）："]
+    lines.extend(f"- [{title}]({url})" for title, url in preview)
     return "\n".join(lines) + "\n\n"
 
 

@@ -171,6 +171,15 @@ def test_group_chat_injects_model_selected_web_evidence(tmp_path):
                     ],
                 },
             },
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://docs.python.org"},
+                "result": {
+                    "ok": True,
+                    "url": "https://docs.python.org",
+                    "content": "Python documentation full page",
+                },
+            },
         )
     )
     service, _, group_file, unread_file, state_file = _service(tmp_path)

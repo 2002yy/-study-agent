@@ -40,7 +40,10 @@ def test_web_lookup_run_persists_and_restores_after_repository_restart(tmp_path)
     assert created.status == "completed"
     assert restored is not None
     assert restored.items[0]["search_excerpt"] == "durable lookup"
-    assert restored.source_block
+    assert restored.provider_status == "candidates_only"
+    assert restored.stop_reason == "search_candidates_only"
+    assert restored.answer_confidence == "none"
+    assert restored.source_block == ""
     assert restored.completed_at is not None
 
 

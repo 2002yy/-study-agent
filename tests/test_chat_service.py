@@ -107,6 +107,15 @@ def test_chat_service_injects_model_selected_web_evidence(tmp_path):
                     ],
                 },
             },
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://fastapi.tiangolo.com"},
+                "result": {
+                    "ok": True,
+                    "url": "https://fastapi.tiangolo.com",
+                    "content": "FastAPI documentation body",
+                },
+            },
         )
     )
     captured: dict = {}

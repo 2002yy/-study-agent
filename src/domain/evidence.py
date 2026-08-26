@@ -123,8 +123,9 @@ def build_evidence_snapshot(
 
     Lifecycle status is deliberately conservative:
     - local chunks become selected only when disclosure selected that chunk ID;
-    - WebTool search results are candidates and successful reads are read;
-    - ResearchRun selected/rejected records retain their durable assessment;
+    - WebTool search results are candidates; reads become selected only when used;
+    - ResearchRun selections require durable read/structured-evidence truth;
+    - legacy ResearchRun selections without read truth remain unknown candidates;
     - ordinal legacy web IDs such as ``web-1`` never become selected URLs;
     - pedagogy evidence references remain distinct from answer claim links;
     - claim links are accepted only from an upstream owner with a real claim ID.
@@ -216,6 +217,19 @@ def _add_web_tool_refs(
     if not web_tools:
         return
     tool_error = _text(web_tools.get("error"))
+    evidence_status = _text(web_tools.get("evidence_status"))
+    candidate_provider_status = (
+        "candidate_only"
+        if evidence_status == "candidate_only"
+        else "provider_failed"
+        if tool_error
+        else "found"
+    )
+    used_urls = {
+        _text(item.get("url")).rstrip("/").casefold()
+        for item in web_tools.get("used_sources") or ()
+        if isinstance(item, dict) and _text(item.get("url"))
+    }
     for call in web_tools.get("calls") or ():
         if not isinstance(call, dict):
             continue
@@ -241,7 +255,7 @@ def _add_web_tool_refs(
                         domain=_domain(url),
                         published_at=_published_at(item),
                         lifecycle_status="candidate",
-                        provider_status="provider_failed" if tool_error else "found",
+                        provider_status=candidate_provider_status,
                     )
                 )
         elif name == "web_read":
@@ -249,6 +263,7 @@ def _add_web_tool_refs(
             if not url:
                 continue
             ok = result.get("ok") is True or _text(result.get("ok")).lower() == "true"
+            selected = ok and url.rstrip("/").casefold() in used_urls
             accumulator.add(
                 EvidenceRefV1(
                     id=_web_id(url=url, title=url),
@@ -257,8 +272,13 @@ def _add_web_tool_refs(
                     source=url,
                     url=url,
                     domain=_domain(url),
-                    lifecycle_status="read" if ok else "candidate",
+                    lifecycle_status=(
+                        "selected" if selected else "read" if ok else "candidate"
+                    ),
                     provider_status="read" if ok else "read_failed",
+                    selection_reason=(
+                        "web_read_sent_to_answer" if selected else ""
+                    ),
                 )
             )
 
@@ -273,6 +293,7 @@ def _add_research_run_refs(
         return
     provider_status = _text(research.get("provider_status"))
     run_id = _text(research.get("run_id"))
+    truth_version = _nonnegative_int(research.get("source_truth_version"))
     statuses: tuple[tuple[EvidenceLifecycleStatus, str], ...] = (
         ("selected", "selected_sources"),
         ("rejected", "rejected_sources"),
@@ -292,6 +313,24 @@ def _add_research_run_refs(
             title = _text(assessment.get("title") or item.get("title")) or url
             source_id = _text(assessment.get("source_id"))
             evidence_state = _text(record.get("evidence_state"))
+            read_status = _text(record.get("read_status"))
+            assessment_reason = _text(assessment.get("selection_reason"))
+            verified = read_status in {"read", "structured"} or assessment_reason in {
+                "read_backed_tool_evidence",
+                "structured_tool_evidence",
+            }
+            lifecycle_status: EvidenceLifecycleStatus = status
+            ref_provider_status = provider_status
+            if status == "selected" and not verified:
+                lifecycle_status = "candidate"
+                if truth_version < 2 and not read_status:
+                    ref_provider_status = "legacy_unknown"
+                elif read_status == "failed":
+                    ref_provider_status = "read_failed"
+                elif read_status == "skipped":
+                    ref_provider_status = "read_skipped"
+                else:
+                    ref_provider_status = "candidate_only"
             evidence_id = _web_id(url=url, title=title) if (url or title) else source_id
             if not evidence_id:
                 continue
@@ -305,14 +344,16 @@ def _add_research_run_refs(
                     domain=_text(assessment.get("domain")) or _domain(url),
                     published_at=_published_at(item),
                     score=_finite_float(assessment.get("relevance")),
-                    lifecycle_status=status,
-                    provider_status=provider_status,
+                    lifecycle_status=lifecycle_status,
+                    provider_status=ref_provider_status,
                     selection_reason=(
                         f"research_{evidence_state}:{run_id}"
-                        if status == "selected" and evidence_state and run_id
+                        if lifecycle_status == "selected" and evidence_state and run_id
                         else f"research_run:{run_id}"
-                        if status == "selected" and run_id
-                        else "research_selected" if status == "selected" else ""
+                        if lifecycle_status == "selected" and run_id
+                        else "research_selected"
+                        if lifecycle_status == "selected"
+                        else ""
                     ),
                     rejection_reason=(
                         (
@@ -405,6 +446,13 @@ def _finite_float(value: Any) -> float:
     if parsed != parsed or parsed in {float("inf"), float("-inf")}:
         return 0.0
     return parsed
+
+
+def _nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _object(value: Any) -> dict[str, Any]:

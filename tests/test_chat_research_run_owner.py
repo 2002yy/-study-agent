@@ -38,7 +38,16 @@ def test_chat_tool_trace_is_owned_by_thread_and_turn(tmp_path):
                         }
                     ],
                 },
-            }
+            },
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://example.test/ownership"},
+                "result": {
+                    "ok": True,
+                    "url": "https://example.test/ownership",
+                    "content": "Durable ownership full page",
+                },
+            },
         ],
         source_block="bounded tool evidence",
     )
@@ -51,7 +60,53 @@ def test_chat_tool_trace_is_owned_by_thread_and_turn(tmp_path):
         "turn_id": "turn-1",
     }
     assert completed.research_context["tool_trace"]["calls"][0]["name"] == "web_search"
+    assert completed.research_context["tool_trace"]["evidence_status"] == "read_backed"
     assert completed.source_block == "bounded tool evidence"
+
+
+def test_search_only_trace_stays_candidate_and_cannot_be_reused_as_evidence(tmp_path):
+    service = WebLookupService(
+        WebLookupRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    )
+    created = service.create("Candidate only", run_kind="chat_tool_loop")
+    completed = service.record_tool_trace(
+        created.id,
+        calls=[
+            {
+                "name": "web_search",
+                "arguments": {"query": "candidate"},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Candidate result",
+                            "url": "https://example.test/candidate",
+                        }
+                    ],
+                },
+            }
+        ],
+        source_block="must not become evidence",
+    )
+
+    assert completed.status == "completed"
+    assert completed.provider_status == "candidates_only"
+    assert completed.stop_reason == "search_candidates_only"
+    assert len(completed.items) == 1
+    assert completed.selected_sources == []
+    assert completed.source_block == ""
+    assert completed.research_context["tool_trace"]["evidence_status"] == (
+        "candidate_only"
+    )
+    with pytest.raises(ValueError, match="not usable as chat evidence"):
+        _chat_command(
+            ChatRequest(
+                user_input="Use it",
+                web_context="must not become evidence",
+                web_context_run_id=completed.id,
+            ),
+            service,
+        )
 
 
 @pytest.mark.parametrize(
@@ -117,7 +172,16 @@ def test_chat_command_accepts_only_matching_completed_research_evidence(tmp_path
                         }
                     ],
                 },
-            }
+            },
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://example.test/evidence"},
+                "result": {
+                    "ok": True,
+                    "url": "https://example.test/evidence",
+                    "content": "Recovered full page evidence",
+                },
+            },
         ],
         source_block="server-owned evidence",
     )
@@ -172,7 +236,16 @@ def test_chat_tool_trace_cancelled_by_owner_turn_cannot_complete(tmp_path):
                         }
                     ],
                 },
-            }
+            },
+            {
+                "name": "web_read",
+                "arguments": {"url": "https://example.test/cancelled"},
+                "result": {
+                    "ok": True,
+                    "url": "https://example.test/cancelled",
+                    "content": "Cancelled evidence full page",
+                },
+            },
         ],
         source_block="must not commit",
         operation_id=operation_id,

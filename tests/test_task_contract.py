@@ -36,6 +36,19 @@ def test_research_request_does_not_enter_learning_state():
     assert contract.learning_state_enabled is False
 
 
+def test_explicit_bounded_research_verbs_route_to_research():
+    for request in (
+        "请联网研究：opus5",
+        "调查一下这个产品的价格变化",
+        "比较 Alpha 和 Beta 的实际能力",
+        "综合分析这些公开报道",
+        "verify the current release date",
+    ):
+        contract = classify_task_contract(request)
+        assert contract.task_intent == "research", request
+        assert contract.reason == "explicit_external_research"
+
+
 def test_explicit_learning_and_execution_intents_are_distinct():
     learning = classify_task_contract("带我系统学习 GPT-5.6")
     explain_back = classify_task_contract("我来解释二分查找，你检查我的理解")

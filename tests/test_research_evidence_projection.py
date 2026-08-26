@@ -64,6 +64,8 @@ def test_research_source_projection_keeps_identity_and_assessment_only():
         "run_id": "web_lookup_1",
         "provider_status": "partial",
         "stop_reason": "budget_exhausted",
+        "source_truth_version": 0,
+        "read_summary": {},
         "selected_sources": [
             {
                 "item": {

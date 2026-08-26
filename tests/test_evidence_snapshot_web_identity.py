@@ -64,6 +64,7 @@ def test_research_source_assessment_can_authoritatively_select_same_url():
             "research_sources": {
                 "run_id": "research-1",
                 "provider_status": "found",
+                "source_truth_version": 2,
                 "selected_sources": [
                     {
                         "item": {
@@ -77,6 +78,7 @@ def test_research_source_assessment_can_authoritatively_select_same_url():
                             "domain": "fastapi.tiangolo.com",
                             "relevance": 1.0,
                         },
+                        "read_status": "read",
                     }
                 ],
                 "rejected_sources": [],

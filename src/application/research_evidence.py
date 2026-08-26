@@ -27,6 +27,14 @@ _ASSESSMENT_FIELDS = (
     "rejection_reason",
     "duplicate_of",
     "worth_reading",
+    "selection_reason",
+)
+_READ_SUMMARY_FIELDS = (
+    "attempted",
+    "successful",
+    "failed",
+    "skipped",
+    "used_chars",
 )
 
 
@@ -37,10 +45,20 @@ def research_sources_snapshot(run: Any) -> dict[str, Any]:
     and arbitrary provider payloads are intentionally excluded from ChatTurn truth.
     """
 
+    context = getattr(run, "research_context", None)
+    context = context if isinstance(context, dict) else {}
+    read_summary = context.get("read_summary")
+    read_summary = read_summary if isinstance(read_summary, dict) else {}
     return {
         "run_id": str(getattr(run, "id", "") or ""),
         "provider_status": str(getattr(run, "provider_status", "") or ""),
         "stop_reason": str(getattr(run, "stop_reason", "") or ""),
+        "source_truth_version": _nonnegative_int(context.get("source_truth_version")),
+        "read_summary": {
+            key: read_summary[key]
+            for key in _READ_SUMMARY_FIELDS
+            if key in read_summary and _is_scalar(read_summary[key])
+        },
         "selected_sources": _safe_records(
             getattr(run, "selected_sources", ()) or ()
         ),
@@ -76,6 +94,10 @@ def _safe_record(record: Any) -> dict[str, Any] | None:
     if not safe_item and not safe_assessment:
         return None
     safe: dict[str, Any] = {"item": safe_item, "assessment": safe_assessment}
+    read = _object(record.get("read"))
+    read_status = str(record.get("read_status") or read.get("status") or "").strip()
+    if read_status in {"read", "failed", "skipped", "structured"}:
+        safe["read_status"] = read_status
     evidence_state = record.get("evidence_state")
     if isinstance(evidence_state, str) and evidence_state in {
         "inherited_candidate",
@@ -93,3 +115,10 @@ def _object(value: Any) -> dict[str, Any]:
 
 def _is_scalar(value: Any) -> bool:
     return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0

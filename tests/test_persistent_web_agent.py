@@ -33,6 +33,14 @@ class FakeGateway:
             "verdict": {"status": "not_generated"},
         }
 
+    def read(self, url: str, *, max_chars: int) -> dict:
+        return {
+            "ok": True,
+            "url": url,
+            "content": "full page body"[:max_chars],
+            "method": "test_read",
+        }
+
 
 def test_persistent_agent_exposes_and_executes_pr_review_context_tool():
     captured: dict = {}
@@ -240,6 +248,40 @@ def test_ordinary_research_bypasses_slow_model_tool_planner():
 
     assert trace.used is True
     assert trace.calls[0]["name"] == "web_search"
+    assert trace.calls[1]["name"] == "web_read"
     assert trace.calls[0]["result"]["results"][0]["url"] == (
         "https://example.test/source"
     )
+
+
+def test_explicit_research_uses_planner_and_cannot_adopt_search_only_output():
+    captured: dict = {}
+
+    def run_loop(messages, **_kwargs):
+        captured["system"] = messages[0]["content"]
+        return [
+            {
+                "name": "web_search",
+                "arguments": {"query": "Opus 5"},
+                "result": {
+                    "status": "ok",
+                    "results": [
+                        {
+                            "title": "Candidate",
+                            "url": "https://example.test/candidate",
+                            "snippet": "candidate only",
+                        }
+                    ],
+                },
+            }
+        ]
+
+    trace = PersistentWebToolAgent(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        run_loop=run_loop,
+    ).resolve("请联网研究：opus5", research_intent=True)
+
+    assert "Search results are candidates only" in captured["system"]
+    assert trace.used is False
+    assert trace.to_dict()["evidence_status"] == "candidate_only"
+    assert trace.context_block() == ""

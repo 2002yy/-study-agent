@@ -75,7 +75,13 @@ class _FailingSemanticEvaluator:
         raise AssertionError("semantic evaluation must not run for quick answers")
 
 
-def _service(tmp_path: Path, *, semantic_evaluator=None, retrieve_override=None):
+def _service(
+    tmp_path: Path,
+    *,
+    semantic_evaluator=None,
+    retrieve_override=None,
+    web_trace: WebToolTrace | None = None,
+):
     captured: dict[str, Any] = {
         "web_calls": 0,
         "rag_enabled": [],
@@ -93,6 +99,9 @@ def _service(tmp_path: Path, *, semantic_evaluator=None, retrieve_override=None)
         captured["web_context"] = kwargs["conversation_context"]
         captured["owner_thread_id"] = kwargs["owner_thread_id"]
         captured["owner_turn_id"] = kwargs["owner_turn_id"]
+        captured["research_intent"] = kwargs["research_intent"]
+        if web_trace is not None:
+            return web_trace
         return WebToolTrace(
             calls=(
                 {
@@ -106,6 +115,15 @@ def _service(tmp_path: Path, *, semantic_evaluator=None, retrieve_override=None)
                                 "url": "https://example.test/docs",
                             }
                         ]
+                    },
+                },
+                {
+                    "name": "web_read",
+                    "arguments": {"url": "https://example.test/docs"},
+                    "result": {
+                        "ok": True,
+                        "url": "https://example.test/docs",
+                        "content": "Official docs full page",
                     },
                 },
             )
@@ -465,8 +483,27 @@ def test_research_task_does_not_query_local_knowledge(tmp_path):
 
     assert captured["rag_enabled"] == [False]
     assert captured["web_calls"] == 1
+    assert captured["research_intent"] is True
     assert prepared.route["task_contract"]["source_policy"] == "web_only"
     assert prepared.rag["result_count"] == 0
+
+
+def test_explicit_research_without_any_tool_call_is_forced_to_report_gap(tmp_path):
+    service, captured = _service(tmp_path, web_trace=WebToolTrace())
+
+    prepared = service.start_turn(
+        PolicyChatCommand(
+            user_input="请联网研究：opus5",
+            thread_id="chat-research-no-tools",
+            web_policy="auto",
+            cloud_context_policy="allow_local_evidence",
+        )
+    )
+
+    assert prepared.rag["web_tools"]["used"] is False
+    rag_context = captured["messages"][0]["rag_context"]
+    assert "本轮没有取得任何已读取正文或结构化一手证据" in rag_context
+    assert "不得依据搜索摘要或模型既有知识输出具体事实" in rag_context
 
 
 def test_explicit_quick_answer_override_controls_the_whole_turn(tmp_path):

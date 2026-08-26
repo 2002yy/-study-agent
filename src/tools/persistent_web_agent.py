@@ -142,6 +142,7 @@ class PersistentWebToolAgent(WebToolAgent):
         conversation_context: str = "",
         owner_thread_id: str | None = None,
         owner_turn_id: str | None = None,
+        research_intent: bool = False,
     ) -> WebToolTrace:
         if not _env_flag("WEB_TOOL_ENABLED", default=True):
             return WebToolTrace(enabled=False)
@@ -168,8 +169,17 @@ class PersistentWebToolAgent(WebToolAgent):
                     f"ResearchRun create failed: {type(exc).__name__}: {exc}"
                 )
         query_context = normalize_web_query(user_input)
+        research_instruction = (
+            "This is an explicit bounded-research request. Search results are "
+            "candidates only. Use web_read on discovered pages before declaring "
+            "research complete; if reading fails, leave the result candidate-only "
+            "and do not infer facts from snippets."
+            if research_intent
+            else ""
+        )
         system_prompt = (
             f"{_TOOL_SYSTEM_PROMPT}\n"
+            f"{research_instruction}\n"
             "Use github_pr_review_context when the user asks for an integrated PR review, "
             "review risk context, unresolved-review mapping, or CI-to-change evidence. "
             "Prefer it over manually combining github_pr and github_change_impact. "
@@ -190,7 +200,11 @@ class PersistentWebToolAgent(WebToolAgent):
             },
         ]
         try:
-            if not _requires_planned_tools(user_input) and self.submit_tool_loop is None:
+            if (
+                not research_intent
+                and not _requires_planned_tools(user_input)
+                and self.submit_tool_loop is None
+            ):
                 focused_query = (
                     query_context.canonical_query or query_context.raw_query or user_input
                 )
@@ -202,6 +216,31 @@ class PersistentWebToolAgent(WebToolAgent):
                         "result": result,
                     }
                 ]
+                results = result.get("results") if isinstance(result, dict) else None
+                first_url = ""
+                if isinstance(results, list):
+                    for item in results:
+                        if isinstance(item, dict):
+                            first_url = str(item.get("url") or item.get("link") or "").strip()
+                            if first_url:
+                                break
+                read_method = getattr(self.gateway, "read", None)
+                if first_url and callable(read_method):
+                    try:
+                        read_result = read_method(first_url, max_chars=8000)
+                    except Exception as exc:
+                        read_result = {
+                            "ok": False,
+                            "url": first_url,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    calls.append(
+                        {
+                            "name": "web_read",
+                            "arguments": {"url": first_url, "max_chars": 8000},
+                            "result": read_result,
+                        }
+                    )
                 trace_error = persistence_error
                 if run is not None:
                     preview = WebToolTrace(calls=tuple(calls), run_id=run.id)

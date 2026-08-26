@@ -122,9 +122,10 @@ def test_direct_lookup_persists_bounded_attempts_and_assessed_sources(tmp_path):
     assert run.status == "completed"
     assert run.research_context["canonical_query"] == "GPT-5.6 Sol"
     assert [attempt["status"] for attempt in run.query_attempts] == ["empty", "found"]
-    assert run.provider_status == "found"
-    assert run.stop_reason == "direct_results_found"
-    assert run.answer_confidence == "medium"
+    assert run.provider_status == "candidates_only"
+    assert run.stop_reason == "search_candidates_only"
+    assert run.answer_confidence == "none"
+    assert run.source_block == ""
     assert run.selected_sources[0]["item"] == run.items[0]
     assert run.selected_sources[0]["assessment"]["selected"] is True
     assert run.selected_sources[0]["assessment"]["directness"] == "direct_title"
@@ -159,7 +160,10 @@ def test_lookup_rejects_invalid_and_duplicate_sources_before_citation(tmp_path):
         for record in run.rejected_sources
     }
     assert reasons == {"duplicate", "missing_title_and_url", "invalid_url"}
-    assert run.stop_reason == "direct_results_found"
+    assert run.provider_status == "candidates_only"
+    assert run.stop_reason == "search_candidates_only"
+    assert run.answer_confidence == "none"
+    assert run.source_block == ""
 
 
 def test_empty_results_remain_empty_evidence_not_confirmed_absence(tmp_path):

@@ -6,7 +6,7 @@ import time
 from src.tools.web_agent import WebToolTrace
 
 from src.api.models.chat import ChatRequest
-from src.api.routes.chat_routes import chat_stream_endpoint
+from src.api.routes.chat_routes import _web_source_preview, chat_stream_endpoint
 from src.application.chat_service import ChatDependencies, ChatService
 from src.context_builder import build_messages
 from src.mode_manager import RuntimeModes
@@ -149,6 +149,71 @@ def test_failed_research_emits_visible_notice_before_model_tokens(runtime_test_c
     assert body.index(notice) < body.index("offline answer")
 
 
+def test_source_preview_is_labeled_as_three_of_total_used_sources():
+    preview = _web_source_preview(
+        {
+            "used_sources": [
+                {
+                    "title": f"Read source {index}",
+                    "url": f"https://example.test/{index}",
+                }
+                for index in range(1, 6)
+            ]
+        }
+    )
+
+    assert "本次使用的来源（预览 3/5）" in preview
+    assert "Read source 1" in preview
+    assert "Read source 3" in preview
+    assert "Read source 4" not in preview
+
+
+def test_candidate_only_search_emits_truthful_notice_before_model_tokens(
+    runtime_test_context,
+):
+    async def tokens(*args, **kwargs):
+        yield "bounded answer"
+
+    service = _service(runtime_test_context, tokens)
+    dependencies = service.dependencies
+    service.dependencies = ChatDependencies(
+        **{
+            **dependencies.__dict__,
+            "resolve_web_tools": lambda *_args, **_kwargs: WebToolTrace(
+                calls=(
+                    {
+                        "name": "web_search",
+                        "arguments": {"query": "candidate"},
+                        "result": {
+                            "status": "ok",
+                            "results": [
+                                {
+                                    "title": "Candidate",
+                                    "url": "https://example.test/candidate",
+                                }
+                            ],
+                        },
+                    },
+                )
+            ),
+        }
+    )
+
+    body = asyncio.run(
+        _consume_stream(
+            service,
+            runtime_test_context.web_lookup_service,
+            ConnectedRequest(),
+            "candidate-only-visible-notice",
+            session_service=runtime_test_context.session_service,
+        )
+    )
+
+    notice = "候选链接，但尚未读取正文"
+    assert notice in body
+    assert body.index(notice) < body.index("bounded answer")
+
+
 def test_successful_research_emits_source_preview_before_model_tokens(
     runtime_test_context,
 ):
@@ -175,6 +240,15 @@ def test_successful_research_emits_source_preview_before_model_tokens(
                             ],
                         },
                     },
+                    {
+                        "name": "web_read",
+                        "arguments": {"url": "https://example.test/docs"},
+                        "result": {
+                            "ok": True,
+                            "url": "https://example.test/docs",
+                            "content": "Official documentation body",
+                        },
+                    },
                 ),
                 run_id="web_lookup_found",
             ),
@@ -191,9 +265,10 @@ def test_successful_research_emits_source_preview_before_model_tokens(
         )
     )
 
-    assert "联网搜索已完成" in body
+    assert "联网正文读取已完成" in body
+    assert "本次使用的来源（预览 1/1）" in body
     assert "https://example.test/docs" in body
-    assert body.index("联网搜索已完成") < body.index("synthesized answer")
+    assert body.index("联网正文读取已完成") < body.index("synthesized answer")
 
 
 def test_disconnect_before_first_token_interrupts_turn(runtime_test_context):

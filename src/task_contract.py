@@ -62,6 +62,14 @@ _LEARN_MARKERS = (
 )
 _RESEARCH_PATTERNS = (
     re.compile(r"联网(?:看|查|搜|检索|了解)"),
+    re.compile(
+        r"(?:请|帮我|需要|想要?|做个|进行)?\s*(?:联网)?\s*"
+        r"(?:研究|调研|调查|查证|核实|验证|比较|对比|综合分析)"
+    ),
+    re.compile(
+        r"\b(?:research|investigate|verify|compare|survey|analy[sz]e)\b",
+        re.I,
+    ),
     re.compile(r"(?:搜|查)(?:一下|一查|查看).{0,12}(?:最新|最近|发布|官网|公开)"),
     re.compile(r"(?:最新|最近).{0,16}(?:消息|进展|发布|版本|报道|新闻)"),
     re.compile(r"(?:公开信息|官方消息|官网资料|新闻来源)"),

@@ -42,7 +42,12 @@ def _is_true(value: object) -> bool:
 
 
 def trusted_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return only calls that contain user-displayable source evidence."""
+    """Return sanitized source-bearing calls, including search candidates.
+
+    A successful ``web_search`` proves only that candidate links were
+    discovered.  Callers must use :func:`evidence_tool_calls` before treating
+    a call as answer evidence.
+    """
 
     trusted: list[dict[str, Any]] = []
     discovered_urls: set[str] = set()
@@ -115,6 +120,23 @@ def trusted_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
             trusted.append(call)
 
     return trusted
+
+
+def evidence_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return calls that may enter answer context.
+
+    Plain search snippets are deliberately excluded.  A normal web page is
+    usable only after a successful, discovery-linked ``web_read``.  GitHub
+    tools remain usable because their structured API response is itself the
+    bounded primary payload rather than a search-engine snippet.
+    """
+
+    return [
+        call
+        for call in trusted_tool_calls(calls)
+        if str(call.get("name") or "") == "web_read"
+        or str(call.get("name") or "").startswith("github_")
+    ]
 
 
 def tool_call_errors(calls: list[dict[str, Any]]) -> list[str]:
@@ -223,4 +245,60 @@ def tool_source_items(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             seen.add(url.casefold())
             items.append({**item, "url": url, "link": url})
+    return items
+
+
+def tool_evidence_items(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project answer-usable calls into stable source identities."""
+
+    safe_calls = trusted_tool_calls(calls)
+    search_titles: dict[str, str] = {}
+    for call in safe_calls:
+        if str(call.get("name") or "") != "web_search":
+            continue
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        for item in result.get("results", []):
+            if not isinstance(item, dict):
+                continue
+            url = _public_url(item.get("url") or item.get("link"))
+            title = str(item.get("title") or "").strip()
+            if url and title:
+                search_titles.setdefault(url.casefold(), title)
+
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for call in evidence_tool_calls(calls):
+        name = str(call.get("name") or "")
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        arguments = call.get("arguments")
+        arguments = arguments if isinstance(arguments, dict) else {}
+        if name == "web_read":
+            url = _public_url(result.get("url") or arguments.get("url"))
+            if not url or url.casefold() in seen:
+                continue
+            seen.add(url.casefold())
+            items.append(
+                {
+                    "title": str(result.get("title") or "").strip()
+                    or search_titles.get(url.casefold())
+                    or urlparse(url).netloc,
+                    "url": url,
+                    "link": url,
+                    "snippet": str(result.get("content") or result.get("readme") or "")[:500],
+                    "source": str(result.get("method") or "web_read"),
+                }
+            )
+            continue
+        # Structured GitHub calls are already independently sanitized by
+        # ``trusted_tool_calls`` and can reuse the normal item projection.
+        for item in tool_source_items([call]):
+            url = _public_url(item.get("url") or item.get("link"))
+            if not url or url.casefold() in seen:
+                continue
+            seen.add(url.casefold())
+            items.append(item)
     return items

@@ -113,7 +113,13 @@ function EvidenceRow({
       ) : null}
       {diagnostic && (ref.providerStatus || ref.selectionReason || ref.rejectionReason) ? (
         <span className="evidence-ref-meta">
-          {[ref.providerStatus, ref.selectionReason, ref.rejectionReason]
+          {[
+            ref.providerStatus === "legacy_unknown"
+              ? "legacy candidate · 历史验证状态未知"
+              : ref.providerStatus,
+            ref.selectionReason,
+            ref.rejectionReason,
+          ]
             .filter(Boolean)
             .join(" · ")}
         </span>
@@ -312,23 +318,45 @@ export function EvidenceTrail({ evidence }: { evidence: TurnEvidence }) {
                   {web.searches.map((search, index) => (
                     <div key={`s${index}`} className="web-call-card">
                       <div className="web-call-head">
-                        <Search size={13} /> 搜索 “{search.query}”
+                        <Search size={13} /> 搜索 “{search.query}” · 候选（预览{" "}
+                        {Math.min(3, search.results.length)}/{search.results.length}）
                       </div>
                       {search.results.length ? (
-                        search.results.slice(0, 3).map((result, resultIndex) => (
-                          <a
-                            key={`${result.url ?? result.title ?? resultIndex}`}
-                            className="web-result"
-                            href={result.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {result.title || result.url}
-                            {result.url ? (
-                              <span className="web-url">{result.url}</span>
-                            ) : null}
-                          </a>
-                        ))
+                        <>
+                          {search.results.slice(0, 3).map((result, resultIndex) => (
+                            <a
+                              key={`${result.url ?? result.title ?? resultIndex}`}
+                              className="web-result"
+                              href={result.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {result.title || result.url}
+                              {result.url ? (
+                                <span className="web-url">{result.url}</span>
+                              ) : null}
+                            </a>
+                          ))}
+                          {search.results.length > 3 ? (
+                            <details className="web-result-overflow">
+                              <summary>查看其余 {search.results.length - 3} 条候选</summary>
+                              {search.results.slice(3).map((result, resultIndex) => (
+                                <a
+                                  key={`${result.url ?? result.title ?? resultIndex + 3}`}
+                                  className="web-result"
+                                  href={result.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {result.title || result.url}
+                                  {result.url ? (
+                                    <span className="web-url">{result.url}</span>
+                                  ) : null}
+                                </a>
+                              ))}
+                            </details>
+                          ) : null}
+                        </>
                       ) : (
                         <p className="web-preview">本次查询没有返回可展示的结果。</p>
                       )}

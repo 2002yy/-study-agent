@@ -952,3 +952,16 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - 匹配的远程 [CI #32877392793](https://github.com/2002yy/study-agent/actions/runs/32877392793) 以同一 head SHA 完成，结论为 `success`；pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 test/build、browser Golden Journeys 与 real-stack browser gates 均通过。
 - 交付判断：**SX1 GO / COMPLETE。** 实施及其权威证据均已交付；后续提交/CI 的精确状态以 Git 与 GitHub Actions 为准，不在本文件建立自引用式追记链。
 - 下一唯一切片：**RQ1-A 语义止血**——禁止零正文读取候选进入 `validated_tool_evidence`，修正“本次使用的来源”和 `3/N` UI，legacy 显示 unknown/candidate，并阻止明确研究意图落入 snippet-only 强结论路径。
+
+### 15.9 RQ1-A 本地实施证据（2026-08-26）
+
+- `web_search` 结果现在只形成 candidate；只有与本轮已发现公开 URL 对应、`ok=true` 且包含非空正文的 `web_read`，或独立结构化 GitHub API 证据，才能进入回答上下文、`used_sources` 和 ResearchRun `selected_sources`。搜索摘要不再进入模型联网上下文。
+- chat tool trace、标准 ResearchRun 和 deep ResearchRun 在“有候选、零成功读取”时统一落为 `provider_status=candidates_only`、`stop_reason=search_candidates_only`、`answer_confidence=none`、空 `source_block`；不再产生 `validated_tool_evidence`、`direct_results_found` 或中等置信度的矛盾组合。
+- “研究/调查/验证/比较/综合分析”等明确研究意图会被识别为 research，并绕开普通确定性快速路由。无论得到候选还是规划器零工具结束，只要没有可用正文/结构化证据，模型上下文就被硬性限制为只报告研究未完成、候选数量和读取缺口，不得依据搜索摘要或模型既有知识输出价格、日期、能力比较或确定性结论。
+- 即时回复中的“本次使用的来源”只读取 `used_sources`，标签改为“联网正文读取已完成，本次使用的来源（预览 3/N）”；candidate-only 使用单独的可见止血提示。证据轨迹把搜索结果显示为“候选（预览 3/N）”，前三条之外可展开，candidate/read/selected/read_failed 不再混用。
+- ChatTurn 的 ResearchRun 证据投影新增 `source_truth_version=2` 和有界读取计数/状态，不保存全文。现行已读或结构化证据可派生为 selected；历史 selected 若缺少正文读取真值则派生为 `legacy candidate / 历史验证状态未知`，既不伪造成已读，也不改写为 rejected。
+- 定向后端回归 130/130、全量后端 pytest 1150/1150（366.76 秒）、全量 Ruff、定向 detect-secrets 0 findings、expanded mypy baseline（当前 122、基线 128、净减少 6）、前端 Vitest 344/344 与 TypeScript production build 均通过；`git diff --check` 通过。
+- 真实一键启动复验：后端 `127.0.0.1:8000`、前端 `127.0.0.1:5173`、固定 SearXNG `127.0.0.1:8080` 均 ready；上游多引擎超时/限流被诚实显示为 `degraded`。Playwright 在桌面和 760px 窄屏复验旧 `opus5` turn：主证据区显示“本轮没有标记为已采用的可核对证据”，诊断区显示“候选（预览 3/5）”，其余 2 条可展开，窄屏 `scrollWidth == innerWidth == 760`。唯一 console error 为未配置 `/favicon.ico` 的 404，与本切片无关。
+- **RQ1-A implementation：LOCAL GO。** 本切片只关闭候选/正文/已采用语义与 UI 止血门；不声称研究范围、分析深度或完整 RQ1 已完成。
+- **RQ1：仍为 NO-GO / RQ1-B+C REQUIRED。** 45/60 秒有界研究、问题面规划、5–8 页读取、内容家族/来源角色、原子主张绑定、冲突分析、取消/逐调用审计和 12 个真实案例双门均未由 RQ1-A 实现或验收；G17-LAN 继续 NO-GO。
+- 本地实施证据生成后，远程 `main` 已新增正式跟踪的 `docs/RESEARCH_QUALITY_CODEX_TASKBOOK.md` 与 `docs/RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`。当前批次只交付 RQ1-A，不在同一提交改写两份新规划；RQ1-A 交付后唯一允许的下一批是 docs-only 路线统一，明确 Pre-RQCE、Shared Research Quality Engine、quick/bounded/deep preset、12/20/50–60 三级 Gate 与 RQCE-P0/P1/P2 命名，然后 STOP。该 docs-only 批完成前禁止直接进入旧 RQ1-B、RQCE-P0-A0 或任何 active Claim Engine。
