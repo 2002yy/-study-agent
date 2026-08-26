@@ -1,10 +1,26 @@
 # Study Agent 当前状态
 
 > **唯一进度入口**  
-> 更新：2026-08-25
+> 更新：2026-08-26
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
+
+## 0. Current Handoff
+
+> 新窗口 / 新 Agent 冷启动时先读本节，再按链接读取本轮所需合同；历史章节保留证据与决策时间语义，不拥有比本节更新的“当前下一步”。
+
+- **Current HEAD：**`2afea76f7a37abc1a48e4f25c4974439383907fb`（`main`）。
+- **Remote CI：**[#32955918199](https://github.com/2002yy/study-agent/actions/runs/32955918199) 已完成，结论 `success`，head SHA 与上述 HEAD 精确一致。
+- **Current initiative：**Research Quality Claim Engine（RQCE）/ Shared Research Quality Engine；C1–C100 已冻结，服务 quick / bounded / deep 三个 preset，不新增第四条 research pipeline。
+- **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0-A0 contract audit；A1 contracts；A2 durable `research_context["claim_engine"]` state；A3 research trace；B1 evidence requirement policy；B2 deterministic Evidence Gate；B3 shadow stop decision。
+- **Runtime status：**legacy 用户可见联网研究行为仍是 production truth；Claim Engine **尚未 production-active**；尚未接 `WebLookupService` shadow observer；尚无 legacy-output-to-ClaimState projection；不得把 B3 的纯 decision 层误解为 runtime 已启用。
+- **GO / NO-GO：**上述 foundation checkpoint 为 **REMOTE GO / DELIVERED**；RQCE-P0 整体仍 **NO-GO**；RQ1 bounded production activation 仍 **NO-GO**；G17-LAN 仍 **NO-GO / BLOCKED**。
+- **唯一下一 batch：**`RQCE-P0-C1 Benchmark / Eval Schema`。
+- **C1 禁止事项：**不得接 `WebLookupService`；不得启用 shadow observer；不得实现 claim projection；不得创建完整 20-case fixtures；不得跑 live web；不得改变 quick/bounded/deep 用户可见行为；不得进入 C2。
+- **权威设计合同：**[`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)。
+- **OpenCode 小批施工协议：**[`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)。
+- **状态读取规则：**若本文件历史段落中的旧 HEAD、旧“下一步”或旧 LOCAL/REMOTE 状态与本节冲突，以本节 + Git/GitHub 当前事实为准；实现者应修正文档，不得自行重开已冻结架构选择。
 
 ## 1. 当前结论
 
@@ -25,7 +41,7 @@
 - **P2-D-4D：完成（自动验收部分）；实体手机验收延期。** firefox/webkit sample + 5 项目 51/51 通过；因 Android 导出/部署配置尚未就绪，用户于 2026-08-11 明确将实体手机验收延期，记录表仍为空且不得标记完成。
 - **P2-E：自动化批次完成；实体手机人工验收延期。** 范围（2026-08-11 经现状调研确认，跳过 G 系列产品能力评审）：E-5 仓库清理 → E-1 自动化验收与文档收口 → E-2 backend 辅助模块直测补缺 → E-3 前端 surface 测试补缺；Android 导出/部署配置就绪后再恢复人工验收。
 
-当前已验证实现基线：`dd93fdabaa6f5f2637ef4f03604f43f91a1725c4`（[CI #32761262084 attempt 2](https://github.com/2002yy/study-agent/actions/runs/32761262084) 全门禁通过；验证时本地与 `origin/main` 为 `0/0`）。该基线已经包含 G12 cooperative cancellation、DR1 Deep Research、G14 临时附件、G17 Enter 配置、G16 会话记忆授权、G4 服务端分页/搜索和 G10 安全 follow-up lineage。
+历史基础验证基线：`dd93fdabaa6f5f2637ef4f03604f43f91a1725c4`（[CI #32761262084 attempt 2](https://github.com/2002yy/study-agent/actions/runs/32761262084) 全门禁通过）。当前 RQCE checkpoint 与远程门禁以顶部 **Current Handoff** 为准。
 
 ## 2. P2-D 已进入 main 的基础
 
@@ -446,7 +462,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 7. **G17 人工可访问性与显式 LAN 验收。** 只在 SX1/RQ1 GO 后进入；对比度、真实屏幕阅读器与实体手机仍由人工证据关闭。当前 WLAN 为 Public 且 LAN controller 尚未实现，保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
 8. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究真实性缺口，也不得创建第二套真值。
 
-当前阶段：**RQ1-A / Pre-RQCE 已由 `7edfda4` 和 CI #32945352584 交付；Research Quality 路线已按 15.10 统一为共享引擎的 quick/bounded/deep presets。RQCE-P0-A0 至 B3 已在本地逐批通过但尚未提交，当前唯一允许的下一逻辑 batch 是 RQCE-P0-C1 eval schema；RQ1 整体与 G17-LAN 仍为 NO-GO。**
+当前阶段：**RQ1-A / Pre-RQCE 已由 `7edfda4` 和 CI #32945352584 交付；Research Quality 路线已统一为共享引擎的 quick/bounded/deep presets。RQCE-P0-A0 至 B3 已由 `2afea76f7a37abc1a48e4f25c4974439383907fb` 交付 `main`，匹配的 CI #32955918199 为 `success`；当前唯一允许的下一逻辑 batch 是 RQCE-P0-C1 eval schema；RQ1 整体与 G17-LAN 仍为 NO-GO。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -919,7 +935,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 
 ### 15.5 冻结实施路线
 
-1. **SX1（下一唯一代码切片）：**纳入固定 digest 的最小 Compose/config 与 ignored secret layering；实现备份、`18080` candidate、有效搜索、切换、确定性回滚和 7 天保留；正常启动仍只复用 loopback SearXNG，不开放 LAN。
+1. **SX1（历史第一代码切片）：**纳入固定 digest 的最小 Compose/config 与 ignored secret layering；实现备份、`18080` candidate、有效搜索、切换、确定性回滚和 7 天保留；正常启动仍只复用 loopback SearXNG，不开放 LAN。
 2. **RQ1-A / Pre-RQCE 语义止血：**禁止零正文读取候选成为 `validated_tool_evidence`；修正“本次使用的来源”和 `3/N` UI；legacy 显示 unknown/candidate；明确研究意图不再落入 snippet-only 强结论路径。该前置切片已交付，不回滚。
 3. **Shared Research Quality Engine：**C1–C100 是 Quick / RQ1 bounded / DR1 deep 共用的 Claim/Evidence/Gap/Gate/Cluster/Budget/Trace/Audit 控制平面，不是第四条 research pipeline。旧 RQ1-B 不再单独造 engine，而作为共享引擎首个 production activation target 的 `bounded` preset；仍冻结 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`。
 4. **三级验收：**RQ1-C 的 12 个无泄漏真实案例决定 bounded preset 是否 GO；20 题 Shadow 诊断 Claim Engine 的 False Closure/Scheduler/Gate/Cost；50–60 Frozen + Live benchmark 决定完整 Research Quality / DR1 release。三者不互相替代。
@@ -932,7 +948,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **SX1 implementation：GO / COMPLETE。** 固定 digest、仓库 Compose/config、ignored secret/proxy、备份、`18080` candidate、切换、回滚路径和 retained-container guard 已实现并完成真实切换；实施提交 `1185b63` 已推送，匹配的远程 CI #32877392793 全绿。
 - **RQ1：NO-GO / IMPLEMENTATION REQUIRED。** 真实 `opus5` Run 已证明 snippet-only 强结论与 UI 真值缺口。
 - **G17-LAN：BLOCKED / AUDIT REQUIRED / Decision: NO-GO。** 当前 WLAN 为 Public，controller/gateway/snapshot/firewall 证据尚不存在；只能在 SX1 与 RQ1 GO 后推进正式验收。
-- **当前执行入口以 15.10 为准。** 本节原“RQ1-A 下一步”已由 15.9 的远程交付和 15.10 的路线统一取代。
+- **当前执行入口：顶部 `Current Handoff` + 本文件最后一个 RQCE Stop report。** 历史章节中的旧“下一步”只保留时间语义，不得覆盖顶部 handoff。
 
 ### 15.7 SX1 本地实现证据（2026-08-26）
 
@@ -951,7 +967,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - 实施提交：`1185b63ef6784d08046ca4244ee8ce751b549c39`（`feat: pin and manage local SearXNG`），已推送至 `origin/main`。
 - 匹配的远程 [CI #32877392793](https://github.com/2002yy/study-agent/actions/runs/32877392793) 以同一 head SHA 完成，结论为 `success`；pytest、RAG K1、Ruff、package helper、detect-secrets、expanded mypy、前端 test/build、browser Golden Journeys 与 real-stack browser gates 均通过。
 - 交付判断：**SX1 GO / COMPLETE。** 实施及其权威证据均已交付；后续提交/CI 的精确状态以 Git 与 GitHub Actions 为准，不在本文件建立自引用式追记链。
-- 下一唯一切片：**RQ1-A 语义止血**——禁止零正文读取候选进入 `validated_tool_evidence`，修正“本次使用的来源”和 `3/N` UI，legacy 显示 unknown/candidate，并阻止明确研究意图落入 snippet-only 强结论路径。
+- 下一唯一切片（历史）：**RQ1-A 语义止血**——该切片已由 15.9 完成交付；当前下一步以顶部 handoff 为准。
 
 ### 15.9 RQ1-A 本地实施证据（2026-08-26）
 
@@ -1041,11 +1057,11 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - OpenCode 计划在 B3 写“对 WebLookupService 最小集成”，任务书第15节则把 B 定义为 Gate + Trace unit fixtures、把 shadow observer 明确放在 RQCE-P0-C。当前还没有 legacy-output-to-ClaimState projection；现在接 service 只会让 empty graph 全量 BLOCK，使 `legacy_would_stop_but_shadow_blocked` 指标失真。
 - **冻结处理：B3 只实现纯 stop decision、false-closure candidate 指标和 fail-safe shadow boundary；不改 WebLookupService。** 真实 observer/service checkpoint 接线必须与 C 阶段的 projection/eval schema 同批完成，并证明 legacy answer byte-for-byte 不变。
 
-### 15.18 RQCE-P0-B3 Stop decision（2026-08-26，本地累计未提交）
+### 15.18 RQCE-P0-B3 Stop decision（2026-08-26）
 
 - **Batch status：PASS / COMPLETE。** 新增 `src/web/research/stop_gate.py` 与 `tests/test_research_quality_stop_gate.py`；没有修改 WebLookupService 或任何 legacy path。
 - **Shadow truth。** Decision 同时记录 legacy_would_stop/legacy_should_stop、shadow pass/block/partial、open Critical、gaps/reasons 和 `legacy_would_stop_but_shadow_blocked`。其中 `legacy_should_stop` 始终严格等于 legacy 输入；partial 保留未闭环主张但不误记为 shadow block。
 - **Fail-safe。** Shadow evaluator 任何异常都被收敛为 `unavailable + shadow_gate_failed`，不回放异常细节、不产生 false-closure candidate，也不改变 legacy stop。
 - **验证。** B3 专项 5/5；A0 复用边界 + A1–B3 + 既有 Evidence/AnswerClaim/WebLookup/recovery 覆盖合计 112/112；新增包 Ruff、mypy 0 error；expanded mypy baseline `122 <= 128` 且本包 0 diagnostics；定向 detect-secrets 0 finding files；C1–C100 数量 100→100 且 normalized delta 0；四份权威文档本地链接 0 missing；`git diff --check` 通过。
-- **聚合交付状态：LOCAL GO / REMOTE NOT STARTED。** docs reconciliation、A0、A1、A2、A3、B1、B2、B3 均各自有 Stop report；按用户要求未 commit、未 push、未触发远程 CI。远程 `main` 仍停在 `3ce1563`；不得把本地 GO 误写成远程交付完成。
+- **聚合交付状态：REMOTE GO / CHECKPOINT DELIVERED。** docs reconciliation、A0、A1、A2、A3、B1、B2、B3 已由提交 `2afea76f7a37abc1a48e4f25c4974439383907fb` 推送 `main`；匹配的 [CI #32955918199](https://github.com/2002yy/study-agent/actions/runs/32955918199) 已完成且结论为 `success`。该 checkpoint 仍保持 legacy runtime 行为不变，真实 observer activation 延后到 RQCE-P0-C。
 - **P0 / RQ1 仍 NO-GO。** 当前没有 claim projection、shadow observer、20-case schema/fixtures/runner/report，也没有 active runtime。下一唯一逻辑 batch 是 `RQCE-P0-C1 Benchmark/eval schema`；C 阶段必须先生成可解释 projection，再允许 service observer 接线，且 legacy answer 必须 byte-for-byte 不变。
