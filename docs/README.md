@@ -1,6 +1,6 @@
 # Study Agent 文档索引与治理
 
-> 更新：2026-08-21
+> 更新：2026-08-26
 >
 > **唯一进度入口：[`PROJECT_STATUS.md`](PROJECT_STATUS.md)。** 当前事实、证据、缺口和执行顺序只在该文件维护。
 
@@ -40,6 +40,18 @@
 | [`SECURITY.md`](SECURITY.md) | 安全与外发数据边界 |
 | [`TECH_STACK.md`](TECH_STACK.md) | 当前技术栈参考 |
 | [`MOBILE_ACCEPTANCE_D4D.md`](MOBILE_ACCEPTANCE_D4D.md) | 延期中的实体手机人工验收记录表 |
+| [`G12_ACCEPTANCE.md`](G12_ACCEPTANCE.md) | G12 会话附件切片的人工验收记录（已交付，仅作证据引用） |
+
+### 待裁决的外部路线草案
+
+以下两份文档由外部窗口随 RQ1-A 工作流进入仓库，尚**不构成执行授权**：
+
+- [`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)：联网研究质量整改任务书（C1–C100 / P0–P2 路线）
+- [`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)：对应的 OpenCode 执行计划
+
+它们与 `PROJECT_STATUS.md` 15.5/15.9 的 RQ1 路线存在需统一的边界冲突；按 15.9 冻结结论，
+纳入或替代现路线前必须先完成只读复审与 Grill。进度事实仍以 `PROJECT_STATUS.md` 为唯一入口，
+这两份草案在裁决前**不参与当前事实投票**。
 
 ### 冻结参考
 
