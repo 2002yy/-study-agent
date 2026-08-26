@@ -112,7 +112,7 @@ def test_report_generator_produces_truth_fixed_markdown() -> None:
     report = run_report(CASES_FILE, TRANSCRIPTS_FILE)
     assert report.startswith("# RQCE-P0-C5 Shadow Report")
     assert "Frozen 10 聚合指标" in report
-    assert "Frozen 10 逐 case" in report
+    assert "逐 case 诊断" in report
     assert "RQCE-P0 Exit Gate" in report
     assert "trap-secondary-only-frozen" in report
     assert "trap-unanswerable-frozen" in report
