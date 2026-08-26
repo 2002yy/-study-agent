@@ -42,16 +42,14 @@
 | [`MOBILE_ACCEPTANCE_D4D.md`](MOBILE_ACCEPTANCE_D4D.md) | 延期中的实体手机人工验收记录表 |
 | [`G12_ACCEPTANCE.md`](G12_ACCEPTANCE.md) | G12 会话附件切片的人工验收记录（已交付，仅作证据引用） |
 
-### 待裁决的外部路线草案
+### Research Quality 权威路线
 
-以下两份文档由外部窗口随 RQ1-A 工作流进入仓库，尚**不构成执行授权**：
+以下两份文档已于 2026-08-26 完成 docs-only 路线统一；状态与当前执行入口仍由 `PROJECT_STATUS.md` 15.10 独占：
 
-- [`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)：联网研究质量整改任务书（C1–C100 / P0–P2 路线）
-- [`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)：对应的 OpenCode 执行计划
+- [`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)：联网研究质量整改总合同（C1–C100 / Shared Research Quality Engine / RQCE-P0/P1/P2）
+- [`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)：对应的小批施工与验收协议
 
-它们与 `PROJECT_STATUS.md` 15.5/15.9 的 RQ1 路线存在需统一的边界冲突；按 15.9 冻结结论，
-纳入或替代现路线前必须先完成只读复审与 Grill。进度事实仍以 `PROJECT_STATUS.md` 为唯一入口，
-这两份草案在裁决前**不参与当前事实投票**。
+统一解释：RQ1-A 是已交付的 Pre-RQCE 真值止血；C1–C100 是 quick / bounded / deep 三个 preset 的共享控制平面；旧 RQ1-B 并入 bounded preset。两份施工文档不得覆盖 `PROJECT_STATUS.md` 的当前状态、Gate 或执行授权。
 
 ### 冻结参考
 

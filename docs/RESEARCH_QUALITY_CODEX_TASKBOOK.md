@@ -2,7 +2,8 @@
 
 > 状态：**C1–C100 全部冻结**  
 > 目标仓库：`2002yy/study-agent`  
-> 施工原则：**P0 → P1 → P2 分阶段推进；前一阶段未过验收 Gate，不得进入下一阶段。禁止一次性重构整个联网系统。**  
+> 施工原则：**RQCE-P0 → RQCE-P1 → RQCE-P2 分阶段推进；前一阶段未过验收 Gate，不得进入下一阶段。禁止一次性重构整个联网系统。**
+> 路线统一：**RQ1-A 是已交付的 Pre-RQCE Truth Stabilization；C1–C100 是三种研究 preset 共用的 Research Quality Engine，不是第四条研究管线。**
 > 本任务书优先级高于施工过程中临时产生的“更优雅架构”冲动；如发现冻结决策与当前代码存在硬冲突，只允许记录冲突、给出最小替代方案和证据，不得自行改写目标。
 
 ---
@@ -47,6 +48,37 @@ Question
 
 ---
 
+## 0.1 权威路线统一（2026-08-26）
+
+本节解释 C1–C100 与既有 Quick / RQ1 / DR1 的关系；不改写 C1–C100 决策正文。
+
+```text
+                    Shared Research Quality Engine
+           Claim / Evidence / Gap / Gate / Cluster / Budget
+                         Trace / Audit
+                              |
+             +----------------+----------------+
+             |                |                |
+        quick preset     bounded preset      deep preset
+        轻量快速查询       RQ1 45s/60s        DR1 3–10min
+        不跑完整图         <=20 candidates     10–20 reads
+                         5–8 reads            默认 12/16
+```
+
+- **RQ1-A = Pre-RQCE Truth Stabilization。** candidate、read、selected/cited 的真值修复已经交付，所有 preset 必须继承；禁止回滚。
+- **C1–C100 = Shared Research Quality Engine。** 它是共享控制平面，不是 `standard + RQ1 + DR1` 之外的第四条 pipeline，也不得再并行实现独立 `RQ1BoundedResearchEngine`。
+- **RQ1-B = bounded preset。** 旧 RQ1-B 的问题面规划、多语言查询、安全读取、来源角色、gap 补搜、claim/evidence 绑定、结构化综合与预算要求并入共享引擎；bounded 是通过相应 Gate 后第一个生产激活目标，不代表在 Shadow 阶段提前 active。
+- **Quick preset 保持轻量。** “不得修改 Standard Search 行为”只禁止把完整 Claim Graph、Deep Research 的搜索/read/token/延迟成本强制加给普通快速查询；它不保护错误 evidence truth。candidate/read/selected/cited 语义必须跨 preset 一致。
+- **bounded preset 保持 RQ1 冻结预算。** 最多 20 candidates、5–8 reads、45 秒停止扩展、60 秒硬收口；5–8 是预算范围，不为凑数强读。
+- **deep preset 保持 DR1 产品边界。** 3–10 分钟、10–20 reads；`soft reads=12`、`hard reads=16`、`soft deadline=6min`、`hard deadline=8min` 是 deep 的 `TUNABLE_DEFAULT`，不覆盖 bounded。
+- **三个评测层不互相替代。** RQ1-C 的 12 个真实案例决定 bounded preset 是否 GO；20 题 Shadow 诊断 Claim/Gate/Scheduler/Cost；50–60 Frozen + Live benchmark 决定完整 Research Quality / DR1 release。C30 的原始 40–60 表述保留为设计范围，施工与 release 采用后续冻结的 50–60 Gate。
+- **阶段命名固定为 `RQCE-P0 / RQCE-P1 / RQCE-P2`。** 这是 Research Quality Claim Engine 的施工阶段，避免与 Study Agent 历史 P1/P2 项目阶段混淆；C1–C100 编号不变。
+- **Owner 不变。** 复用 WebLookupRun/ResearchRun、ChatTurn operation/CAS/cancellation 真值；不新增第二套 run truth。
+
+逻辑 batch 必须独立计划、验证和记录。为减少远程 CI 成本，允许把多个相邻且各自通过本地 Exit Gate 的小 batch 累计后统一提交；这不允许跨 Gate、跳过 reviewer/tests，或在同一逻辑 batch 中扩大文件边界。
+
+---
+
 # 1. 不可破坏约束（Codex 必须先读）
 
 ## 1.1 禁止一次性大重构
@@ -57,9 +89,9 @@ Question
 - 替换现有 `EvidenceRefV1` / `AnswerClaimV1` 体系；
 - 新建一整套数据库表来承载 Claim Graph；
 - 默认打开新 Claim Engine；
-- 改掉 Standard Search 的行为；
+- 让 Standard Search 承担完整 Claim Engine / Deep Research 成本，或破坏跨 preset 的 evidence truth；
 - 为“架构整洁”移动大量现有文件；
-- 把 P0/P1/P2 合成一个 PR/一个提交。
+- 把 RQCE-P0/RQCE-P1/RQCE-P2 合成一个 PR/一个提交。
 
 ## 1.2 复用现有基础设施
 
@@ -240,7 +272,7 @@ needs_follow_up =
 - **C60**：Dynamic Claim 增加 expected impact / expected research cost gate。
 
 ### C61–C70
-- **C61**：20 题 Shadow Set 是 P0 诊断实验，不是正式上线判据；正式 release 用 50–60 题。
+- **C61**：20 题 Shadow Set 是 RQCE-P0 诊断实验，不是正式上线判据；正式 release 用 50–60 题。
 - **C62**：Benchmark Gold 主要标 question surfaces / claim requirements / source roles / conflicts / forbidden closure，而非固定长答案。
 - **C63**：同时建设 Frozen Corpus 回归集和 Live-Web 集成集。
 - **C64**：Baseline 与 Shadow/Active 比较必须控制同问题、同时间窗口、同 provider/网络；Frozen 集则使用完全相同 corpus。
@@ -292,7 +324,7 @@ needs_follow_up =
 
 # 4. 目标内部数据模型（第一版）
 
-P0 只实现必要字段，避免一开始做满所有属性。
+RQCE-P0 只实现必要字段，避免一开始做满所有属性。
 
 ```text
 ResearchState
@@ -387,13 +419,13 @@ RESEARCH_CLAIM_ENGINE_MODE=off|shadow|active
 off
 ```
 
-直到 P0 Shadow 通过。
+直到 RQCE-P0 Shadow 通过。
 
 ---
 
-# 6. P0 —— Contracts + Shadow + 20 题诊断实验
+# 6. RQCE-P0 —— Contracts + Shadow + 20 题诊断实验
 
-## P0 目标
+## RQCE-P0 目标
 
 **不改变用户可见 Deep Research 回答。**
 
@@ -410,18 +442,19 @@ off
 9. 从现有 Deep Research 输出投影到 Shadow Claim Engine；
 10. 能回答“legacy 为什么提前结束”。
 
-P0 不追求完整新搜索调度器，不做生产切换。
+RQCE-P0 不追求完整新搜索调度器，不做生产切换。
 
 ---
 
-## P0 新增文件建议
+## RQCE-P0 新增文件建议
 
 优先采用新子包，**不移动现有文件**：
 
 ```text
 src/web/research/
 ├─ __init__.py
-├─ models.py
+├─ contracts.py
+├─ state.py
 ├─ claim_planner.py
 ├─ source_roles.py
 ├─ evidence_gate.py
@@ -430,18 +463,13 @@ src/web/research/
 └─ shadow.py
 ```
 
-测试：
+测试按当前仓库 flat discovery 起步；A1 的 exact test file 是：
 
 ```text
-tests/research/
-├─ test_models.py
-├─ test_claim_planner.py
-├─ test_source_roles.py
-├─ test_evidence_gate.py
-├─ test_trace.py
-├─ test_shadow.py
-└─ test_metrics.py
+tests/test_research_quality_contracts.py
 ```
+
+后续测试只有在数量足以形成稳定子域时才迁入 `tests/research/`，不得在 A1 顺手移动既有测试。
 
 Fixtures：
 
@@ -463,7 +491,7 @@ tools/report_research_shadow.py
 
 ---
 
-## P0 修改现有文件
+## RQCE-P0 修改现有文件
 
 ### `src/application/web_lookup_service.py`
 
@@ -477,7 +505,7 @@ tools/report_research_shadow.py
 
 ### `src/web/source_assessment.py`
 
-P0 不改为“真相判断器”。
+RQCE-P0 不改为“真相判断器”。
 
 只允许：
 
@@ -487,13 +515,13 @@ P0 不改为“真相判断器”。
 
 ### `src/domain/evidence.py`
 
-原则上 P0 不改 schema。
+原则上 RQCE-P0 不改 schema。
 
 如 ResearchState 需要稳定 evidence ID helper，可提取/复用，但不得破坏 `EvidenceSnapshotV1` 兼容性。
 
 ### `src/domain/answer_claims.py`
 
-P0 不改主 contract。
+RQCE-P0 不改主 contract。
 
 仅在 evaluator 复用确有必要时抽取共用 validation helper；不能让 ResearchClaim 直接继承 AnswerClaim。
 
@@ -510,7 +538,7 @@ src/evals/research_quality.py
 
 ---
 
-## P0 Hard Gate 最小规则
+## RQCE-P0 Hard Gate 最小规则
 
 至少覆盖：
 
@@ -527,7 +555,7 @@ src/evals/research_quality.py
 
 ---
 
-# 7. P0 必做：20 题 Shadow Research Experiment
+# 7. RQCE-P0 必做：20 题 Shadow Research Experiment
 
 ## 7.1 性质
 
@@ -609,9 +637,9 @@ SUPPORTS / CONTRADICTS / QUALIFIES / high-value LEAD
 
 目标第一版：`>60%`，成熟：`>70%`。
 
-## 7.5 P0 退出条件
+## 7.5 RQCE-P0 退出条件
 
-P0 允许进入 P1 的最低条件：
+RQCE-P0 允许进入 RQCE-P1 的最低条件：
 
 - 所有 hard-gate deterministic tests 通过；
 - Shadow trace 可完整解释每个 false closure；
@@ -622,15 +650,15 @@ P0 允许进入 P1 的最低条件：
 - 没有发现 Claim Engine 无界增长/死循环；
 - legacy 用户回答路径在 `off` 和 `shadow` 模式下保持兼容。
 
-**P0 不要求达到最终 Release KPI。**
+**RQCE-P0 不要求达到最终 Release KPI。**
 
 ---
 
-# 8. P1 —— Active Core：Gap-directed Research + Budget + Stop Gate
+# 8. RQCE-P1 —— Active Core：Gap-directed Research + Budget + Stop Gate
 
-P0 过后才开始。
+RQCE-P0 过后才开始。
 
-## P1 目标
+## RQCE-P1 目标
 
 让新 Claim Engine 在 feature flag `active` 下真正控制 Deep Research：
 
@@ -651,7 +679,7 @@ Standard Search 保持旧轻量路径。
 
 ---
 
-## P1 新增模块
+## RQCE-P1 新增模块
 
 ```text
 src/web/research/
@@ -672,7 +700,7 @@ src/web/research/
 
 ---
 
-## P1 修改 `src/application/web_lookup_service.py`
+## RQCE-P1 修改 `src/application/web_lookup_service.py`
 
 目标是**变薄**，但不要一口气拆完。
 
@@ -707,7 +735,7 @@ WebLookupService
 
 ---
 
-## P1 Query 策略
+## RQCE-P1 Query 策略
 
 同一 Gap 一批默认 2–4 queries（TUNABLE），但必须覆盖不同 SearchIntent：
 
@@ -737,11 +765,11 @@ canonicalize
 ### 改掉现有“first non-empty variant break”的行为
 
 只在 Claim Engine active path 改。
-Legacy path暂不动，防止 P1 扩散回归范围。
+Legacy path暂不动，防止 RQCE-P1 扩散回归范围。
 
 ---
 
-## P1 Read Scheduler
+## RQCE-P1 Read Scheduler
 
 排序优先级：
 
@@ -767,7 +795,7 @@ wave 结束立即 Gate。
 
 ---
 
-## P1 Evidence Extraction
+## RQCE-P1 Evidence Extraction
 
 禁止：
 
@@ -786,7 +814,7 @@ facts = content[:1200]
 
 ---
 
-## P1 Source Independence
+## RQCE-P1 Source Independence
 
 第一版用启发式 cluster 即可：
 
@@ -811,7 +839,7 @@ independence_score/proposal
 
 ---
 
-## P1 Saturation
+## RQCE-P1 Saturation
 
 `TUNABLE_DEFAULT`：
 
@@ -833,7 +861,9 @@ claim status improvement
 
 ---
 
-## P1 Runtime Budget
+## RQCE-P1 Runtime Budget
+
+本节的 12/16 reads 与 6/8 分钟只用于 `deep` preset 的 `TUNABLE_DEFAULT`；`bounded` 继续使用 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`，不得被本节覆盖。
 
 建议默认：
 
@@ -859,7 +889,7 @@ Budget 由 code 所有；模型只能看到剩余预算、建议如何分配。
 
 ---
 
-## P1 Stop Gate
+## RQCE-P1 Stop Gate
 
 在模型准备结束 / research synthesis 前运行：
 
@@ -894,7 +924,7 @@ Stop Gate 不接受模型自报“已经够了”。
 
 ---
 
-# 9. P1 失败恢复
+# 9. RQCE-P1 失败恢复
 
 必须引入结构化 `ResearchFailureReason`：
 
@@ -944,11 +974,11 @@ FAILED
 
 ---
 
-# 10. P2 —— Reader/Synthesis/Audit/Production Quality
+# 10. RQCE-P2 —— Reader/Synthesis/Audit/Production Quality
 
-P1 核心控制面稳定后才做。
+RQCE-P1 核心控制面稳定后才做。
 
-## P2 Reader
+## RQCE-P2 Reader
 
 ### 修改
 
@@ -997,7 +1027,7 @@ excerpt/hash
 
 ---
 
-## P2 Cache
+## RQCE-P2 Cache
 
 新增/复用持久缓存：
 
@@ -1019,7 +1049,7 @@ freshness_class
 
 ---
 
-# 11. P2 ResearchBrief + Synthesis
+# 11. RQCE-P2 ResearchBrief + Synthesis
 
 新增：
 
@@ -1074,7 +1104,7 @@ synthesis_guidance
 
 ---
 
-# 12. P2 Final Answer Auditor
+# 12. RQCE-P2 Final Answer Auditor
 
 检查：
 
@@ -1102,7 +1132,7 @@ Date discipline
 
 # 13. 50–60 题正式 Release Benchmark
 
-P2/active 生产默认前必须完成。
+RQCE-P2/active 生产默认前必须完成。
 
 ## 13.1 两套测试
 
@@ -1240,7 +1270,7 @@ Veto：
 
 每批提交至少包含对应测试。
 
-## 14.1 P0 deterministic fixtures
+## 14.1 RQCE-P0 deterministic fixtures
 
 必须有：
 
@@ -1260,7 +1290,7 @@ Veto：
 14. duplicate claim merge retains alias/canonical
 15. dynamic claim cap 生效
 
-## 14.2 P1 integration/replay
+## 14.2 RQCE-P1 integration/replay
 
 必须覆盖：
 
@@ -1279,7 +1309,7 @@ Veto：
 - domain circuit breaker
 - fast/reasoning model routing fallback
 
-## 14.3 P2 synthesis
+## 14.3 RQCE-P2 synthesis
 
 必须覆盖：
 
@@ -1312,7 +1342,7 @@ Veto：
 
 Codex 必须按以下最小批次提交，不允许跳阶段：
 
-## P0-A：Contract only
+## RQCE-P0-A：Contract only
 
 - models
 - schema validation
@@ -1321,13 +1351,13 @@ Codex 必须按以下最小批次提交，不允许跳阶段：
 
 **不得接生产流程。**
 
-## P0-B：Gate + Trace
+## RQCE-P0-B：Gate + Trace
 
 - deterministic evidence gate
 - research trace
 - unit fixtures
 
-## P0-C：Shadow Harness
+## RQCE-P0-C：Shadow Harness
 
 - shadow observer
 - 20-case fixtures
@@ -1335,11 +1365,11 @@ Codex 必须按以下最小批次提交，不允许跳阶段：
 
 运行 20 题并产出报告。
 
-**只有人工确认 P0 报告后才进入 P1。**
+**只有人工确认 RQCE-P0 报告后才进入 RQCE-P1。**
 
 ---
 
-## P1-A：Gap + CandidatePool
+## RQCE-P1-A：Gap + CandidatePool
 
 - gap planner
 - query intents
@@ -1347,14 +1377,14 @@ Codex 必须按以下最小批次提交，不允许跳阶段：
 - role fit
 - clustering basic
 
-## P1-B：Scheduler + Extractor
+## RQCE-P1-B：Scheduler + Extractor
 
 - read waves
 - batch extractor
 - eligible evidence
 - marginal evidence gain
 
-## P1-C：Budget + Stop Gate
+## RQCE-P1-C：Budget + Stop Gate
 
 - runtime budget
 - saturation
@@ -1368,20 +1398,20 @@ Codex 必须按以下最小批次提交，不允许跳阶段：
 
 ---
 
-## P2-A：Progressive Reader
+## RQCE-P2-A：Progressive Reader
 
 - section locate
 - PDF
 - JS/login/block states
 - cache/circuit breaker
 
-## P2-B：ResearchBrief + Synthesis
+## RQCE-P2-B：ResearchBrief + Synthesis
 
 - structured brief
 - competing explanations
 - answer-first synthesis
 
-## P2-C：Final Auditor + Release Benchmark
+## RQCE-P2-C：Final Auditor + Release Benchmark
 
 - final claim audit
 - one repair max
@@ -1516,24 +1546,24 @@ Shadow/Benchmark after
 
 ---
 
-# 20. Codex 开工指令（直接执行）
+# 20. Codex A0 初始开工指令（已完成，仅供审计回放）
 
 ```text
 请按照《Study Agent 联网研究质量整改任务书（Codex 施工版）》施工。
 
 硬约束：
 1. C1–C100 已冻结，不重新讨论架构。
-2. 只做 P0-A：Contract only。
-3. 不进入 P0-B/P0-C/P1/P2。
+2. 只做 RQCE-P0-A0：现状契约审计（只读）。
+3. 不进入 RQCE-P0-A1/RQCE-P0-B/RQCE-P0-C/RQCE-P1/RQCE-P2。
 4. 不重写 WebLookupService。
-5. 不改 Standard Search 行为。
+5. 不让 Standard Search 承担完整 Claim Engine / Deep Research 成本；不破坏跨 preset evidence truth。
 6. 不替换现有 EvidenceRefV1 / AnswerClaimV1；ResearchClaim 建在其上并引用 server-owned evidence IDs。
-7. 第一版 ResearchState 放 WebLookupRun.research_context["claim_engine"]，schema_version=1。
-8. 每个新行为必须配 unit test / fixture。
-9. 运行相关回归测试；若出现失败，先定位是否由本批引入。
-10. 完成后按任务书第16节格式汇报，并停下等待下一批，不自动继续。
+7. 本批不修改 production code；只确认第一版 ResearchState、owner、持久化与兼容边界。
+8. 输出可复用资产、collision/risk、A1 exact files、测试矩阵和 forbidden areas。
+9. 运行文档/引用/diff 检查；不得以审计为名提前创建 contracts。
+10. 完成后按任务书第16节格式生成 A0 Stop report。若用户已授权连续本地累计，再以新 Preflight 进入 A1。
 
-开始前先读取并总结与 P0-A 直接相关的当前实现：
+开始前先读取并总结与 RQCE-P0-A0 直接相关的当前实现：
 - src/application/web_lookup_service.py
 - src/domain/evidence.py
 - src/domain/answer_claims.py
@@ -1556,7 +1586,7 @@ Shadow/Benchmark after
 已确认的几个当前基线：
 
 - `source_assessment.py` 当前主要判断 usability/directness，不判断 truth；`worth_reading` 门槛较宽。
-- `web_lookup_service.py` 当前存在 query variant 命中首个非空结果后 `break` 的 legacy 行为；Claim Engine active path 要在 P1 改，但 P0 不动 legacy。
+- `web_lookup_service.py` 当前存在 query variant 命中首个非空结果后 `break` 的 legacy 行为；Claim Engine active path 要在 RQCE-P1 改，但 RQCE-P0 不动 legacy。
 - standard research 当前 read budget 默认约 `max_reads=3 / max_chars_per_source=6000 / max_total_chars=16000`；Deep Research 新预算另行控制。
 - `concurrency.py` 已有 bounded executor，可复用。
 - `deep_research.py` 已有独立 auto-escalation，不纳入 Claim Engine 重构。
@@ -1566,4 +1596,4 @@ Shadow/Benchmark after
 
 ---
 
-**执行终点：先完成 P0-A，然后停。**
+**当前执行点：A0–B3 已在本地逐批通过、尚未提交；以 `docs/PROJECT_STATUS.md` 最后一个 RQCE Stop report 为准，下一逻辑 batch 是 RQCE-P0-C1。A0 指令不得重复执行。**

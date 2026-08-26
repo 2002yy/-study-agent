@@ -446,7 +446,7 @@ post-P2-D acceptance + test hardening（不含 G 系列产品能力评审）
 7. **G17 人工可访问性与显式 LAN 验收。** 只在 SX1/RQ1 GO 后进入；对比度、真实屏幕阅读器与实体手机仍由人工证据关闭。当前 WLAN 为 Public 且 LAN controller 尚未实现，保持 `BLOCKED / AUDIT REQUIRED / Decision: NO-GO`。
 8. **继续延期 Android 产品化、Learner Model 独立 UI、GraphRAG 与长期画像写回。** 它们不得抢占当前研究真实性缺口，也不得创建第二套真值。
 
-当前阶段：**SX1 实施提交 `1185b63` 已推送 `origin/main`，对应远程 CI #32877392793 全绿；当前唯一允许的新代码切片为 RQ1-A 语义止血。RQ1 整体与 G17-LAN 仍保持 NO-GO，不得提前进入 RQ1-B/C 或 LAN。**
+当前阶段：**RQ1-A / Pre-RQCE 已由 `7edfda4` 和 CI #32945352584 交付；Research Quality 路线已按 15.10 统一为共享引擎的 quick/bounded/deep presets。RQCE-P0-A0 至 B3 已在本地逐批通过但尚未提交，当前唯一允许的下一逻辑 batch 是 RQCE-P0-C1 eval schema；RQ1 整体与 G17-LAN 仍为 NO-GO。**
 
 ## 10. 2026-08-21 同步、仓库整理与下一切片门禁
 
@@ -920,9 +920,9 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 ### 15.5 冻结实施路线
 
 1. **SX1（下一唯一代码切片）：**纳入固定 digest 的最小 Compose/config 与 ignored secret layering；实现备份、`18080` candidate、有效搜索、切换、确定性回滚和 7 天保留；正常启动仍只复用 loopback SearXNG，不开放 LAN。
-2. **RQ1-A 语义止血：**禁止零正文读取候选成为 `validated_tool_evidence`；修正“本次使用的来源”和 `3/N` UI；legacy 显示 unknown/candidate；明确研究意图不再落入 snippet-only 强结论路径。
-3. **RQ1-B 有界研究：**实现问题面规划、多语言查询、安全读取、内容家族去重、来源角色、一次缺口补搜、原子主张/证据绑定、结构化综合和 45/60 秒取消/预算。
-4. **RQ1-C 双门验收：**确定性测试 + 12 个无泄漏真实案例 + 慢搜索/慢读取取消实测 + 逐调用审计；全部硬门闭合后才能将 RQ1 标为 GO。
+2. **RQ1-A / Pre-RQCE 语义止血：**禁止零正文读取候选成为 `validated_tool_evidence`；修正“本次使用的来源”和 `3/N` UI；legacy 显示 unknown/candidate；明确研究意图不再落入 snippet-only 强结论路径。该前置切片已交付，不回滚。
+3. **Shared Research Quality Engine：**C1–C100 是 Quick / RQ1 bounded / DR1 deep 共用的 Claim/Evidence/Gap/Gate/Cluster/Budget/Trace/Audit 控制平面，不是第四条 research pipeline。旧 RQ1-B 不再单独造 engine，而作为共享引擎首个 production activation target 的 `bounded` preset；仍冻结 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`。
+4. **三级验收：**RQ1-C 的 12 个无泄漏真实案例决定 bounded preset 是否 GO；20 题 Shadow 诊断 Claim Engine 的 False Closure/Scheduler/Gate/Cost；50–60 Frozen + Live benchmark 决定完整 Research Quality / DR1 release。三者不互相替代。
 5. **G17-LAN：**在 production snapshot、单设备 Private LAN、gateway token isolation、watchdog/firewall cleanup 和 raw/sanitized artifact 合同下实现；最后由实体手机、真实屏幕阅读器与对比度人工记录决定 G17 GO/NO-GO。
 6. **明确延期：**动态浏览器读取、HTTPS/tunnel、公共或子网 LAN、自动镜像升级、Valkey/公共限流、USB/镜像替代验收、Android 产品化、GraphRAG 和长期画像写回均不进入上述切片。
 
@@ -932,7 +932,7 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **SX1 implementation：GO / COMPLETE。** 固定 digest、仓库 Compose/config、ignored secret/proxy、备份、`18080` candidate、切换、回滚路径和 retained-container guard 已实现并完成真实切换；实施提交 `1185b63` 已推送，匹配的远程 CI #32877392793 全绿。
 - **RQ1：NO-GO / IMPLEMENTATION REQUIRED。** 真实 `opus5` Run 已证明 snippet-only 强结论与 UI 真值缺口。
 - **G17-LAN：BLOCKED / AUDIT REQUIRED / Decision: NO-GO。** 当前 WLAN 为 Public，controller/gateway/snapshot/firewall 证据尚不存在；只能在 SX1 与 RQ1 GO 后推进正式验收。
-- **当前唯一允许下一步：建立 RQ1-A 语义止血窄切片；不夹带 RQ1-B/C 或 LAN。**
+- **当前执行入口以 15.10 为准。** 本节原“RQ1-A 下一步”已由 15.9 的远程交付和 15.10 的路线统一取代。
 
 ### 15.7 SX1 本地实现证据（2026-08-26）
 
@@ -962,6 +962,90 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - ChatTurn 的 ResearchRun 证据投影新增 `source_truth_version=2` 和有界读取计数/状态，不保存全文。现行已读或结构化证据可派生为 selected；历史 selected 若缺少正文读取真值则派生为 `legacy candidate / 历史验证状态未知`，既不伪造成已读，也不改写为 rejected。
 - 定向后端回归 130/130、全量后端 pytest 1150/1150（366.76 秒）、全量 Ruff、定向 detect-secrets 0 findings、expanded mypy baseline（当前 122、基线 128、净减少 6）、前端 Vitest 344/344 与 TypeScript production build 均通过；`git diff --check` 通过。
 - 真实一键启动复验：后端 `127.0.0.1:8000`、前端 `127.0.0.1:5173`、固定 SearXNG `127.0.0.1:8080` 均 ready；上游多引擎超时/限流被诚实显示为 `degraded`。Playwright 在桌面和 760px 窄屏复验旧 `opus5` turn：主证据区显示“本轮没有标记为已采用的可核对证据”，诊断区显示“候选（预览 3/5）”，其余 2 条可展开，窄屏 `scrollWidth == innerWidth == 760`。唯一 console error 为未配置 `/favicon.ico` 的 404，与本切片无关。
-- **RQ1-A implementation：LOCAL GO。** 本切片只关闭候选/正文/已采用语义与 UI 止血门；不声称研究范围、分析深度或完整 RQ1 已完成。
-- **RQ1：仍为 NO-GO / RQ1-B+C REQUIRED。** 45/60 秒有界研究、问题面规划、5–8 页读取、内容家族/来源角色、原子主张绑定、冲突分析、取消/逐调用审计和 12 个真实案例双门均未由 RQ1-A 实现或验收；G17-LAN 继续 NO-GO。
-- 本地实施证据生成后，远程 `main` 已新增正式跟踪的 `docs/RESEARCH_QUALITY_CODEX_TASKBOOK.md` 与 `docs/RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`。当前批次只交付 RQ1-A，不在同一提交改写两份新规划；RQ1-A 交付后唯一允许的下一批是 docs-only 路线统一，明确 Pre-RQCE、Shared Research Quality Engine、quick/bounded/deep preset、12/20/50–60 三级 Gate 与 RQCE-P0/P1/P2 命名，然后 STOP。该 docs-only 批完成前禁止直接进入旧 RQ1-B、RQCE-P0-A0 或任何 active Claim Engine。
+- **RQ1-A / Pre-RQCE implementation：GO / COMPLETE。** 实现提交 `7edfda44fa83093d7b3c3ffbe52617375fb7d5fd` 已推送 `main`；匹配的 [CI #32945352584](https://github.com/2002yy/study-agent/actions/runs/32945352584) 为 `success`。本切片只关闭候选/正文/已采用语义与 UI 止血门；不声称研究范围、分析深度或完整 RQ1 已完成。
+- **RQ1：仍为 NO-GO / bounded preset + RQ1-C REQUIRED。** 45/60 秒有界研究、问题面规划、5–8 页读取、内容家族/来源角色、原子主张绑定、冲突分析、取消/逐调用审计和 12 个真实案例双门仍未实现或验收；G17-LAN 继续 NO-GO。
+- 远程 `main` 已跟踪 `docs/RESEARCH_QUALITY_CODEX_TASKBOOK.md` 与 `docs/RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`；它们与本节的统一结果见 15.10，不再作为平行草案参与事实投票。
+
+### 15.10 Research Quality 路线统一（2026-08-26，docs-only reconciliation）
+
+- **架构：CLOSED。** RQ1-A 正式定义为 `Pre-RQCE Truth Stabilization`；C1–C100 正式定义为 `Shared Research Quality Engine`，服务 quick / bounded / deep 三个 preset，不新增第四条 pipeline，不实现独立 `RQ1BoundedResearchEngine`。
+- **Standard Search invariant：CLOSED。** Quick 不承担完整 Claim Graph、Deep Research 的 search/read/token/延迟成本；该约束不保护错误 evidence truth。candidate/read/selected/cited 语义必须跨 preset 一致。
+- **预算：CLOSED。** bounded 保持 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`；deep 保持 DR1 的 3–10 分钟、10–20 reads，12/16 reads 与 6/8 分钟是 deep `TUNABLE_DEFAULT`；quick 继续更轻。
+- **Gate：CLOSED。** 12-case RQ1-C、20-case Shadow、50–60 Frozen + Live 分别拥有 bounded GO、工程诊断、整体/DR1 Release 三种不同判断权，不互相替代。
+- **命名：CLOSED。** 新研究整改施工阶段统一为 `RQCE-P0 / RQCE-P1 / RQCE-P2`；C1–C100 内容与编号不变，避免和 Study Agent 历史 P1/P2 项目阶段冲突。
+- **Owner：CLOSED。** 继续扩展现有 WebLookupRun/ResearchRun 与 ChatTurn operation/CAS/cancellation 真值，不新增第二套 run truth。
+- **交付节奏：CLOSED。** 每个逻辑 batch 仍需独立 preflight、Exit Gate、本地验证和 Stop report；为减少重复远程 CI，用户已明确允许多个相邻且各自通过的本地小批累计后统一提交。不得跨 Gate 聚合或省略逐批验证。
+- **本轮施工起点：`RQCE-P0-A0` 只读契约审计。** 该起点已按 15.11 完成；当前执行点必须读取本文件最后一个 RQCE Stop report，不得回退到本条重复施工。
+
+### 15.11 RQCE-P0-A0 现状契约审计（2026-08-26，read-only）
+
+- **Batch status：PASS / COMPLETE。** A0 只审计现状与冻结边界，没有修改 production code；定向基线 `51 passed in 15.26s`，文档链接、C1–C100 决策行守恒与 `git diff --check` 随本地 docs batch 继续复验。
+- **运行与持久化 owner：CLOSED。** `WebLookupRun.research_context` 是第一版 Claim Engine state 的唯一持久化位置，键为 `claim_engine`；`WebLookupRepository` 已拥有 operation ownership、version CAS、checkpoint、cooperative cancellation 与 terminal transition。不得新增 ResearchRun/LocalRagRun/ClaimRun 表或第二套状态机真值。
+- **可复用 evidence truth：CLOSED。** `src/domain/evidence.py` 的 `EvidenceRefV1`、`ClaimEvidenceLinkV1` 与 server-owned evidence IDs 是事实层；新的 research relation 由 Research Contracts 做窄枚举校验。`src/evidence/evidence_ref.py` 只用于旧归一化/UI 投影，不升级为持久化 owner。
+- **Claim 边界：CLOSED。** `AnswerClaimV1` 继续只表示最终答案主张；`ResearchClaim` 表示研究过程中的问题分解、缺口与冲突，二者不合并。可复用 known evidence ID、重复 ID、confidence/range 等验证模式，但不得让 research contract 改写 final-answer lifecycle。
+- **查询与调度边界：CLOSED。** `src/web/research_contract.py` 继续拥有 legacy query attempts / deterministic query context；`source_assessment.py` 继续只判 usability/directness，不冒充 Claim Gate；`deep_research.py` 继续只做 escalation；`concurrency.py` 的 bounded executor 可在后续调度 batch 复用。A1 不改这些文件。
+- **包位置 collision：RESOLVED。** 新共享引擎使用 `src/web/research/`，避免含混的顶层 `src/research/`，也不把新合同塞入既有单文件 `src/web/research_contract.py`。测试沿用仓库 flat discovery。
+- **A1 exact files：FROZEN。** 仅 `CREATE src/web/research/__init__.py`、`CREATE src/web/research/contracts.py`、`CREATE tests/test_research_quality_contracts.py`。production files = 2；A1 只实现不可变、版本化、可序列化的数据合同与纯校验，不实现 planner/gate/orchestrator/persistence adapter。
+- **A1 forbidden files：FROZEN。** 不修改 `src/application/web_lookup_service.py`、`src/repositories/web_lookup_repository.py`、`src/domain/runtime_entities.py`、数据库 schema/migration、现有 evidence/answer-claim/query contracts、frontend、prompt 或 feature flag；不启动 shadow/active。
+- **A1 test matrix：FROZEN。** 覆盖最小合法 state round-trip；claim kind/priority/state/relation 枚举；未知/重复 claim 与 evidence link；confidence 与 budget 边界；gap/conflict 引用完整性；schema version fail-closed；无 raw page body/secret 字段；输入顺序不影响确定性输出。
+- **已知风险。** `ClaimEvidenceLinkV1` 本身允许通用字符串，因此 research-specific relation 必须在新 builder/parser 中 fail closed；`research_context` 是 JSON 边界，A2 必须使用显式 `to_dict/from_dict` 且保留 repository CAS，不能直接序列化 dataclass；现有 source assessment 的数量置信度不能作为事实真值。
+- **A0 Stop report。** Behavior changed：仅权威文档冻结合同边界；Behavior intentionally unchanged：所有 runtime/search/read/answer/UI/persistence 行为；Frozen decisions satisfied：单一 owner、ResearchClaim/AnswerClaim 分离、server-owned evidence IDs、legacy 定位、exact files/tests。用户已授权连续本地累计，因此下一逻辑 batch `RQCE-P0-A1 Research Contracts v1` 可在新 Preflight 后开始，仍不提交。
+
+### 15.12 RQCE-P0-A1 Research Contracts v1（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 按 A0 exact files 仅新增 `src/web/research/__init__.py`、`src/web/research/contracts.py`、`tests/test_research_quality_contracts.py`；没有修改既有 production 文件，也没有接入 runtime。
+- **合同结果。** 新增 versioned/frozen `ResearchState` 及 Question/Claim/EvidenceRequirement/server-owned Evidence projection/ClaimEvidenceLink/Gap/Conflict/Cluster/Budget/Trace/Brief schema；`ResearchClaimEvidenceLink` 组合复用 `ClaimEvidenceLinkV1`，并在 research parser 中收窄为 supports/contradicts/qualifies/background/lead。
+- **Fail-closed 边界。** unknown schema/field/enum、重复 ID/link、未知 claim/question/evidence/cluster/gap 引用、非有限或越界 confidence/budget、没有对应 supports/contradicts link 的 ConflictGap、把 satisfied claim 写入 unresolved brief 均拒绝；ResearchEvidence 只允许有界 locator/anchored spans，不提供 raw page body、credential 或 token 字段。
+- **确定性与兼容。** Builder 对 ID/link/trace 与集合字段稳定排序；`to_dict/from_dict` 完成 JSON-safe round-trip。`unresolved` 与 `unavailable` 保持不同真值；旧 `AnswerClaimV1`、EvidenceSnapshot、query contract、WebLookup service/repository/schema/UI 全部未改。
+- **验证。** A1 专项 `19 passed in 4.24s`；新增代码 Ruff 通过；新增代码与测试 mypy `Success: no issues found in 4 source files`；`git diff --check` 通过。A0 既有合同/恢复基线此前为 51/51。
+- **A1 Stop report。** Behavior changed：production behavior 0；Behavior intentionally unchanged：legacy search/read/stop/synthesis/persistence/answer/UI；Known limitation：合同尚未持久化、未启用 shadow、未实现 planner/gate；Frozen decisions satisfied：exact files、单一 evidence truth、AnswerClaim 分离、严格 schema。按用户连续累计授权，下一逻辑 batch 为 `RQCE-P0-A2 State persistence adapter`，新 Preflight 后开始，仍不提交。
+
+### 15.13 RQCE-P0-A2 State persistence adapter（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 新增 `src/web/research/state.py` 与 `tests/test_research_quality_state.py`，并仅在新包 `__init__.py` 导出；没有修改 service、repository、entity 或数据库 schema。
+- **单一 owner 保持。** `attach_claim_engine_state()` 只复制并严格校验 `research_context["claim_engine"]`；真实 SQLite 测试通过既有 `WebLookupRepository.begin_operation/checkpoint` 的 operation owner + version CAS 完成落盘与 repository restart round-trip，没有新增写入器或第二套 run truth。
+- **旧 run 与坏 state 安全边界。** 缺少 `claim_engine` 明确加载为 `absent/off`；旧 schema、非 object 或校验失败明确加载为 `unavailable/shadow`，只返回有界 reason code，不回放异常或原始内容，也不影响 legacy context。P0 只提供 `new_empty_shadow_state()`，不提供 active bootstrap。
+- **为何不修改 WebLookupService。** 当前仓库没有已冻结/实现的 `RESEARCH_CLAIM_ENGINE_MODE` 配置 owner，默认又必须为 off；在 A2 直接 create 时注入 shadow 会构成未授权 runtime activation。A2 因而只交付可由后续 flag batch 显式调用的 adapter。
+- **验证。** A1+A2+WebLookup 持久化/恢复回归 `32 passed in 10.10s`；新增包 Ruff 通过；新增 production package mypy 0 error；仓库 expanded mypy baseline `current=122 / baseline=128 / resolved=6 / new package diagnostics=0`；`git diff --check` 通过。
+- **A2 Stop report。** Behavior changed：production behavior 0；Behavior intentionally unchanged：create/execute/checkpoint/cancel/resume/retry/search/read/stop/synthesis/UI；Known limitation：尚无 runtime flag/observer/trace writer；Frozen decisions satisfied：`research_context["claim_engine"]`、repository CAS、old run compatibility、bad schema fail-safe。按连续累计授权，下一逻辑 batch 为 `RQCE-P0-A3 Research Trace v1`，新 Preflight 后开始，仍不提交。
+
+### 15.14 RQCE-P0-A3 Research Trace v1（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 新增 `src/web/research/trace.py` 与 `tests/test_research_quality_trace.py`，在尚未远程交付的 v1 contract 中补齐强制 UTC timestamp/run_id，并收窄为冻结的 13 类 trace event（任务书列出的 12 类加 `failure_recorded`，其中 stop allowed/blocked 分列）。没有修改 legacy service。
+- **严格 writer。** `append_research_trace()` 生成单调 sequence、规范化 UTC、拒绝跨 run trace 混写，并对 claim/gap/evidence/budget 事件强制所需引用；追加后通过完整 ResearchState builder 再校验，不能绕过 server-owned evidence ID 或内部引用门。
+- **legacy 安全边界。** `try_append_research_trace()` 在 trace contract/type/reference 失败时返回原不可变 state + `trace_validation_failed`，不抛给 legacy；当前没有 runtime 接线，因此 trace 无法改变用户答案或让现行研究失败。
+- **持久化兼容。** Trace 经 `ResearchState.to_dict` 进入既有 claim-engine context adapter，并完成 attach/load round-trip；不记录 raw page body、credential、token 或 parser exception。
+- **验证。** A3 专项 10/10；A1–A3 合同/state/trace 合计 34/34；新增包 Ruff 通过、mypy 0 error、`git diff --check` 通过。
+- **A3 Stop report。** Behavior changed：production behavior 0；Behavior intentionally unchanged：legacy research 与 UI；Known limitation：尚未由 observer 写入真实 trace，也没有 Evidence Gate；Frozen decisions satisfied：强制字段、冻结事件、单 run、失败不拖垮 legacy。按连续累计授权，下一逻辑 batch 为 `RQCE-P0-B1 Evidence requirement policy`，新 Preflight 后开始，仍不提交。
+
+### 15.15 RQCE-P0-B1 Evidence requirement policy（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 新增 `src/web/research/policy.py` 与 `tests/test_research_quality_policy.py`；只扩展尚未交付的 v1 `EvidenceRequirement` 为显式 `requires_successful_read`，没有 role-classifier LLM、Gate 或 runtime 接线。
+- **显式 profile，而非错误推断。** `factual/analytical` 不能唯一决定证据规则，因此 planner 必须显式选择 official statement/current fact/quantitative/causal/community sentiment/exploratory hypothesis profile；缺少 profile 不静默套默认。
+- **角色策略。** 冻结 primary/authoritative secondary/independent secondary/community/aggregator 五类。官方声明只允许成功正文读取的 primary 正式闭环；社区情绪允许 community + independent secondary，不要求官方 primary；aggregator 在所有 profile 都只能作为 lead，Critical 非官方 profile 默认要求 2 个独立来源。
+- **代码 owner。** Policy 只产出 eligible roles、lead-only roles、最小独立来源、primary/read requirement 与 hypothesis-only closure semantic；它不分类 URL、不判真、不改变 ClaimState，未来 B2 仍必须用代码 hard gate。
+- **验证。** B1 专项 11/11；A1–B1 合计 45/45；新增包 Ruff 与 mypy 0 error，`git diff --check` 通过。
+- **B1 Stop report。** Behavior changed：production behavior 0；Behavior intentionally unchanged：legacy 与 UI；Known limitation：ResearchEvidence 还没有 read/extractor eligibility，policy 尚未执行；Frozen decisions satisfied：C2/C3/C6/C12/C14/C16/C17/C21 的 policy 侧边界。按连续累计授权，下一逻辑 batch 为 `RQCE-P0-B2 Deterministic Evidence Gate`，新 Preflight 后开始，仍不提交。
+
+### 15.16 RQCE-P0-B2 Deterministic Evidence Gate（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 新增 `src/web/research/evidence_gate.py` 与 `tests/test_research_quality_evidence_gate.py`；只扩展未交付 v1 ResearchEvidence 的 lifecycle/extraction eligibility 和 ResearchBudget 的候选/读取/时间消耗量，没有 runtime 接线。
+- **Hard Gate。** Critical claim 只有成功 read/selected、extractor eligible、role eligible、强度 `>=0.7` 且拥有足够独立 source clusters 的 supports links 才能闭环；primary-required profile 还必须有 primary。模型写入 `state=satisfied` 不能越过这些代码门。
+- **False closure 防线。** snippet/candidate、read/extractor failure、unknown/missing metadata、重复 cluster、UNAVAILABLE、缺 primary、空 Claim Graph 均不能 PASS；strong support + strong contradiction 生成/复用 ConflictGap 并 BLOCK，不做多数投票。resolved gap 不伪装 active gap。
+- **预算语义。** hard candidate/read/time 任一耗尽且仍有 open Critical 时返回 `PARTIAL`，保留 open claims/gaps/reasons 并允许 legacy 产生明确不完整结果，但绝不返回 satisfied/PASS。未耗尽则 BLOCK。
+- **验证。** B2 专项 11/11；A1–B2 合计 56/56；新增包 Ruff 与 mypy 0 error，`git diff --check` 通过。
+- **B2 Stop report。** Behavior changed：production behavior 0；Behavior intentionally unchanged：legacy/UI；Known limitation：Gate 尚未接 observer，0.7 为后续 benchmark 可校准阈值；Frozen decisions satisfied：C1/C4/C7/C8/C9/C16/C17/C18/C22/C23 与 Hard Gate 最小规则。下一逻辑 batch 为 `RQCE-P0-B3 Stop interceptor decision（shadow-only）`，新 Preflight 后开始，仍不提交。
+
+### 15.17 RQCE-P0-B3 边界复审决策（2026-08-26）
+
+- OpenCode 计划在 B3 写“对 WebLookupService 最小集成”，任务书第15节则把 B 定义为 Gate + Trace unit fixtures、把 shadow observer 明确放在 RQCE-P0-C。当前还没有 legacy-output-to-ClaimState projection；现在接 service 只会让 empty graph 全量 BLOCK，使 `legacy_would_stop_but_shadow_blocked` 指标失真。
+- **冻结处理：B3 只实现纯 stop decision、false-closure candidate 指标和 fail-safe shadow boundary；不改 WebLookupService。** 真实 observer/service checkpoint 接线必须与 C 阶段的 projection/eval schema 同批完成，并证明 legacy answer byte-for-byte 不变。
+
+### 15.18 RQCE-P0-B3 Stop decision（2026-08-26，本地累计未提交）
+
+- **Batch status：PASS / COMPLETE。** 新增 `src/web/research/stop_gate.py` 与 `tests/test_research_quality_stop_gate.py`；没有修改 WebLookupService 或任何 legacy path。
+- **Shadow truth。** Decision 同时记录 legacy_would_stop/legacy_should_stop、shadow pass/block/partial、open Critical、gaps/reasons 和 `legacy_would_stop_but_shadow_blocked`。其中 `legacy_should_stop` 始终严格等于 legacy 输入；partial 保留未闭环主张但不误记为 shadow block。
+- **Fail-safe。** Shadow evaluator 任何异常都被收敛为 `unavailable + shadow_gate_failed`，不回放异常细节、不产生 false-closure candidate，也不改变 legacy stop。
+- **验证。** B3 专项 5/5；A0 复用边界 + A1–B3 + 既有 Evidence/AnswerClaim/WebLookup/recovery 覆盖合计 112/112；新增包 Ruff、mypy 0 error；expanded mypy baseline `122 <= 128` 且本包 0 diagnostics；定向 detect-secrets 0 finding files；C1–C100 数量 100→100 且 normalized delta 0；四份权威文档本地链接 0 missing；`git diff --check` 通过。
+- **聚合交付状态：LOCAL GO / REMOTE NOT STARTED。** docs reconciliation、A0、A1、A2、A3、B1、B2、B3 均各自有 Stop report；按用户要求未 commit、未 push、未触发远程 CI。远程 `main` 仍停在 `3ce1563`；不得把本地 GO 误写成远程交付完成。
+- **P0 / RQ1 仍 NO-GO。** 当前没有 claim projection、shadow observer、20-case schema/fixtures/runner/report，也没有 active runtime。下一唯一逻辑 batch 是 `RQCE-P0-C1 Benchmark/eval schema`；C 阶段必须先生成可解释 projection，再允许 service observer 接线，且 legacy answer 必须 byte-for-byte 不变。

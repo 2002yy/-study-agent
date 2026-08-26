@@ -4,7 +4,7 @@
 > 
 > 上位规范：`docs/RESEARCH_QUALITY_CODEX_TASKBOOK.md`
 > 
-> 状态：C1–C100 已冻结。本文件不重新做架构决策，只把冻结决策拆成适合 OpenCode 小批施工的执行剧本。
+> 状态：C1–C100 已冻结，且已与 `PROJECT_STATUS.md` 的 Quick / RQ1 / DR1 三层路线完成统一。本文件不重新做架构决策，只把冻结决策拆成适合 OpenCode 小批施工的执行剧本。
 > 
 > 总原则：**一次只推进一个 batch；每个 batch 独立计划、独立修改、独立测试、独立停机。前一 batch 未通过 Exit Gate，不得自动进入下一 batch。**
 
@@ -14,7 +14,7 @@
 
 原任务书适合作为“总设计合同”，但如果直接交给 OpenCode 一个长会话执行，仍有几个风险：
 
-1. 模型可能为了“完成任务”跨越 P0/P1/P2 边界；
+1. 模型可能为了“完成任务”跨越 RQCE-P0/RQCE-P1/RQCE-P2 边界；
 2. 上下文越来越长后，容易忘记某个禁止项；
 3. 同一会话同时规划、施工、审查，容易自我确认；
 4. 测试失败时，模型可能继续补丁式改动，逐渐扩大范围；
@@ -46,7 +46,7 @@ Planner → Builder → Reviewer → Tests → Stop
 - 再读取本执行计划中“当前 batch”；
 - 不得自动进入下一 batch；
 - 默认最多修改 4 个 production files + 对应 tests；若超出必须停止并报告原因；
-- 不得修改 Standard Search 行为，除非当前 batch 明确允许；
+- 不得让 Standard Search 承担完整 Claim Engine / Deep Research 成本；不得破坏 candidate/read/selected/cited 的跨 preset 真值；
 - 不得重写 `WebLookupService`；
 - 不得替换现有 `EvidenceRefV1 / AnswerClaimV1`；
 - 每批结束必须运行指定测试并输出 diff summary。
@@ -117,7 +117,24 @@ Planner → Builder → Reviewer → Tests → Stop
 
 推荐一个 batch 一个新会话，或至少在阶段切换时新建会话。
 
-不要让一个 OpenCode 会话从 P0-A 一路跑到 P2。
+不要让一个 OpenCode 会话从 RQCE-P0-A 一路跑到 RQCE-P2。若用户明确授权连续本地推进，也必须在每个逻辑 batch 后生成独立 Stop report，再以新的 preflight 开始下一 batch。
+
+### 2.5 统一后的唯一技术路线
+
+```text
+Pre-RQCE: RQ1-A truth stabilization（已交付，不回滚）
+                         ↓
+Shared Research Quality Engine（C1–C100）
+                         ↓
+       quick preset | bounded preset | deep preset
+```
+
+- quick：保持轻量，不跑完整 Claim Graph；仍继承正确 evidence truth。
+- bounded：旧 RQ1-B 并入此 preset，冻结 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`；通过共享引擎 Gate 后是第一个 production activation target。
+- deep：沿用 DR1 的 3–10 分钟、10–20 reads；12/16 reads 与 6/8 分钟仅是 deep `TUNABLE_DEFAULT`。
+- RQ1-C 12-case 是 bounded GO Gate；20-case Shadow 是工程诊断；50–60 Frozen + Live 是整体/DR1 Release Gate。三者不互相替代。
+- 禁止形成 `standard + 独立 RQ1 engine + DR1 engine + Claim engine` 四套实现。
+- 新施工阶段只使用 `RQCE-P0 / RQCE-P1 / RQCE-P2`，不再使用裸 `P0/P1/P2`。
 
 ---
 
@@ -162,9 +179,10 @@ Current git status:
 输出 exact diff plan，例如：
 
 ```text
-CREATE src/research/contracts.py
+CREATE src/web/research/__init__.py
+CREATE src/web/research/contracts.py
 MODIFY src/application/web_lookup_service.py (仅加入 shadow state bootstrap，不改变 legacy answer path)
-CREATE tests/research/test_contracts.py
+CREATE tests/test_research_quality_contracts.py
 ```
 
 若 production files >4：默认停止，拆成两个 batch。
@@ -201,21 +219,21 @@ Frozen decisions satisfied:
 Next batch: <name> (NOT STARTED)
 ```
 
-然后停。
+然后停。若用户已明确授权连续本地累计，可在保存本批 Stop report 后进入下一逻辑 batch，但不得省略新的 Preflight、Exit Gate 或本地验证。
 
 ---
 
-# 4. P0：先建立研究控制面的“骨架”，不改变用户答案
+# 4. RQCE-P0：先建立研究控制面的“骨架”，不改变用户答案
 
-P0 的总目标：
+RQCE-P0 的总目标：
 
 > Claim Engine 能计算、能追踪、能评测，但 legacy Deep Research 仍决定最终答案。
 
-P0 期间 `claim_engine_shadow` 是唯一允许的新模式；不得默认 active。
+RQCE-P0 期间 `claim_engine_shadow` 是唯一允许的新模式；不得默认 active。
 
 ---
 
-## P0-A0：现状契约审计（只读）
+## RQCE-P0-A0：现状契约审计（只读）
 
 ### 目标
 
@@ -233,9 +251,7 @@ P0 期间 `claim_engine_shadow` 是唯一允许的新模式；不得默认 activ
 
 ### 输出
 
-`docs/research_quality/P0_A0_CONTRACT_AUDIT.md`
-
-只允许新增这一个 docs 文件；不改 production code。
+写入当前状态 owner `docs/PROJECT_STATUS.md` 的 RQCE-P0-A0 审计节；不得新增平行 status/roadmap/audit owner，不改 production code。
 
 ### Exit Gate
 
@@ -250,11 +266,17 @@ P0 期间 `claim_engine_shadow` 是唯一允许的新模式；不得默认 activ
 
 ---
 
-## P0-A1：Research Contracts v1
+## RQCE-P0-A1：Research Contracts v1
 
 ### 建议新增
 
-`src/research/contracts.py`
+```text
+src/web/research/__init__.py
+src/web/research/contracts.py
+tests/test_research_quality_contracts.py
+```
+
+这是 A0 冻结的 exact files。保持当前仓库 flat test discovery；不得借 A1 修改 service/repository/schema/UI。
 
 ### 只实现数据合同，不实现算法
 
@@ -295,7 +317,7 @@ UNAVAILABLE
 
 ### Tests
 
-`tests/research/test_contracts.py`
+`tests/test_research_quality_contracts.py`
 
 覆盖：
 
@@ -312,12 +334,12 @@ UNAVAILABLE
 
 ---
 
-## P0-A2：ResearchState + persistence adapter
+## RQCE-P0-A2：ResearchState + persistence adapter
 
 ### 建议新增
 
-- `src/research/state.py`
-- `tests/research/test_state.py`
+- `src/web/research/state.py`
+- `tests/test_research_quality_state.py`
 
 ### 可修改
 
@@ -353,12 +375,12 @@ research_context["claim_engine"] = {
 
 ---
 
-## P0-A3：Research Trace v1
+## RQCE-P0-A3：Research Trace v1
 
 ### 建议新增
 
-- `src/research/trace.py`
-- `tests/research/test_trace.py`
+- `src/web/research/trace.py`
+- `tests/test_research_quality_trace.py`
 
 Trace event 至少支持：
 
@@ -400,14 +422,14 @@ Trace failure 不能让 legacy research 失败。
 
 ---
 
-# 5. P0-B：Evidence Gate Shadow
+# 5. RQCE-P0-B：Evidence Gate Shadow
 
-## P0-B1：Evidence requirement policy
+## RQCE-P0-B1：Evidence requirement policy
 
 ### 建议新增
 
-- `src/research/policy.py`
-- `tests/research/test_policy.py`
+- `src/web/research/policy.py`
+- `tests/test_research_quality_policy.py`
 
 ### 目标
 
@@ -421,12 +443,12 @@ Community sentiment 与官方事实不能套同一规则。
 
 ---
 
-## P0-B2：Deterministic Evidence Gate
+## RQCE-P0-B2：Deterministic Evidence Gate
 
 ### 建议新增
 
-- `src/research/evidence_gate.py`
-- `tests/research/test_evidence_gate.py`
+- `src/web/research/evidence_gate.py`
+- `tests/test_research_quality_evidence_gate.py`
 
 ### 第一版只实现硬规则
 
@@ -454,13 +476,13 @@ reasons
 
 ---
 
-## P0-B3：Stop interceptor（Shadow only）
+## RQCE-P0-B3：Stop interceptor（Shadow only）
 
 ### 建议新增
 
-- `src/research/stop_gate.py`
-- 对 `web_lookup_service.py` 做最小集成
-- `tests/research/test_stop_gate_shadow.py`
+- `src/web/research/stop_gate.py`
+- `tests/test_research_quality_stop_gate.py`
+- 本批只实现纯 decision/metric/fail-safe boundary；真实 observer 与 `web_lookup_service.py` 接线移入 RQCE-P0-C，与 claim projection 同批验证，避免 empty graph 产生失真指标。
 
 ### 行为
 
@@ -496,9 +518,9 @@ legacy_would_stop_but_shadow_blocked
 
 ---
 
-# 6. P0-C：20 题 Shadow Experiment
+# 6. RQCE-P0-C：20 题 Shadow Experiment
 
-## P0-C1：Benchmark schema / frozen fixture format
+## RQCE-P0-C1：Benchmark schema / frozen fixture format
 
 ### 建议新增
 
@@ -521,7 +543,7 @@ forbidden_closure_conditions
 
 ---
 
-## P0-C2：20 个陷阱题
+## RQCE-P0-C2：20 个陷阱题
 
 10 类 × 2：
 
@@ -542,7 +564,7 @@ forbidden_closure_conditions
 
 ---
 
-## P0-C3：Shadow runner
+## RQCE-P0-C3：Shadow runner
 
 记录：
 
@@ -561,11 +583,11 @@ Elapsed
 Failure Reasons
 ```
 
-P0 阶段未实现新 scheduler 时，Useful Read Ratio 可只记录 legacy baseline。
+RQCE-P0 阶段未实现新 scheduler 时，Useful Read Ratio 可只记录 legacy baseline。
 
 ---
 
-## P0-C4：跑第一次 baseline vs shadow
+## RQCE-P0-C4：跑第一次 baseline vs shadow
 
 必须输出报告：
 
@@ -578,9 +600,9 @@ P0 阶段未实现新 scheduler 时，Useful Read Ratio 可只记录 legacy base
 - Claim planner/fixture 是否遗漏 critical surface；
 - 当前数据结构能否解释失败。
 
-### P0 Exit Gate
+### RQCE-P0 Exit Gate
 
-P0 通过标准：
+RQCE-P0 通过标准：
 
 1. legacy 用户可见行为不变；
 2. ClaimState/Trace/Gate 可持久化和恢复；
@@ -588,23 +610,23 @@ P0 通过标准：
 4. False Closure case 能输出明确 claim/gap 原因；
 5. 没有 unknown evidence ID 绕过 Gate。
 
-**P0 未通过，禁止进入 P1。**
+**RQCE-P0 未通过，禁止进入 RQCE-P1。**
 
 ---
 
-# 7. P1：搜索与证据调度器（仍先 Shadow）
+# 7. RQCE-P1：搜索与证据调度器（仍先 Shadow）
 
-P1 目标：
+RQCE-P1 目标：
 
 > 让 Claim Engine 不只是“判断不够”，还知道“下一步该搜什么、读什么”。
 
 ---
 
-## P1-A1：SearchIntent + Gap Planner contracts
+## RQCE-P1-A1：SearchIntent + Gap Planner contracts
 
 ### 新增
 
-- `src/research/search_intent.py`
+- `src/web/research/search_intent.py`
 - `tests/research/test_search_intent.py`
 
 结构：
@@ -638,11 +660,11 @@ community
 
 ---
 
-## P1-A2：Gap-directed Query Planner
+## RQCE-P1-A2：Gap-directed Query Planner
 
 ### 新增
 
-- `src/research/gap_planner.py`
+- `src/web/research/gap_planner.py`
 - `tests/research/test_gap_planner.py`
 
 ### 规则
@@ -659,11 +681,11 @@ Planner 只生成 SearchIntent，不执行 search。
 
 ---
 
-## P1-B1：CandidatePool
+## RQCE-P1-B1：CandidatePool
 
 ### 新增
 
-- `src/research/candidate_pool.py`
+- `src/web/research/candidate_pool.py`
 - `tests/research/test_candidate_pool.py`
 
 ### 复用
@@ -684,12 +706,12 @@ Planner 只生成 SearchIntent，不执行 search。
 
 ---
 
-## P1-B2：Source Role + EvidenceCluster
+## RQCE-P1-B2：Source Role + EvidenceCluster
 
 ### 新增
 
-- `src/research/source_role.py`
-- `src/research/evidence_cluster.py`
+- `src/web/research/source_role.py`
+- `src/web/research/evidence_cluster.py`
 - 对应 tests
 
 ### Source roles
@@ -717,11 +739,11 @@ unknown
 
 ---
 
-## P1-C1：Candidate Rank / Expected Information Gain
+## RQCE-P1-C1：Candidate Rank / Expected Information Gain
 
 ### 新增
 
-- `src/research/candidate_ranker.py`
+- `src/web/research/candidate_ranker.py`
 - `tests/research/test_candidate_ranker.py`
 
 排序两层：
@@ -745,12 +767,12 @@ Soft rank:
 
 ---
 
-## P1-C2：Read Scheduler + ResearchBudget
+## RQCE-P1-C2：Read Scheduler + ResearchBudget
 
 ### 新增
 
-- `src/research/scheduler.py`
-- `src/research/budget.py`
+- `src/web/research/scheduler.py`
+- `src/web/research/budget.py`
 - tests
 
 ### 复用
@@ -758,6 +780,8 @@ Soft rank:
 `src/web/concurrency.py::run_bounded()`。
 
 ### TUNABLE_DEFAULT
+
+以下参数只属于 `deep` preset；不得覆盖 `bounded` 的 `<=20 candidates / 5–8 reads / 45s soft / 60s hard`：
 
 ```text
 soft reads = 12
@@ -782,11 +806,11 @@ read top 2–3
 
 ---
 
-## P1-D1：EvidenceExtractor contracts + batch extraction
+## RQCE-P1-D1：EvidenceExtractor contracts + batch extraction
 
 ### 新增
 
-- `src/research/evidence_extractor.py`
+- `src/web/research/evidence_extractor.py`
 - `tests/research/test_evidence_extractor.py`
 
 输入：2–4 page selected chunks + active claims/gaps。
@@ -813,11 +837,11 @@ contradictions
 
 ---
 
-## P1-D2：Evidence Progress / Saturation
+## RQCE-P1-D2：Evidence Progress / Saturation
 
 ### 新增
 
-- `src/research/progress.py`
+- `src/web/research/progress.py`
 - tests
 
 Material progress：
@@ -833,7 +857,7 @@ Material progress：
 
 ---
 
-## P1-E：完整 Shadow orchestration
+## RQCE-P1-E：完整 Shadow orchestration
 
 ### 目标
 
@@ -850,11 +874,11 @@ Gap → Query batch → CandidatePool → Rank → Read wave
 
 `WebLookupService` 只调用一个新的 orchestration adapter，例如：
 
-`src/research/orchestrator.py`
+`src/web/research/orchestrator.py`
 
 不要把上述逻辑继续堆进 `_execute_deep()`。
 
-### P1 Exit Gate
+### RQCE-P1 Exit Gate
 
 重新跑 20 题 Shadow。
 
@@ -870,18 +894,18 @@ False Closure 明显下降
 
 具体参数可调；原则不可改。
 
-P1 未通过不得 active。
+RQCE-P1 未通过不得 active。
 
 ---
 
-# 8. P2：Reader、失败恢复、Synthesis 与 Release
+# 8. RQCE-P2：Reader、失败恢复、Synthesis 与 Release
 
-## P2-A1：Progressive Reader
+## RQCE-P2-A1：Progressive Reader
 
 ### 新增建议
 
-- `src/research/reader.py`
-- `src/research/page_selection.py`
+- `src/web/research/reader.py`
+- `src/web/research/page_selection.py`
 - tests
 
 ### 替换的只是 Deep Research 新路径
@@ -900,7 +924,7 @@ deep primary raw 20–30k
 
 ---
 
-## P2-A2：Failure taxonomy + fallback ladder
+## RQCE-P2-A2：Failure taxonomy + fallback ladder
 
 至少：
 
@@ -935,7 +959,7 @@ UNAVAILABLE = 系统/访问条件导致无法验证
 
 ---
 
-## P2-A3：PDF / JS / 登录墙 / 反爬
+## RQCE-P2-A3：PDF / JS / 登录墙 / 反爬
 
 ### PDF
 
@@ -955,11 +979,11 @@ UNAVAILABLE = 系统/访问条件导致无法验证
 
 ---
 
-## P2-B1：Evidence Cache
+## RQCE-P2-B1：Evidence Cache
 
 ### 新增
 
-- `src/research/cache.py`
+- `src/web/research/cache.py`
 - tests
 
 key 至少：
@@ -976,11 +1000,11 @@ search cache 另带 provider/query/freshness TTL。
 
 ---
 
-## P2-C1：ResearchBrief
+## RQCE-P2-C1：ResearchBrief
 
 ### 新增
 
-- `src/research/brief.py`
+- `src/web/research/brief.py`
 - tests
 
 结构：
@@ -1002,11 +1026,11 @@ synthesis_guidance
 
 ---
 
-## P2-C2：Synthesis Planner
+## RQCE-P2-C2：Synthesis Planner
 
 ### 新增
 
-- `src/research/synthesis.py`
+- `src/web/research/synthesis.py`
 - tests
 
 规则：
@@ -1023,11 +1047,11 @@ synthesis_guidance
 
 ---
 
-## P2-C3：Final Auditor
+## RQCE-P2-C3：Final Auditor
 
 ### 新增
 
-- `src/research/final_auditor.py`
+- `src/web/research/final_auditor.py`
 - tests
 
 检查：
@@ -1048,7 +1072,7 @@ date discipline
 
 # 9. 50–60 题 Release Benchmark
 
-P2 全功能 shadow 完成后，冻结一套正式 benchmark。
+RQCE-P2 全功能 shadow 完成后，冻结一套正式 benchmark。
 
 ### 两条线
 
@@ -1096,11 +1120,11 @@ Uncertainty Fidelity = 0 → FAIL
 例如：
 
 ```text
-/research-p0-a0
-/research-p0-a1
-/research-p0-a2
-/research-p0-a3
-/research-p0-b1
+/research-rqce-p0-a0
+/research-rqce-p0-a1
+/research-rqce-p0-a2
+/research-rqce-p0-a3
+/research-rqce-p0-b1
 ...
 ```
 
@@ -1145,27 +1169,29 @@ Research 产品内部仍使用 `research_fast / research_reasoning` capability r
 
 # 12. 每阶段推荐提交粒度
 
-不要 P0 一个 commit。
+不要 RQCE-P0 一个 commit。
 
 建议：
 
 ```text
-P0-A0 docs audit
-P0-A1 contracts
-P0-A2 state persistence
-P0-A3 trace
-P0-B1 policy
-P0-B2 evidence gate
-P0-B3 shadow stop gate
-P0-C1 eval schema
-P0-C2 fixtures
-P0-C3 runner
-P0-C4 shadow report
+RQCE-P0-A0 docs audit
+RQCE-P0-A1 contracts
+RQCE-P0-A2 state persistence
+RQCE-P0-A3 trace
+RQCE-P0-B1 policy
+RQCE-P0-B2 evidence gate
+RQCE-P0-B3 shadow stop gate
+RQCE-P0-C1 eval schema
+RQCE-P0-C2 fixtures
+RQCE-P0-C3 runner
+RQCE-P0-C4 shadow report
 ```
 
-每个 commit 应：单一意图；测试通过；可独立 revert；不依赖未来 batch 才能恢复 legacy 行为。
+每个逻辑 batch 应：单一意图；测试通过；可独立审查；不依赖未来 batch 才能恢复 legacy 行为。
 
-P1/P2 同理。
+默认一个逻辑 batch 一个 commit。若用户为减少远程 CI 成本明确要求累计提交，允许将多个**相邻、均已独立通过 Exit Gate**的小 batch 合成一次 commit；必须在提交说明/状态文档中列出所含 batch 和逐批验证证据。不得跨阶段 Gate 聚合，也不得用聚合提交掩盖某批未通过。
+
+RQCE-P1/RQCE-P2 同理。
 
 ---
 
@@ -1186,7 +1212,7 @@ P1/P2 同理。
 4. 默认不修改超过 4 个 production files；若必须超过，停止并解释如何拆分。
 5. 不得重写 WebLookupService；只允许本批明确规定的最小 adapter/integration。
 6. 不得替换 EvidenceRefV1 / ClaimEvidenceLinkV1 / AnswerClaimV1。
-7. 不得改变 Standard Search，除非本批明确允许。
+7. 不得让 Standard Search 承担完整 Claim Engine / Deep Research 成本；所有 preset 的 evidence truth 必须一致。
 8. 不得把 UNAVAILABLE 与 UNRESOLVED 混淆。
 9. 修改后运行 focused tests + affected regression tests + git diff --check。
 10. 最后输出固定 Stop report，并停止。不要开始下一批。
@@ -1218,35 +1244,35 @@ P1/P2 同理。
 
 ---
 
-# 15. 第一轮实际建议怎么开工
+# 15. 新 checkout 的第一轮开工顺序（当前仓库已越过此 bootstrap）
 
-如果现在开始用 OpenCode，不要从 P0-A1 直接写代码。
+如果在新 checkout 从零开始用 OpenCode，不要从 RQCE-P0-A1 直接写代码；当前仓库进度以 `docs/PROJECT_STATUS.md` 最后一个 RQCE Stop report 为准。
 
 推荐顺序：
 
 ```text
 Session 1
-P0-A0 只读契约审计
+RQCE-P0-A0 只读契约审计
 ↓ STOP
 
 Session 2
-P0-A1 Research Contracts v1
+RQCE-P0-A1 Research Contracts v1
 ↓ tests
 ↓ reviewer
 ↓ STOP
 
 Session 3
-P0-A2 State persistence adapter
+RQCE-P0-A2 State persistence adapter
 ↓ tests
 ↓ reviewer
 ↓ STOP
 
 Session 4
-P0-A3 Trace
+RQCE-P0-A3 Trace
 ...
 ```
 
-也就是说，第一轮只要 P0-A0 + P0-A1 做扎实即可；不要追求单会话做完整个 P0。
+也就是说，第一轮只要 RQCE-P0-A0 + RQCE-P0-A1 做扎实即可；不要追求单会话做完整个 RQCE-P0。
 
 ---
 
@@ -1254,8 +1280,8 @@ P0-A3 Trace
 
 必须同时满足：
 
-1. P0 完整 Exit Gate 通过；
-2. P1 20 题 Shadow 明显降低 False Closure；
+1. RQCE-P0 完整 Exit Gate 通过；
+2. RQCE-P1 20 题 Shadow 明显降低 False Closure；
 3. Primary Retrieval 提升；
 4. Useful Read Ratio 不低于第一版目标；
 5. 没有明显 runaway search/read；
@@ -1284,4 +1310,4 @@ Active 也应先 feature flag / limited mode，不直接删除 legacy。
 + legacy 可回退
 ```
 
-到那时再考虑数据库迁移、移除 legacy、进一步模型/成本优化和更丰富 UI；这些都不属于当前 P0。
+到那时再考虑数据库迁移、移除 legacy、进一步模型/成本优化和更丰富 UI；这些都不属于当前 RQCE-P0。
