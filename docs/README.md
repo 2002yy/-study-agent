@@ -2,7 +2,7 @@
 
 > 更新：2026-08-26
 >
-> **唯一进度入口：[`PROJECT_STATUS.md`](PROJECT_STATUS.md)。** 当前事实、证据、缺口和执行顺序只在该文件维护。
+> **唯一进度入口：[`PROJECT_STATUS.md`](PROJECT_STATUS.md)。** 当前事实、证据、缺口和执行顺序只在该文件维护；新窗口先读其顶部 **Current Handoff**。
 
 ## 1. 文档所有权
 
@@ -44,12 +44,12 @@
 
 ### Research Quality 权威路线
 
-以下两份文档已于 2026-08-26 完成 docs-only 路线统一；状态与当前执行入口仍由 `PROJECT_STATUS.md` 15.10 独占：
+以下两份文档已于 2026-08-26 完成 docs-only 路线统一；**当前状态与执行入口由 `PROJECT_STATUS.md` 顶部 Current Handoff + 其最新 RQCE Stop report 独占**，不得再固定指向某个会过期的章节号：
 
 - [`RESEARCH_QUALITY_CODEX_TASKBOOK.md`](RESEARCH_QUALITY_CODEX_TASKBOOK.md)：联网研究质量整改总合同（C1–C100 / Shared Research Quality Engine / RQCE-P0/P1/P2）
 - [`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)：对应的小批施工与验收协议
 
-统一解释：RQ1-A 是已交付的 Pre-RQCE 真值止血；C1–C100 是 quick / bounded / deep 三个 preset 的共享控制平面；旧 RQ1-B 并入 bounded preset。两份施工文档不得覆盖 `PROJECT_STATUS.md` 的当前状态、Gate 或执行授权。
+统一解释：RQ1-A 是已交付的 Pre-RQCE 真值止血；C1–C100 是 quick / bounded / deep 三个 preset 的共享控制平面；旧 RQ1-B 并入 bounded preset。两份施工文档不得覆盖 `PROJECT_STATUS.md` 的 Current Handoff、当前 Gate 或执行授权。
 
 ### 冻结参考
 
@@ -77,7 +77,8 @@
 
 ```text
 README.md
-→ docs/PROJECT_STATUS.md
+→ docs/PROJECT_STATUS.md（先读顶部 Current Handoff）
+→ 若当前 initiative 为 RQCE：读取 PROJECT_STATUS 最新 RQCE Stop report
 → docs/ARCHITECTURE.md
 ```
 
@@ -95,14 +96,16 @@ domain_models.md
 
 ```text
 docs/WEB_SEARCH_SETUP.md
-→ docs/PROJECT_STATUS.md（当前实测证据）
+→ docs/PROJECT_STATUS.md（Current Handoff + 最新实测/RQCE 状态）
+→ docs/RESEARCH_QUALITY_CODEX_TASKBOOK.md（若涉及 Research Quality）
+→ docs/RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md（若准备施工）
 → docs/NEWS_PIPELINE.md（仅 NewsRun 专项）
 ```
 
 核对 Grill 结论与实现授权：
 
 ```text
-docs/PROJECT_STATUS.md（当前决策、GO/NO-GO、下一切片）
+docs/PROJECT_STATUS.md（先读 Current Handoff，再读最新相关 Stop report）
 → domain_models.md（已冻结领域语义）
 → state_invariants.md（不可突破的硬边界）
 → docs/STATE_MODEL.md（状态 owner 与持久化边界）
