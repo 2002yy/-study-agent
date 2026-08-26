@@ -108,18 +108,23 @@ def _write_temp(payload: dict) -> Path:
     return Path(path)
 
 
-def test_report_generator_produces_nonempty_markdown() -> None:
+def test_report_generator_produces_truth_fixed_markdown() -> None:
     report = run_report(CASES_FILE, TRANSCRIPTS_FILE)
     assert report.startswith("# RQCE-P0-C5 Shadow Report")
-    assert "聚合指标" in report
-    assert "按类别分布" in report
-    assert "逐 case 诊断" in report
-    assert "RQCE-P0 Exit Gate 自检" in report
+    assert "Frozen 10 聚合指标" in report
+    assert "Frozen 10 逐 case" in report
+    assert "RQCE-P0 Exit Gate" in report
     assert "trap-secondary-only-frozen" in report
     assert "trap-unanswerable-frozen" in report
     assert "missed false closures" in report
     assert "Live 10 operational observation" in report
-    assert "cases with benchmark-relevant candidates: 2/10" in report
+    assert "cases with benchmark-surface matches: 2/10" in report
+    assert "external calls: 14 logical / 17 attempts; failed attempts: 5" in report
+    assert "projected public documents: 4" in report
+    assert "NO_ANSWER_RELEVANT_CANDIDATE" in report
+    assert "BENCHMARK_MATCH_FALSE_NEGATIVE" in report
+    assert "production `worth_reading=true`: 50" in report
+    assert "independent audit off-target: 35" in report
 
 
 def test_default_paths_match_repo_layout() -> None:
