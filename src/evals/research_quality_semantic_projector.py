@@ -336,11 +336,16 @@ def project_live_semantic_case(
         "case_id": normalized_case_id,
         "projection_status": "completed",
         "failure_reason": "",
+        "typed_failure_reason": "",
+        "stop_reason": "projection_completed",
         "legacy_closed_basis": "operational_search_status_ok_proxy",
         "question": normalized_question,
         "reference_date": normalized_reference_date,
         "documents": documents,
         "transcript": transcript.to_dict(),
+        "retrieval_funnel": _funnel_from_observation(
+            observation, documents, read_audit
+        ),
         "external_calls": audits,
         "reads": read_audit,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -567,6 +572,91 @@ def _parse_evidence_projection(raw: Any, *, claim_count: int) -> dict[str, Any]:
     }
 
 
+def _funnel_from_observation(
+    observation: Mapping[str, Any],
+    documents: list[dict[str, Any]],
+    read_audit: list[dict[str, Any]],
+) -> dict[str, Any]:
+    successful_reads = sum(
+        1 for entry in read_audit if entry.get("status") == "read_ok"
+    )
+    queries = observation.get("attempted_queries", [])
+    return {
+        "attempted_queries": len(queries) if isinstance(queries, list) else 0,
+        "returned_candidate_count": int(observation.get("candidate_count") or 0),
+        "benchmark_relevant_candidate_count": int(
+            observation.get("relevant_candidate_count") or 0
+        ),
+        "source_role_fit_candidate_count": len(documents),
+        "scheduled_read_count": len(read_audit),
+        "successful_read_count": successful_reads,
+        "projected_document_count": len(documents),
+        "eligible_evidence_count": sum(
+            1
+            for doc in documents
+            if doc.get("source_role")
+            in {"primary", "authoritative_secondary", "independent_secondary"}
+        ),
+    }
+
+
+def _typed_failure_reason(
+    failure_reason: str,
+    audits: list[dict[str, Any]],
+) -> str:
+    if not audits:
+        return failure_reason
+    error_types = sorted(
+        {
+            str(audit.get("error_type") or "")
+            for audit in audits
+            if audit.get("status") == "attempted_failed"
+        }
+    )
+    if error_types:
+        return f"{failure_reason}:{','.join(error_types)}"
+    return failure_reason
+
+
+def _transcript_from_observation(
+    *,
+    case_id: str,
+    question: str,
+    reference_date: str,
+    observation: Mapping[str, Any],
+    projected_claims: tuple[ProjectedClaim, ...],
+    reads: list[dict[str, Any]],
+) -> ResearchRunTranscript:
+    queries = tuple(
+        _bounded_text(value, 500)
+        for value in observation.get("attempted_queries", [])
+        if str(value).strip()
+    )
+    successful_reads = [
+        RunReadRecord(
+            doc_id=str(entry.get("url") or "")[:200],
+            outcome="success",
+        )
+        for entry in reads
+        if entry.get("status") == "read_ok"
+    ]
+    return ResearchRunTranscript(
+        case_id=case_id,
+        reference_date=reference_date,
+        queries=queries,
+        searches=max(1, len(observation.get("attempted_queries", []))),
+        reads=tuple(successful_reads),
+        cited_doc_ids=(),
+        addressed_claim_surfaces=(),
+        question_surface=question,
+        projected_claims=projected_claims,
+        projected_claim_evidence=(),
+        llm_calls=0,
+        elapsed_seconds=max(0.0, float(observation.get("elapsed_seconds") or 0.0)),
+        closed=str(observation.get("search_status") or "") == "ok",
+    )
+
+
 def _unavailable_case(
     *,
     case_id: str,
@@ -579,15 +669,26 @@ def _unavailable_case(
     projected_claims: tuple[ProjectedClaim, ...] = (),
     read_audit: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    transcript = _transcript_from_observation(
+        case_id=case_id,
+        question=question,
+        reference_date=reference_date,
+        observation=observation,
+        projected_claims=projected_claims,
+        reads=read_audit or [],
+    )
     return {
         "case_id": case_id,
         "projection_status": "unavailable",
         "failure_reason": failure_reason,
+        "typed_failure_reason": _typed_failure_reason(failure_reason, audits),
+        "stop_reason": "projection_exhausted_no_fallback",
         "legacy_closed_basis": "operational_search_status_ok_proxy",
         "question": question,
         "reference_date": reference_date,
         "documents": [],
-        "transcript": None,
+        "transcript": transcript.to_dict(),
+        "retrieval_funnel": _funnel_from_observation(observation, [], read_audit or []),
         "projected_claims": [claim.to_dict() for claim in projected_claims],
         "external_calls": audits,
         "reads": list(read_audit or []),

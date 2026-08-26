@@ -51,7 +51,10 @@ DEFAULT_LIVE_CASES = (
     REPO_ROOT / "tests" / "fixtures" / "research_quality" / "live_trap_cases.json"
 )
 DEFAULT_LIVE_SEMANTIC = (
-    REPO_ROOT / "docs" / "research_quality" / "P0_LIVE_SEMANTIC_EVAL.json"
+    REPO_ROOT / "docs" / "research_quality" / "P0_LIVE_SEMANTIC_EVAL_V2.json"
+)
+DEFAULT_CLASSIFICATION = (
+    REPO_ROOT / "docs" / "research_quality" / "P0_RETRIEVAL_FAILURE_CLASSIFICATION.json"
 )
 
 
@@ -77,7 +80,11 @@ def load_live_semantic_evaluations(
     cases = load_research_quality_eval_cases(cases_path)
     case_by_id = {case.id: case for case in cases}
     raw = json.loads(semantic_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schema_version") != LIVE_SEMANTIC_SCHEMA_VERSION:
+    accepted_versions = {
+        LIVE_SEMANTIC_SCHEMA_VERSION,
+        "research-quality-harness-closure-v1",
+    }
+    if not isinstance(raw, dict) or raw.get("schema_version") not in accepted_versions:
         raise ValueError("unsupported live semantic artifact")
     records = raw.get("cases")
     if not isinstance(records, list):
@@ -140,6 +147,7 @@ def render_report(
     live_observation: dict[str, Any] | None = None,
     live_evaluations: tuple[RunEvaluation, ...] = (),
     live_semantic: dict[str, Any] | None = None,
+    classification: dict[str, Any] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("# RQCE-P0-C5 Shadow Report (gold-blind baseline vs shadow)")
@@ -320,7 +328,38 @@ def render_report(
             f"{overall.successful_read_count}; macro={overall.mean_useful_read_ratio:.2f}"
         )
         lines.append("")
-    lines.append("## RQCE-P0 Exit Gate 自检")
+    if classification is not None:
+        lines.append("## Live retrieval failure classification (C5-C)")
+        lines.append("")
+        counts = classification.get("taxonomy_counts", {})
+        lines.append("| failure_type | count |")
+        lines.append("|---|---:|")
+        for ftype in (
+            "QUERY_UNDERSPECIFIED",
+            "PROVIDER_RECALL_MISS",
+            "RELEVANCE_FALSE_NEGATIVE",
+            "SOURCE_ROLE_MISMATCH",
+            "READ_NOT_SCHEDULED",
+            "READ_FAILED",
+            "PROJECTION_REJECTED",
+            "CLAIM_PROJECTION_UNAVAILABLE",
+            "COMPLETED_WITH_EVIDENCE",
+        ):
+            lines.append(f"| {ftype} | {counts.get(ftype, 0)} |")
+        lines.append("")
+        lines.append("| case_id | primary failure | queries | returned | relevant | scheduled reads | successful reads | projected docs |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        for row in classification.get("rows", []):
+            f = row.get("funnel", {})
+            lines.append(
+                f"| {row.get('case_id')} | {row.get('primary_failure_type')} | "
+                f"{f.get('attempted_queries', 0)} | {f.get('returned_candidate_count', 0)} | "
+                f"{f.get('benchmark_relevant_candidate_count', 0)} | {f.get('scheduled_read_count', 0)} | "
+                f"{f.get('successful_read_count', 0)} | {f.get('projected_document_count', 0)} |"
+            )
+        lines.append("")
+
+        lines.append("## RQCE-P0 Exit Gate 自检")
     lines.append("")
     lines.append("1. **legacy 用户可见行为不变**：transcript 是离线 eval 输入，未触碰 WebLookupService 或任何 runtime 路径。")
     lines.append("2. **ClaimState/Trace/Gate 可持久化和恢复**：runner 在进程内构造 ResearchState 并经 build_research_state 严格校验；既有持久化 adapter（A2）与 trace writer（A3）未改。")
@@ -359,6 +398,7 @@ def run_report(
     live_observation_path: Path | None = DEFAULT_LIVE_OBSERVATION,
     live_cases_path: Path = DEFAULT_LIVE_CASES,
     live_semantic_path: Path | None = DEFAULT_LIVE_SEMANTIC,
+    classification_path: Path | None = DEFAULT_CLASSIFICATION,
 ) -> str:
     cases = load_research_quality_eval_cases(cases_path)
     transcripts = load_transcripts(transcripts_path)
@@ -376,6 +416,9 @@ def run_report(
             live_cases_path,
             live_semantic_path,
         )
+    classification = None
+    if classification_path is not None and classification_path.exists():
+        classification = json.loads(classification_path.read_text(encoding="utf-8"))
     return render_report(
         evaluations,
         summary,
@@ -384,6 +427,7 @@ def run_report(
         live_observation,
         live_evaluations,
         live_semantic,
+        classification,
     )
 
 
@@ -411,6 +455,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--live-cases", type=Path, default=DEFAULT_LIVE_CASES)
     parser.add_argument("--live-semantic", type=Path, default=DEFAULT_LIVE_SEMANTIC)
+    parser.add_argument("--classification", type=Path, default=DEFAULT_CLASSIFICATION)
     return parser
 
 
@@ -421,6 +466,7 @@ def main() -> int:
         args.transcripts,
         live_cases_path=args.live_cases,
         live_semantic_path=args.live_semantic,
+        classification_path=args.classification,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

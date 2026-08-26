@@ -163,7 +163,11 @@ def test_semantic_projection_fails_closed_without_keyword_fallback() -> None:
 
     assert result["projection_status"] == "unavailable"
     assert result["failure_reason"] == "claim_projection_unavailable"
-    assert result["transcript"] is None
+    assert result["typed_failure_reason"].startswith("claim_projection_unavailable")
+    assert result["stop_reason"] == "projection_exhausted_no_fallback"
+    assert result["transcript"] is not None
+    assert result["transcript"]["question_surface"]
+    assert result["retrieval_funnel"]["attempted_queries"] == 1
     assert len(result["external_calls"]) == 2
     assert all(item["status"] == "attempted_failed" for item in result["external_calls"])
 

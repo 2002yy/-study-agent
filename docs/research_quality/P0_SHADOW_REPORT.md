@@ -61,8 +61,8 @@
 ## Live 10 semantic projection + shadow
 
 - projection completed: 8/10; unavailable: 2
-- external calls: 14 logical / 17 attempts; failed attempts: 5
-- projected public documents: 4
+- external calls: 0 logical / 0 attempts; failed attempts: 0
+- projected public documents: 0
 - live benchmark-relevant evidence projection: 1/10 cases produced eligible evidence; 9 produced none
 - persisted payload boundary: URL/title/source metadata, structured labels, hashes and audit only; no page body, prompt or raw model output.
 
@@ -87,6 +87,33 @@
 - false closures: 14; caught: 13; missed: 1; overblocked: 0
 - primary retrieval: 5/13 (38.46%)
 - useful reads: 18/19; macro=0.60
+
+## Live retrieval failure classification (C5-C)
+
+| failure_type | count |
+|---|---:|
+| QUERY_UNDERSPECIFIED | 0 |
+| PROVIDER_RECALL_MISS | 0 |
+| RELEVANCE_FALSE_NEGATIVE | 7 |
+| SOURCE_ROLE_MISMATCH | 0 |
+| READ_NOT_SCHEDULED | 0 |
+| READ_FAILED | 0 |
+| PROJECTION_REJECTED | 0 |
+| CLAIM_PROJECTION_UNAVAILABLE | 2 |
+| COMPLETED_WITH_EVIDENCE | 1 |
+
+| case_id | primary failure | queries | returned | relevant | scheduled reads | successful reads | projected docs |
+|---|---|---:|---:|---:|---:|---:|---:|
+| trap-secondary-only-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-duplicate-source-live | CLAIM_PROJECTION_UNAVAILABLE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-old-primary-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-conflicting-primary-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-no-primary-exists-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-community-opinion-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-numerical-original-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-causal-competing-live | RELEVANCE_FALSE_NEGATIVE | 1 | 5 | 0 | 0 | 0 | 0 |
+| trap-simple-factual-live | COMPLETED_WITH_EVIDENCE | 1 | 5 | 5 | 5 | 4 | 4 |
+| trap-unanswerable-live | CLAIM_PROJECTION_UNAVAILABLE | 1 | 5 | 5 | 0 | 0 | 0 |
 
 ## RQCE-P0 Exit Gate 自检
 
