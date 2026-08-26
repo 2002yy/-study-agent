@@ -21,6 +21,7 @@ def test_ci_detect_secrets_allows_only_named_research_audit_hashes() -> None:
         "observation_sha256",
         "input_sha256",
         "response_sha256",
+        "content_sha256",
     ):
         assert pattern.search(f'"{field}": "{AUDIT_HASH}"') is not None
 
