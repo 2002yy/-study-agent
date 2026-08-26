@@ -1,11 +1,9 @@
 """Generate the RQCE-P0-C5 frozen + live shadow comparison report.
 
-Loads the frozen trap cases and the legacy transcript fixture, runs the
-offline shadow runner, and writes the diagnostic markdown report to
-``docs/research_quality/P0_SHADOW_REPORT.md``.
-
-This tool performs no live web or model calls. It replays frozen transcripts
-and, when present, the body-free live semantic projection artifact.
+Loads frozen cases, legacy transcripts, the body-free live semantic artifact and
+truth-separated retrieval classification. This tool performs no live web/model calls.
+Gold remains scoring-only; production source assessment, benchmark surface matching
+and independent manual candidate audit remain distinct diagnostic layers.
 """
 
 from __future__ import annotations
@@ -83,6 +81,7 @@ def load_live_semantic_evaluations(
     accepted_versions = {
         LIVE_SEMANTIC_SCHEMA_VERSION,
         "research-quality-harness-closure-v1",
+        "research-quality-harness-closure-v2",
     }
     if not isinstance(raw, dict) or raw.get("schema_version") not in accepted_versions:
         raise ValueError("unsupported live semantic artifact")
@@ -139,6 +138,41 @@ def _live_document(raw: Any) -> FrozenCorpusDocument:
     )
 
 
+def _semantic_counts(live_semantic: dict[str, Any]) -> dict[str, int]:
+    records = [
+        record
+        for record in live_semantic.get("cases", [])
+        if isinstance(record, dict)
+    ]
+    calls = [
+        call
+        for record in records
+        for call in record.get("external_calls", [])
+        if isinstance(call, dict)
+    ]
+    logical_ids = {
+        str(call.get("logical_call_id") or "")
+        for call in calls
+        if str(call.get("logical_call_id") or "")
+    }
+    return {
+        "completed_cases": sum(
+            1 for record in records if record.get("projection_status") == "completed"
+        ),
+        "unavailable_cases": sum(
+            1 for record in records if record.get("projection_status") == "unavailable"
+        ),
+        "logical_calls": len(logical_ids),
+        "external_call_attempts": len(calls),
+        "failed_attempts": sum(
+            1 for call in calls if call.get("status") == "attempted_failed"
+        ),
+        "projected_documents": sum(
+            len(record.get("documents", [])) for record in records
+        ),
+    }
+
+
 def render_report(
     evaluations: tuple[RunEvaluation, ...],
     summary: Any,
@@ -152,7 +186,11 @@ def render_report(
     lines: list[str] = []
     lines.append("# RQCE-P0-C5 Shadow Report (gold-blind baseline vs shadow)")
     lines.append("")
-    lines.append("> 组件诊断报告，不是 Release Gate。Shadow 输入只来自预记录 projection；Gold 只在 decision 完成后评分。live baseline 的 closed 是 operational search-status proxy，不是实际 answer-generation transcript。")
+    lines.append(
+        "> 组件诊断报告，不是 Release Gate。Shadow 输入只来自预记录 projection；"
+        "Gold 只在 decision 完成后评分。production source assessment、benchmark surface match、"
+        "independent manual audit 三层保持分离。"
+    )
     lines.append("")
     lines.append(f"- cases fixture: `{cases_path.relative_to(REPO_ROOT)}`")
     lines.append(f"- transcripts fixture: `{transcripts_path.relative_to(REPO_ROOT)}`")
@@ -172,16 +210,17 @@ def render_report(
     )
     lines.append(
         f"- mean useful read ratio: {summary.mean_useful_read_ratio:.2f} "
-        f"(contributing reads {summary.useful_read_count}/"
-        f"{summary.successful_read_count})"
+        f"(contributing reads {summary.useful_read_count}/{summary.successful_read_count})"
     )
     lines.append(
         f"- mean evidence-linked critical claim coverage: "
         f"{summary.mean_critical_claim_coverage:.2%} "
-        f"(covered {summary.covered_critical_claim_count}/"
-        f"{summary.critical_claim_count})"
+        f"(covered {summary.covered_critical_claim_count}/{summary.critical_claim_count})"
     )
-    lines.append("- metric caveat: synthetic frozen transcripts contain no deliberately wasted successful reads; the 1.00 useful-read result is fixture-bound, not a production KPI.")
+    lines.append(
+        "- metric caveat: synthetic frozen transcripts contain no deliberately wasted successful reads; "
+        "the 1.00 useful-read result is fixture-bound, not a production KPI."
+    )
     lines.append("")
     lines.append("## 按类别分布")
     lines.append("")
@@ -192,7 +231,10 @@ def render_report(
     lines.append("")
     lines.append("## 逐 case 诊断")
     lines.append("")
-    lines.append("| case_id | closed | false_closure | violated | shadow | shadow reasons | open critical | primary retrieval | coverage | useful read ratio |")
+    lines.append(
+        "| case_id | closed | false_closure | violated | shadow | shadow reasons | open critical | "
+        "primary retrieval | coverage | useful read ratio |"
+    )
     lines.append("|---|---|---|---|---|---|---|---|---:|---:|")
     for item in evaluations:
         lines.append(
@@ -211,21 +253,19 @@ def render_report(
     else:
         live_summary = live_observation.get("summary", {})
         live_cases = live_observation.get("cases", [])
-        provider_error_cases = sum(
-            1 for item in live_cases if item.get("provider_errors")
-        )
+        provider_error_cases = sum(1 for item in live_cases if item.get("provider_errors"))
         lines.append(
             f"- search API status=ok: {live_summary.get('search_ok_cases', 0)}/"
             f"{live_observation.get('case_count', 0)}"
         )
         lines.append(
-            f"- cases with benchmark-relevant candidates: "
+            f"- cases with benchmark-surface matches: "
             f"{live_summary.get('cases_with_relevant_candidates', 0)}/"
             f"{live_observation.get('case_count', 0)}"
         )
         lines.append(
             f"- candidates: {live_summary.get('total_candidates', 0)} total / "
-            f"{live_summary.get('total_relevant_candidates', 0)} benchmark-relevant"
+            f"{live_summary.get('total_relevant_candidates', 0)} benchmark-surface matches"
         )
         lines.append(
             f"- reads: {live_summary.get('total_successful_reads', 0)}/"
@@ -236,7 +276,8 @@ def render_report(
             f"{live_observation.get('case_count', 0)}"
         )
         lines.append(
-            "- boundary: this is provider/search/reader evidence only; it uses no model synthesis and produces no shadow decision."
+            "- boundary: provider/search/reader observation only; benchmark-surface match is an eval heuristic, "
+            "not production relevance truth."
         )
     lines.append("")
     lines.append("## Live 10 semantic projection + shadow")
@@ -247,39 +288,40 @@ def render_report(
     if live_semantic is None:
         lines.append("- status: not run")
     else:
-        semantic_summary = live_semantic.get("summary", {})
-        completed = int(semantic_summary.get("completed_cases") or 0)
-        unavailable = int(semantic_summary.get("unavailable_cases") or 0)
-        expected = int(live_semantic.get("case_count") or 0)
+        counts = _semantic_counts(live_semantic)
+        expected = int(live_semantic.get("case_count") or len(live_semantic.get("cases", [])))
         expected_live = expected
-        harness_repeatable = (expected == 10 and completed + unavailable == 10 and len(live_evaluations) >= 0 and live_semantic is not None)
+        completed = counts["completed_cases"]
+        unavailable = counts["unavailable_cases"]
+        harness_repeatable = expected == 10 and completed + unavailable == 10
         lines.append(f"- projection completed: {completed}/{expected}; unavailable: {unavailable}")
         lines.append(
-            f"- external calls: {semantic_summary.get('logical_calls', 0)} logical / "
-            f"{semantic_summary.get('external_call_attempts', 0)} attempts; "
-            f"failed attempts: {semantic_summary.get('failed_attempts', 0)}"
+            f"- external calls: {counts['logical_calls']} logical / "
+            f"{counts['external_call_attempts']} attempts; failed attempts: {counts['failed_attempts']}"
         )
-        lines.append(
-            f"- projected public documents: {semantic_summary.get('projected_documents', 0)}"
-        )
+        lines.append(f"- projected public documents: {counts['projected_documents']}")
         eligible_projection_cases = sum(
             1
             for record in live_semantic.get("cases", [])
-            if len(record.get("documents", [])) > 0
+            if isinstance(record, dict) and len(record.get("documents", [])) > 0
         )
         lines.append(
-            f"- live benchmark-relevant evidence projection: "
-            f"{eligible_projection_cases}/{expected} cases produced eligible evidence; "
+            f"- live evidence-producing cases: {eligible_projection_cases}/{expected}; "
             f"{expected - eligible_projection_cases} produced none"
         )
-        lines.append("- persisted payload boundary: URL/title/source metadata, structured labels, hashes and audit only; no page body, prompt or raw model output.")
+        lines.append(
+            "- persisted payload boundary: URL/title/source metadata, structured labels, hashes and audit only; "
+            "no page body, prompt or raw model output."
+        )
         unavailable_by_id = {
             str(record.get("case_id")): str(record.get("failure_reason") or "")
             for record in live_semantic.get("cases", [])
             if isinstance(record, dict) and record.get("projection_status") != "completed"
         }
         lines.append("")
-        lines.append("| case_id | projection | closed proxy | false_closure | shadow | reasons | primary | coverage | useful |")
+        lines.append(
+            "| case_id | projection | closed proxy | false_closure | shadow | reasons | primary | coverage | useful |"
+        )
         lines.append("|---|---|---|---|---|---|---|---:|---:|")
         evaluation_by_id = {item.case_id: item for item in live_evaluations}
         for record in live_semantic.get("cases", []):
@@ -324,12 +366,18 @@ def render_report(
             f"{overall.primary_required_cases} ({overall.primary_retrieval_rate:.2%})"
         )
         lines.append(
-            f"- useful reads: {overall.useful_read_count}/"
-            f"{overall.successful_read_count}; macro={overall.mean_useful_read_ratio:.2f}"
+            f"- useful reads: {overall.useful_read_count}/{overall.successful_read_count}; "
+            f"macro={overall.mean_useful_read_ratio:.2f}"
         )
         lines.append("")
     if classification is not None:
-        lines.append("## Live retrieval failure classification (C5-C)")
+        lines.append("## Live retrieval truth classification (Truth Fix)")
+        lines.append("")
+        lines.append(
+            "`NO_ANSWER_RELEVANT_CANDIDATE` means the provider returned results but independent manual audit found "
+            "no candidate that could directly contribute answer evidence. `BENCHMARK_MATCH_FALSE_NEGATIVE` is reserved "
+            "for a manually answer-relevant candidate rejected by the benchmark surface matcher."
+        )
         lines.append("")
         counts = classification.get("taxonomy_counts", {})
         lines.append("| failure_type | count |")
@@ -337,7 +385,8 @@ def render_report(
         for ftype in (
             "QUERY_UNDERSPECIFIED",
             "PROVIDER_RECALL_MISS",
-            "RELEVANCE_FALSE_NEGATIVE",
+            "NO_ANSWER_RELEVANT_CANDIDATE",
+            "BENCHMARK_MATCH_FALSE_NEGATIVE",
             "SOURCE_ROLE_MISMATCH",
             "READ_NOT_SCHEDULED",
             "READ_FAILED",
@@ -347,47 +396,98 @@ def render_report(
         ):
             lines.append(f"| {ftype} | {counts.get(ftype, 0)} |")
         lines.append("")
-        lines.append("| case_id | primary failure | queries | returned | relevant | scheduled reads | successful reads | projected docs |")
-        lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        aggregate = classification.get("funnel_aggregate", {})
+        lines.append("### Candidate truth layers")
+        lines.append("")
+        lines.append(
+            f"- returned candidates: {aggregate.get('returned_candidate_count', 0)}"
+        )
+        lines.append(
+            f"- production `worth_reading=true`: "
+            f"{aggregate.get('production_worth_reading_candidate_count', 0)}"
+        )
+        lines.append(
+            f"- benchmark surface matches: {aggregate.get('benchmark_relevant_candidate_count', 0)}"
+        )
+        lines.append(
+            f"- independent audit answer-relevant: "
+            f"{aggregate.get('manual_answer_relevant_candidate_count', 0)}"
+        )
+        lines.append(
+            f"- independent audit topic-only: {aggregate.get('manual_topic_only_candidate_count', 0)}"
+        )
+        lines.append(
+            f"- independent audit off-target: {aggregate.get('manual_off_target_candidate_count', 0)}"
+        )
+        lines.append(
+            "- interpretation: in this recorded sample all 50 candidates were marked production `worth_reading=true`, "
+            "including 35 independently audited OFF_TARGET candidates. The audited benchmark matcher produced 0 "
+            "confirmed false negatives for ANSWER_RELEVANT candidates."
+        )
+        lines.append("")
+        lines.append(
+            "| case_id | primary failure | secondary | queries | returned | prod worth | benchmark match | "
+            "manual answer | topic-only | off-target | reads | docs |"
+        )
+        lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for row in classification.get("rows", []):
             f = row.get("funnel", {})
+            secondary = ", ".join(row.get("secondary_failure_types", [])) or "-"
             lines.append(
-                f"| {row.get('case_id')} | {row.get('primary_failure_type')} | "
+                f"| {row.get('case_id')} | {row.get('primary_failure_type')} | {secondary} | "
                 f"{f.get('attempted_queries', 0)} | {f.get('returned_candidate_count', 0)} | "
-                f"{f.get('benchmark_relevant_candidate_count', 0)} | {f.get('scheduled_read_count', 0)} | "
+                f"{f.get('production_worth_reading_candidate_count', 0)} | "
+                f"{f.get('benchmark_relevant_candidate_count', 0)} | "
+                f"{f.get('manual_answer_relevant_candidate_count', 0)} | "
+                f"{f.get('manual_topic_only_candidate_count', 0)} | "
+                f"{f.get('manual_off_target_candidate_count', 0)} | "
                 f"{f.get('successful_read_count', 0)} | {f.get('projected_document_count', 0)} |"
             )
         lines.append("")
 
-        lines.append("## RQCE-P0 Exit Gate 自检")
+    lines.append("## RQCE-P0 Exit Gate 自检")
     lines.append("")
-    lines.append("1. **legacy 用户可见行为不变**：transcript 是离线 eval 输入，未触碰 WebLookupService 或任何 runtime 路径。")
-    lines.append("2. **ClaimState/Trace/Gate 可持久化和恢复**：runner 在进程内构造 ResearchState 并经 build_research_state 严格校验；既有持久化 adapter（A2）与 trace writer（A3）未改。")
     lines.append(
-        "3. **20-case harness repeatability**: **PASS / COMPLETE** — "
-        "frozen fixtures deterministically re-runnable; live execution protocol, schema and runner re-executable; "
-        "20-case report regenerable from structured inputs (live web URLs/results are not required byte-identical)."
+        "1. **legacy 用户可见行为不变**：transcript 是离线 eval 输入，未触碰 WebLookupService 或 runtime 搜索路径。"
     )
     lines.append(
-        "3b. **20-case diagnostic outcome**: **NO-GO for production activation** — "
-        "8/10 live cases produced no eligible evidence projection; live baseline closure is an operational search-status proxy, "
-        "not a real answer-generation transcript."
+        "2. **ClaimState/Trace/Gate 可持久化和恢复**：既有 A2/A3 合同未改。"
     )
     lines.append(
-        "3c. **live benchmark-relevant evidence projection**: "
-        f"{eligible_projection_cases}/{expected_live} cases produced eligible evidence; "
+        "3. **20-case harness repeatability**: **PASS / COMPLETE** — frozen fixtures deterministic; live protocol/schema/runner "
+        "re-executable; report regenerable from structured inputs."
+    )
+    lines.append(
+        "3b. **20-case diagnostic outcome**: **NO-GO for production activation** — live evidence coverage remains low and "
+        "baseline closure is an operational proxy, not an answer-generation transcript."
+    )
+    lines.append(
+        "3c. **live evidence projection**: "
+        f"{eligible_projection_cases}/{expected_live} cases produced public documents; "
         f"{expected_live - eligible_projection_cases} produced none."
     )
-    lines.append("4. **False Closure case 输出明确 claim/gap 原因**：逐 case 的 open_critical_claims 与 shadow_reasons 已记录于上表。")
-    lines.append("5. **没有 unknown evidence ID 绕过 Gate**：runner 拒绝未知 doc_id 引用；build_research_state 校验 known_evidence_ids。")
-    lines.append("")
+    lines.append(
+        "4. **False Closure 输出明确 claim/gap 原因**：open_critical_claims 与 shadow_reasons 已记录。"
+    )
+    lines.append(
+        "5. **没有 unknown evidence ID 绕过 Gate**：runner/build_research_state 保持 fail-closed。"
+    )
     lines.append("")
     lines.append("## P0 Exit Decision")
     lines.append("")
     if harness_repeatable:
-        lines.append("**RQCE-P0-C5: PASS / COMPLETE.** 20-case Shadow harness delivered and regenerable; production activation remains NO-GO: live evidence projection coverage is low (8/10 no eligible projection) and live baseline closure is an operational proxy. Dominant observed bottleneck: pre-projection retrieval coverage. Current evidence primarily implicates query planning/SearchIntent and legacy relevance/candidate recall; P1 must first classify the no-projection live cases before choosing the implementation target. Local audit + remote HEAD CI green required before RQCE-P1.")
+        lines.append(
+            "**RQCE-P0 harness: PASS / COMPLETE; production activation: NO-GO.** Truth Fix shows the recorded live bottleneck "
+            "is upstream retrieval quality, not a proven benchmark false-negative problem: 7 completed cases had provider "
+            "results but no independently audited answer-relevant candidate, while BENCHMARK_MATCH_FALSE_NEGATIVE=0. "
+            "Production source assessment marked all 50 recorded candidates worth reading, including 35 OFF_TARGET candidates. "
+            "P1 should therefore audit/fix query formulation, degraded-provider fallback and first-nonempty candidate acceptance, "
+            "then add role-aware CandidatePool/rerank; do not copy the benchmark lexical matcher into production."
+        )
     else:
-        lines.append("**RQCE-P0-C5: INCOMPLETE / NO-GO.** 20-case harness not yet regenerable; live semantic artifact missing. Production activation NO-GO. Do not enter RQCE-P1.")
+        lines.append(
+            "**RQCE-P0-C5: INCOMPLETE / NO-GO.** 20-case harness is not regenerable. Do not enter RQCE-P1."
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -435,24 +535,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate the RQCE-P0-C5 frozen + live shadow report.",
     )
-    parser.add_argument(
-        "--cases",
-        type=Path,
-        default=DEFAULT_CASES,
-        help="frozen trap cases fixture (default: tests/fixtures/research_quality/frozen_trap_cases.json)",
-    )
-    parser.add_argument(
-        "--transcripts",
-        type=Path,
-        default=DEFAULT_TRANSCRIPTS,
-        help="legacy transcripts fixture (default: tests/fixtures/research_quality/legacy_transcripts.json)",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=DEFAULT_OUTPUT,
-        help="output markdown report path",
-    )
+    parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
+    parser.add_argument("--transcripts", type=Path, default=DEFAULT_TRANSCRIPTS)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--live-cases", type=Path, default=DEFAULT_LIVE_CASES)
     parser.add_argument("--live-semantic", type=Path, default=DEFAULT_LIVE_SEMANTIC)
     parser.add_argument("--classification", type=Path, default=DEFAULT_CLASSIFICATION)
@@ -472,7 +557,9 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report, encoding="utf-8")
     print(f"wrote {output.relative_to(REPO_ROOT)}")
-    print(f"evaluated {sum(1 for line in report.splitlines() if line.startswith('| trap-'))} cases")
+    print(
+        f"evaluated {sum(1 for line in report.splitlines() if line.startswith('| trap-'))} cases"
+    )
     return 0
 
 
