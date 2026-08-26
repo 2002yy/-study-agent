@@ -1,0 +1,262 @@
+{
+  "schema_version": "research-quality-eval-v1",
+  "cases": [
+    {
+      "id": "trap-secondary-only-live",
+      "category": "secondary_only",
+      "mode": "live",
+      "gold": {
+        "question": "What is the current official rate limit for the public API of the PayGate service?",
+        "critical_surfaces": ["official rate limit", "current value"],
+        "expected_claims": [
+          {
+            "surface": "PayGate publishes an official, current rate limit for its public API.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": {
+          "max_age_days": 365,
+          "requires_dated_evidence": true
+        },
+        "forbidden_closure_conditions": [
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-duplicate-source-live",
+      "category": "duplicate_source",
+      "mode": "live",
+      "gold": {
+        "question": "Which outlets originally reported the announcement, as opposed to republishing wire copy?",
+        "critical_surfaces": [
+          "originating outlets",
+          "republication distinction"
+        ],
+        "expected_claims": [
+          {
+            "surface": "Original reporting can be distinguished from syndicated republication.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "independent_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "independent_sources_below_minimum",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-old-primary-live",
+      "category": "old_primary",
+      "mode": "live",
+      "gold": {
+        "question": "What is the current pricing tier structure for the hosted database service?",
+        "critical_surfaces": ["current pricing tiers"],
+        "expected_claims": [
+          {
+            "surface": "The current pricing tiers are published by the vendor.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": {
+          "max_age_days": 180,
+          "requires_dated_evidence": true
+        },
+        "forbidden_closure_conditions": [
+          "freshness_unmet",
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-conflicting-primary-live",
+      "category": "conflicting_primary",
+      "mode": "live",
+      "gold": {
+        "question": "Did the vendor officially confirm or deny the reported data breach?",
+        "critical_surfaces": ["official breach statement"],
+        "expected_claims": [
+          {
+            "surface": "The vendor has issued an official statement on the breach.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [
+          {
+            "description": "Early statements denied any breach; later statements confirmed limited exposure.",
+            "surfaces": ["breach status"]
+          }
+        ],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "conflict_unresolved",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-no-primary-exists-live",
+      "category": "no_primary_exists",
+      "mode": "live",
+      "gold": {
+        "question": "What are the undisclosed terms of the settlement between the two companies?",
+        "critical_surfaces": ["settlement terms"],
+        "expected_claims": [
+          {
+            "surface": "The settlement terms have not been disclosed publicly.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["independent_secondary", "community"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "snippet_only_evidence",
+          "independent_sources_below_minimum"
+        ]
+      }
+    },
+    {
+      "id": "trap-community-opinion-live",
+      "category": "community_opinion",
+      "mode": "live",
+      "gold": {
+        "question": "How do users currently feel about the platform's new pricing model?",
+        "critical_surfaces": ["user sentiment", "pricing concerns"],
+        "expected_claims": [
+          {
+            "surface": "Current user sentiment about the pricing model is identifiable.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["community", "independent_secondary"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": ["snippet_only_evidence"]
+      }
+    },
+    {
+      "id": "trap-numerical-original-live",
+      "category": "numerical_original_source",
+      "mode": "live",
+      "gold": {
+        "question": "What is the exact official unemployment rate published for the most recent quarter?",
+        "critical_surfaces": ["exact published rate"],
+        "expected_claims": [
+          {
+            "surface": "The statistical agency publishes an exact quarterly unemployment rate.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": {
+          "max_age_days": 120,
+          "requires_dated_evidence": true
+        },
+        "forbidden_closure_conditions": [
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-causal-competing-live",
+      "category": "causal_competing_explanations",
+      "mode": "live",
+      "gold": {
+        "question": "Why did the data migration partially fail last quarter?",
+        "critical_surfaces": ["migration failure cause", "competing explanations"],
+        "expected_claims": [
+          {
+            "surface": "Competing explanations for the migration failure exist.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [
+          {
+            "description": "The engineering postmortem cites schema drift; the vendor support ticket cites a tooling defect.",
+            "surfaces": ["failure cause"]
+          }
+        ],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "conflict_unresolved",
+          "snippet_only_evidence"
+        ]
+      }
+    },
+    {
+      "id": "trap-simple-factual-live",
+      "category": "simple_factual",
+      "mode": "live",
+      "gold": {
+        "question": "Which open-source license does the project use?",
+        "critical_surfaces": ["project license"],
+        "expected_claims": [
+          {
+            "surface": "The project's license is stated in its official repository.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": ["snippet_only_evidence"]
+      }
+    },
+    {
+      "id": "trap-unanswerable-live",
+      "category": "unanswerable_unverifiable",
+      "mode": "live",
+      "gold": {
+        "question": "What are the exact private terms of the unannounced partnership agreement?",
+        "critical_surfaces": ["private agreement terms"],
+        "expected_claims": [
+          {
+            "surface": "The private terms of the agreement are not publicly verifiable.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["independent_secondary", "community"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "question_unverifiable",
+          "snippet_only_evidence"
+        ]
+      }
+    }
+  ]
+}

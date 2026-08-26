@@ -1,0 +1,231 @@
+{
+  "schema_version": "research-quality-run-v1",
+  "transcripts": [
+    {
+      "case_id": "trap-secondary-only-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["streamqueue maximum message size"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "blog-secondary-1",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["blog-secondary-1"],
+      "addressed_claim_surfaces": [
+        "StreamQueue supports a specific maximum message size published by the vendor."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 8.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-duplicate-source-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["safety recall independent confirmation"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "wire-a",
+          "outcome": "success",
+          "extraction_eligible": true
+        },
+        {
+          "doc_id": "wire-b",
+          "outcome": "success",
+          "extraction_eligible": true
+        },
+        {
+          "doc_id": "wire-c",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["wire-a", "wire-b", "wire-c"],
+      "addressed_claim_surfaces": [
+        "The recall was confirmed by a countable number of independently originated reports."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 9.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-old-primary-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["gateway supported TLS versions"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "old-primary",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["old-primary"],
+      "addressed_claim_surfaces": [
+        "The gateway's currently supported TLS versions are published."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 7.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-conflicting-primary-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["database cluster concurrency limit"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "primary-v9",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["primary-v9"],
+      "addressed_claim_surfaces": [
+        "The vendor publishes a definitive concurrency limit."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 8.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-no-primary-exists-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["restructuring decision reasons"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "analyst-1",
+          "outcome": "success",
+          "extraction_eligible": true
+        },
+        {
+          "doc_id": "forum-1",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["analyst-1", "forum-1"],
+      "addressed_claim_surfaces": [
+        "The internal deliberation reasons are not publicly documented."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 9.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-community-opinion-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["community sentiment new API design"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "forum-thread-1",
+          "outcome": "success",
+          "extraction_eligible": true
+        },
+        {
+          "doc_id": "forum-thread-2",
+          "outcome": "success",
+          "extraction_eligible": true
+        },
+        {
+          "doc_id": "blog-review",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["forum-thread-1", "forum-thread-2", "blog-review"],
+      "addressed_claim_surfaces": [
+        "The community's prevailing sentiment about the new API is identifiable from aggregated discussion."
+      ],
+      "llm_calls": 4,
+      "elapsed_seconds": 11.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-numerical-original-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["company revenue figure fiscal 2025"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "aggregator-summary",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["aggregator-summary"],
+      "addressed_claim_surfaces": [
+        "The company reported an exact revenue figure in its official filing."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 7.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-causal-competing-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["february service outage cause"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "incident-report",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["incident-report"],
+      "addressed_claim_surfaces": [
+        "At least two competing causal explanations for the outage exist in authoritative sources.",
+        "A single confirmed root cause has not been established."
+      ],
+      "llm_calls": 4,
+      "elapsed_seconds": 10.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-simple-factual-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["library first public release year"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "project-history",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["project-history"],
+      "addressed_claim_surfaces": [
+        "The library's initial public release year is documented."
+      ],
+      "llm_calls": 2,
+      "elapsed_seconds": 4.0,
+      "closed": true
+    },
+    {
+      "case_id": "trap-unanswerable-frozen",
+      "reference_date": "2026-08-01",
+      "queries": ["committee final decision outcome"],
+      "searches": 1,
+      "reads": [
+        {
+          "doc_id": "speculation-thread",
+          "outcome": "success",
+          "extraction_eligible": true
+        }
+      ],
+      "cited_doc_ids": ["speculation-thread"],
+      "addressed_claim_surfaces": [
+        "The committee's final decision has not been announced and cannot be verified before the announcement."
+      ],
+      "llm_calls": 3,
+      "elapsed_seconds": 8.0,
+      "closed": true
+    }
+  ]
+}

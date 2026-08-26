@@ -1,0 +1,485 @@
+{
+  "schema_version": "research-quality-eval-v1",
+  "cases": [
+    {
+      "id": "trap-secondary-only-frozen",
+      "category": "secondary_only",
+      "mode": "frozen",
+      "gold": {
+        "question": "What is the exact maximum message size supported by the StreamQueue service?",
+        "critical_surfaces": ["exact maximum message size"],
+        "expected_claims": [
+          {
+            "surface": "StreamQueue supports a specific maximum message size published by the vendor.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "blog-secondary-1",
+          "url": "https://example.test/blog/streamqueue-limits",
+          "title": "StreamQueue limits explained",
+          "source_role": "authoritative_secondary",
+          "cluster_id": "c-blog",
+          "published_at": "2025-11-02",
+          "content": "In our testing, StreamQueue accepted messages up to about 1 MB. Several readers reported the same ballpark, so the practical limit is likely 1 MB."
+        },
+        {
+          "doc_id": "aggregator-1",
+          "url": "https://example.test/wiki/streamqueue",
+          "title": "StreamQueue wiki entry",
+          "source_role": "aggregator",
+          "cluster_id": "c-wiki",
+          "published_at": "2025-12-10",
+          "content": "StreamQueue maximum message size is 1 MB according to various blogs."
+        },
+        {
+          "doc_id": "vendor-spec",
+          "url": "https://example.test/vendor/docs/streamqueue-spec",
+          "title": "StreamQueue specification",
+          "source_role": "primary",
+          "cluster_id": "c-vendor",
+          "published_at": "2025-09-20",
+          "content": "Official specification: maximum message size is 1,048,576 bytes (1 MiB). Messages exceeding this size are rejected with error code 413."
+        }
+      ]
+    },
+    {
+      "id": "trap-duplicate-source-frozen",
+      "category": "duplicate_source",
+      "mode": "frozen",
+      "gold": {
+        "question": "How many independently originated reports confirmed the safety recall?",
+        "critical_surfaces": ["independent confirmation count"],
+        "expected_claims": [
+          {
+            "surface": "The recall was confirmed by a countable number of independently originated reports.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "independent_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "independent_sources_below_minimum",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "wire-a",
+          "url": "https://example.test/news/recall-a",
+          "title": "Regulator announces recall",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-wire",
+          "published_at": "2026-02-01",
+          "content": "The regulator announced a recall of 12,000 units today."
+        },
+        {
+          "doc_id": "wire-b",
+          "url": "https://example.test/daily/recall",
+          "title": "Recall announced",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-wire",
+          "published_at": "2026-02-01",
+          "content": "The regulator announced a recall of 12,000 units today, according to a wire report."
+        },
+        {
+          "doc_id": "wire-c",
+          "url": "https://example.test/times/recall-story",
+          "title": "12,000 units recalled",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-wire",
+          "published_at": "2026-02-02",
+          "content": "A wire report states the regulator announced a recall of 12,000 units."
+        },
+        {
+          "doc_id": "regulator-primary",
+          "url": "https://example.test/regulator/press/recall-2026",
+          "title": "Official recall notice",
+          "source_role": "primary",
+          "cluster_id": "c-regulator",
+          "published_at": "2026-02-01",
+          "content": "Official notice: recall of 12,000 units effective immediately."
+        }
+      ]
+    },
+    {
+      "id": "trap-old-primary-frozen",
+      "category": "old_primary",
+      "mode": "frozen",
+      "gold": {
+        "question": "Which TLS protocol versions does the gateway currently support?",
+        "critical_surfaces": ["currently supported TLS versions"],
+        "expected_claims": [
+          {
+            "surface": "The gateway's currently supported TLS versions are published.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": {
+          "max_age_days": 365,
+          "requires_dated_evidence": true
+        },
+        "forbidden_closure_conditions": [
+          "freshness_unmet",
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "old-primary",
+          "url": "https://example.test/vendor/docs/tls-2021",
+          "title": "Gateway TLS configuration (2021)",
+          "source_role": "primary",
+          "cluster_id": "c-vendor",
+          "published_at": "2021-06-01",
+          "content": "The gateway supports TLS 1.0, 1.1, and 1.2."
+        },
+        {
+          "doc_id": "new-secondary",
+          "url": "https://example.test/blog/tls-deprecation",
+          "title": "TLS 1.0/1.1 dropped",
+          "source_role": "authoritative_secondary",
+          "cluster_id": "c-blog",
+          "published_at": "2026-01-20",
+          "content": "Following industry deprecation, the gateway now requires TLS 1.2 or higher; TLS 1.0 and 1.1 are rejected at handshake."
+        }
+      ]
+    },
+    {
+      "id": "trap-conflicting-primary-frozen",
+      "category": "conflicting_primary",
+      "mode": "frozen",
+      "gold": {
+        "question": "What is the official maximum concurrent connection limit of the database cluster?",
+        "critical_surfaces": ["official concurrency limit"],
+        "expected_claims": [
+          {
+            "surface": "The vendor publishes a definitive concurrency limit.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [
+          {
+            "description": "Vendor documentation v9 states a 100-connection limit while the current release notes state 200.",
+            "surfaces": ["concurrency limit"]
+          }
+        ],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "conflict_unresolved",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "primary-v9",
+          "url": "https://example.test/vendor/docs/v9/limits",
+          "title": "Limits (v9 docs)",
+          "source_role": "primary",
+          "cluster_id": "c-vendor-docs",
+          "published_at": "2025-03-10",
+          "content": "Maximum concurrent connections: 100."
+        },
+        {
+          "doc_id": "primary-release",
+          "url": "https://example.test/vendor/releases/2026-03",
+          "title": "Release notes March 2026",
+          "source_role": "primary",
+          "cluster_id": "c-vendor-release",
+          "published_at": "2026-03-05",
+          "content": "The maximum concurrent connection limit is now 200."
+        }
+      ]
+    },
+    {
+      "id": "trap-no-primary-exists-frozen",
+      "category": "no_primary_exists",
+      "mode": "frozen",
+      "gold": {
+        "question": "What were the internal deliberation reasons behind the committee's restructuring decision?",
+        "critical_surfaces": ["internal deliberation reasons"],
+        "expected_claims": [
+          {
+            "surface": "The internal deliberation reasons are not publicly documented.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["independent_secondary", "community"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "snippet_only_evidence",
+          "independent_sources_below_minimum"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "analyst-1",
+          "url": "https://example.test/analysis/restructuring",
+          "title": "Why the restructuring happened",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-analyst",
+          "published_at": "2026-04-11",
+          "content": "Analysts speculate the restructuring was driven by cost pressure, though no official rationale has been published."
+        },
+        {
+          "doc_id": "forum-1",
+          "url": "https://example.test/forum/thread/8812",
+          "title": "Restructuring discussion",
+          "source_role": "community",
+          "cluster_id": "c-forum",
+          "published_at": "2026-04-12",
+          "content": "Members discuss rumors about the restructuring; several claim insider knowledge but provide no documents."
+        }
+      ]
+    },
+    {
+      "id": "trap-community-opinion-frozen",
+      "category": "community_opinion",
+      "mode": "frozen",
+      "gold": {
+        "question": "What is the prevailing community sentiment about the framework's new API design?",
+        "critical_surfaces": ["prevailing sentiment", "representative concerns"],
+        "expected_claims": [
+          {
+            "surface": "The community's prevailing sentiment about the new API is identifiable from aggregated discussion.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["community", "independent_secondary"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": ["snippet_only_evidence"]
+      },
+      "corpus": [
+        {
+          "doc_id": "forum-thread-1",
+          "url": "https://example.test/forum/thread/2201",
+          "title": "New API feedback thread",
+          "source_role": "community",
+          "cluster_id": "c-forum-a",
+          "published_at": "2026-05-02",
+          "content": "Most posters praise the new API's consistency but complain about the migration cost."
+        },
+        {
+          "doc_id": "forum-thread-2",
+          "url": "https://example.test/forum/thread/2245",
+          "title": "API migration pain",
+          "source_role": "community",
+          "cluster_id": "c-forum-b",
+          "published_at": "2026-05-09",
+          "content": "Mixed reactions: some welcome the change, many report breaking changes without a clear upgrade guide."
+        },
+        {
+          "doc_id": "blog-review",
+          "url": "https://example.test/blog/api-review",
+          "title": "Reviewing the new API",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-blog",
+          "published_at": "2026-05-15",
+          "content": "The redesign improves long-term maintainability; community feedback is cautiously positive despite migration friction."
+        }
+      ]
+    },
+    {
+      "id": "trap-numerical-original-frozen",
+      "category": "numerical_original_source",
+      "mode": "frozen",
+      "gold": {
+        "question": "What was the exact revenue figure the company reported for fiscal year 2025?",
+        "critical_surfaces": ["exact reported revenue figure"],
+        "expected_claims": [
+          {
+            "surface": "The company reported an exact revenue figure in its official filing.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "primary_not_read",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "aggregator-summary",
+          "url": "https://example.test/news-aggregate/revenue",
+          "title": "Company posts 5.2B revenue",
+          "source_role": "aggregator",
+          "cluster_id": "c-aggregator",
+          "published_at": "2026-02-10",
+          "content": "The company reported revenue of about 5.2 billion, according to summaries circulating online."
+        },
+        {
+          "doc_id": "press-release",
+          "url": "https://example.test/investor/fy2025-results",
+          "title": "FY2025 results",
+          "source_role": "primary",
+          "cluster_id": "c-investor",
+          "published_at": "2026-02-09",
+          "content": "Official results: revenue of 5,243,000,000 for fiscal year 2025, up 11% year over year."
+        }
+      ]
+    },
+    {
+      "id": "trap-causal-competing-frozen",
+      "category": "causal_competing_explanations",
+      "mode": "frozen",
+      "gold": {
+        "question": "Why did the February service outage occur?",
+        "critical_surfaces": ["root cause", "competing explanations"],
+        "expected_claims": [
+          {
+            "surface": "At least two competing causal explanations for the outage exist in authoritative sources.",
+            "kind": "analytical",
+            "priority": "critical"
+          },
+          {
+            "surface": "A single confirmed root cause has not been established.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [
+          {
+            "description": "The incident report attributes the outage to a configuration change; an independent audit attributes it to hardware failure.",
+            "surfaces": ["root cause"]
+          }
+        ],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "conflict_unresolved",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "incident-report",
+          "url": "https://example.test/status/incident-feb",
+          "title": "February incident report",
+          "source_role": "primary",
+          "cluster_id": "c-status",
+          "published_at": "2026-03-01",
+          "content": "The outage was caused by an incorrect configuration change that propagated routing tables."
+        },
+        {
+          "doc_id": "audit-findings",
+          "url": "https://example.test/audit/february",
+          "title": "Independent audit findings",
+          "source_role": "authoritative_secondary",
+          "cluster_id": "c-audit",
+          "published_at": "2026-03-20",
+          "content": "The audit concludes the proximate cause was hardware failure in two routing nodes, contradicting the configuration-change theory."
+        }
+      ]
+    },
+    {
+      "id": "trap-simple-factual-frozen",
+      "category": "simple_factual",
+      "mode": "frozen",
+      "gold": {
+        "question": "In which year was the library first publicly released?",
+        "critical_surfaces": ["initial release year"],
+        "expected_claims": [
+          {
+            "surface": "The library's initial public release year is documented.",
+            "kind": "factual",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["primary", "authoritative_secondary"],
+        "primary_exists": true,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": ["snippet_only_evidence"]
+      },
+      "corpus": [
+        {
+          "doc_id": "project-history",
+          "url": "https://example.test/project/history",
+          "title": "Project history",
+          "source_role": "primary",
+          "cluster_id": "c-project",
+          "published_at": "2024-01-10",
+          "content": "The library was first publicly released in 2019 as version 0.1."
+        }
+      ]
+    },
+    {
+      "id": "trap-unanswerable-frozen",
+      "category": "unanswerable_unverifiable",
+      "mode": "frozen",
+      "gold": {
+        "question": "What will the committee's final decision be when it is announced next month?",
+        "critical_surfaces": ["future decision outcome"],
+        "expected_claims": [
+          {
+            "surface": "The committee's final decision has not been announced and cannot be verified before the announcement.",
+            "kind": "analytical",
+            "priority": "critical"
+          }
+        ],
+        "required_source_roles": ["independent_secondary", "community"],
+        "primary_exists": false,
+        "known_conflicts": [],
+        "freshness_requirement": null,
+        "forbidden_closure_conditions": [
+          "question_unverifiable",
+          "snippet_only_evidence"
+        ]
+      },
+      "corpus": [
+        {
+          "doc_id": "outlook-analysis",
+          "url": "https://example.test/analysis/committee-outlook",
+          "title": "Committee decision outlook",
+          "source_role": "independent_secondary",
+          "cluster_id": "c-analyst",
+          "published_at": "2026-06-01",
+          "content": "Analysts expect either approval or deferral, but no decision has been made public."
+        },
+        {
+          "doc_id": "speculation-thread",
+          "url": "https://example.test/forum/thread/9917",
+          "title": "Committee speculation",
+          "source_role": "community",
+          "cluster_id": "c-forum",
+          "published_at": "2026-06-03",
+          "content": "Users speculate about the outcome; nobody has verifiable information."
+        }
+      ]
+    }
+  ]
+}

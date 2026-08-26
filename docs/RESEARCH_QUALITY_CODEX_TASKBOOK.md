@@ -1,4 +1,4 @@
-# Study Agent 联网研究质量整改任务书（Codex 施工版）
+﻿# Study Agent 联网研究质量整改任务书（Codex 施工版）
 
 > 状态：**C1–C100 全部冻结**  
 > 目标仓库：`2002yy/study-agent`  
@@ -1596,4 +1596,4 @@ Shadow/Benchmark after
 
 ---
 
-**当前执行点：A0–B3 已在本地逐批通过、尚未提交；以 `docs/PROJECT_STATUS.md` 最后一个 RQCE Stop report 为准，下一逻辑 batch 是 RQCE-P0-C1。A0 指令不得重复执行。**
+**当前执行点：A0–B3 已由提交 `2afea76` 交付远程（CI success）；C1–C4 已本地通过、尚未提交（`docs/PROJECT_STATUS.md` 15.19–15.22），C4 生成诊断报告 `docs/research_quality/P0_SHADOW_REPORT.md`。以 `docs/PROJECT_STATUS.md` 顶部 Current Handoff 与最后一个 RQCE Stop report 为准，下一动作是提交本轮累计并触发远程 CI；RQCE-P1 需人工确认 P0 报告后方可开始。已完成 batch 不得重复执行。**
