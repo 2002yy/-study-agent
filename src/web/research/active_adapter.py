@@ -19,6 +19,24 @@ from typing import Any, Protocol
 from src.web.research.provider_search import ResearchProviderSearch
 from src.web.research_gateway import ResearchWebGateway
 
+_PROVIDER_AUDIT_FIELDS = (
+    "provider",
+    "attempt",
+    "status",
+    "reason",
+    "result_count",
+    "elapsed_seconds",
+    "query_sha256",
+    "query_chars",
+)
+_PROVIDER_OUTCOME_FIELDS = (
+    "provider",
+    "status",
+    "reason",
+    "attempts",
+    "result_count",
+)
+
 
 class ResearchSearchExact(Protocol):
     def search_exact(
@@ -134,16 +152,38 @@ def _audit_from_payload(payload: Mapping[str, Any]) -> ActiveSearchCallAudit:
         reason=_bounded_text(payload.get("reason"), 200),
         providers_attempted=_strings(payload.get("providers_attempted"), limit=12),
         provider_errors=_strings(payload.get("provider_errors"), limit=24),
-        provider_audits=_mapping_tuple(payload.get("provider_audits"), limit=24),
-        provider_outcomes=_mapping_tuple(payload.get("provider_outcomes"), limit=12),
+        provider_audits=_mapping_tuple(
+            payload.get("provider_audits"),
+            fields=_PROVIDER_AUDIT_FIELDS,
+            limit=24,
+        ),
+        provider_outcomes=_mapping_tuple(
+            payload.get("provider_outcomes"),
+            fields=_PROVIDER_OUTCOME_FIELDS,
+            limit=12,
+        ),
         searched_at=_bounded_text(payload.get("searched_at"), 100),
     )
 
 
-def _mapping_tuple(value: Any, *, limit: int) -> tuple[dict[str, Any], ...]:
+def _mapping_tuple(
+    value: Any,
+    *,
+    fields: tuple[str, ...],
+    limit: int,
+) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
         return ()
-    return tuple(dict(item) for item in value[:limit] if isinstance(item, Mapping))
+    return tuple(
+        {
+            field: item[field]
+            for field in fields
+            if field in item
+            and isinstance(item[field], (str, int, float, bool, type(None)))
+        }
+        for item in value[:limit]
+        if isinstance(item, Mapping)
+    )
 
 
 def _strings(value: Any, *, limit: int) -> tuple[str, ...]:
