@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from src.application.research_web_lookup_dispatch import (
-    _AuditRecordingGateway,
-    _AuditedRepositoryProxy,
-)
+from src.application.research_web_lookup_dispatch import _AuditedRepositoryProxy
 from src.domain.runtime_entities import WebLookupRun
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
@@ -60,16 +57,15 @@ class _RecordingRepository:
 
 def test_two_searches_before_one_checkpoint_keep_both_provider_audits() -> None:
     active = ActiveResearchGateway(search_backend=_EmptyBackend())
-    recording = _AuditRecordingGateway(active)
     repository = _RecordingRepository()
     proxy = _AuditedRepositoryProxy(
         cast(WebLookupRepository, repository),
-        recording,
+        active,
         initial_attempt_count=1,
     )
 
-    assert recording.search("first", max_items=5) == []
-    assert recording.search("second", max_items=5) == []
+    assert active.search("first", max_items=5) == []
+    assert active.search("second", max_items=5) == []
 
     proxy.checkpoint(
         "run1",
