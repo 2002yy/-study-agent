@@ -63,7 +63,7 @@ class _AuditedRepositoryProxy:
     def __init__(
         self,
         repository: WebLookupRepository,
-        gateway: _AuditRecordingGateway,
+        gateway: Any,
         *,
         initial_attempt_count: int = 0,
     ) -> None:
@@ -168,16 +168,21 @@ class _AuditedRepositoryProxy:
             operation_id=operation_id,
         )
 
+    def _pending_search_audits(self) -> list[dict[str, Any] | None]:
+        drain = getattr(self._gateway, "drain_search_audits", None)
+        if callable(drain):
+            return list(drain())
+        audit = self._gateway.last_search_audit()
+        return [dict(audit)] if audit is not None else []
+
     def _audited_attempts(
         self,
         query_attempts: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         attempts = [dict(item) for item in query_attempts]
-        pending = self._gateway.drain_search_audits()
+        pending = self._pending_search_audits()
         new_attempt_count = max(0, len(attempts) - self._attempt_count)
         if pending:
-            # One active search produces one query attempt in WebLookupService.
-            # Bind only the suffix created since the previous durable write.
             bind_count = min(len(pending), new_attempt_count)
             start = len(attempts) - bind_count
             for offset, audit in enumerate(pending[-bind_count:] if bind_count else []):
