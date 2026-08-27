@@ -298,11 +298,13 @@ def _default_provider_call(
         error = "" if results else get_last_searxng_error()
         return results, error
     if provider == "bing_rss":
-        results, error = GeneralWebGateway._search_bing_rss(query, limit, timeout)
-        return cast(list[Mapping[str, Any]], results), error
+        bing_results, error = GeneralWebGateway._search_bing_rss(query, limit, timeout)
+        return cast(list[Mapping[str, Any]], bing_results), error
     if provider == "duckduckgo_html":
-        results, error = GeneralWebGateway._search_duckduckgo(query, limit, timeout)
-        return cast(list[Mapping[str, Any]], results), error
+        duckduckgo_results, error = GeneralWebGateway._search_duckduckgo(
+            query, limit, timeout
+        )
+        return cast(list[Mapping[str, Any]], duckduckgo_results), error
     raise ValueError("unsupported research search provider")
 
 
