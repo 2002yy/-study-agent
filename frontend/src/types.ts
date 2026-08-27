@@ -563,12 +563,18 @@ export type WebLookupRunResponse = {
 export type ChatResearchProgress = {
   run_id: string;
   status: "pending" | "running" | "completed" | "partial" | "failed" | "cancelled";
-  stage: "planned" | "searching" | "assessing" | "reading" | "synthesizing" | "completed" | "failed" | "cancelled";
+  stage: "planned" | "searching" | "assessing" | "reading" | "synthesizing" | "gating" | "completed" | "failed" | "cancelled";
   provider_status: string;
   stop_reason: string;
   error: string;
   query_attempt_count: number;
   selected_source_count: number;
+  candidate_count?: number;
+  read_count?: number;
+  cluster_count?: number;
+  open_critical_gap_count?: number;
+  active_phase?: string | null;
+  gate_status?: string | null;
   version: number;
   // G18 deep-research journey fields (present only for deep runs).
   round?: number | null;

@@ -14,17 +14,22 @@ writes a second run state and never treats audit metadata as evidence.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from src.application.web_lookup_service import WebLookupGateway, WebLookupService
+from src.application.active_research_runtime import ActiveResearchRuntimeExecutor
 from src.domain.evidence import build_evidence_snapshot
 from src.domain.runtime_entities import WebLookupRun
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.state import load_claim_engine_state
+from src.web.research.contracts import ResearchState
 
 _PROVIDER_AUDIT_SCHEMA_VERSION = "research-provider-audit-v1"
 ActiveGatewayFactory = Callable[[], ActiveResearchGateway]
+ActiveRuntimeFactory = Callable[
+    [WebLookupRepository, ActiveResearchGateway], ActiveResearchRuntimeExecutor
+]
 
 
 class _AuditedRepositoryProxy:
@@ -182,9 +187,16 @@ class ClaimEngineDispatchWebLookupService(WebLookupService):
         planner: Any = None,
         *,
         active_gateway_factory: ActiveGatewayFactory | None = None,
+        active_runtime_factory: ActiveRuntimeFactory | None = None,
     ) -> None:
         super().__init__(repository, gateway=gateway, planner=planner)
         self._active_gateway_factory = active_gateway_factory or ActiveResearchGateway
+        self._active_runtime_factory = active_runtime_factory or (
+            lambda repository, gateway: ActiveResearchRuntimeExecutor(
+                repository,
+                gateway,
+            )
+        )
 
     def execute(
         self,
@@ -194,7 +206,8 @@ class ClaimEngineDispatchWebLookupService(WebLookupService):
         stale_after_seconds: int = 120,
     ) -> WebLookupRun:
         run = self.get(run_id)
-        if _dispatch_mode(run) != "active":
+        active_state = _dispatch_state(run)
+        if active_state is None:
             return super().execute(
                 run_id,
                 raise_on_error=raise_on_error,
@@ -202,32 +215,31 @@ class ClaimEngineDispatchWebLookupService(WebLookupService):
             )
 
         active_gateway = self._active_gateway_factory()
-        proxy = _AuditedRepositoryProxy(
+        active_runtime = self._active_runtime_factory(
             self.repository,
             active_gateway,
-            initial_attempt_count=len(run.query_attempts),
         )
-        active_service = WebLookupService(
-            cast(WebLookupRepository, proxy),
-            gateway=active_gateway,
-            planner=self.planner,
-        )
-        return active_service.execute(
+        return active_runtime.execute(
             run_id,
+            initial_state=active_state,
             raise_on_error=raise_on_error,
             stale_after_seconds=stale_after_seconds,
         )
 
 
 def _dispatch_mode(run: WebLookupRun) -> str:
+    return "active" if _dispatch_state(run) is not None else "legacy"
+
+
+def _dispatch_state(run: WebLookupRun) -> ResearchState | None:
     known_evidence_ids = _known_research_evidence_ids(run)
     loaded = load_claim_engine_state(
         run.research_context,
         known_evidence_ids=known_evidence_ids,
     )
     if loaded.available and loaded.effective_mode == "active":
-        return "active"
-    return "legacy"
+        return loaded.state
+    return None
 
 
 def _known_research_evidence_ids(run: WebLookupRun) -> tuple[str, ...]:

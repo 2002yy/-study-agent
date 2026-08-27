@@ -20,13 +20,17 @@ from src.web.research.runtime import (
     CLAIM_ENGINE_RUNTIME_CONTEXT_KEY,
     ResearchRuntimeCursor,
     RuntimeCandidate,
+    RuntimeExternalAttemptStart,
+    RuntimeFailure,
     RuntimePlannedQuery,
     RuntimeQueryOutcome,
     attach_runtime_cursor,
+    begin_external_attempt,
     begin_model_attempt,
     finish_model_attempt,
     load_runtime_cursor,
     recover_interrupted_model_attempt,
+    recover_interrupted_external_attempt,
 )
 
 
@@ -269,6 +273,32 @@ def test_claim_planner_allows_active_only_when_explicitly_requested() -> None:
     assert result.state.mode == "active"
 
 
+def test_claim_planner_requests_full_completion_budget() -> None:
+    """Regression: DeepSeek v4 Flash JSON-mode needs >900 completion tokens.
+
+    A real run showed finish_reason=length with output_tokens==900 and an
+    unparseable truncated plan; the same call with a 4000 ceiling produced a
+    valid plan (output_tokens=1056). The planner must keep requesting the
+    full gateway ceiling so the provider cannot truncate the control-plane
+    JSON mid-object.
+    """
+
+    gateway, client = _gateway([_response(_valid_claim_payload())])
+
+    result = RuntimeClaimPlanner(gateway).plan(
+        run_id="run-budget",
+        question="What is the current API rate limit?",
+        reference_date="2026-08-27",
+        budget=_budget(),
+        mode="active",
+    )
+
+    assert result.completed is True
+    assert client.create_calls, "planner must issue exactly one model call"
+    for call in client.create_calls:
+        assert call["max_tokens"] == 4000
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -391,6 +421,35 @@ def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
     assert recovered.inflight_model_call is None
     assert recovered.failures[-1].code == "interrupted_unknown"
     assert recovered.failures[-1].item_id == "logical:attempt:1"
+
+
+def test_inflight_external_call_recovers_as_interrupted_unknown() -> None:
+    marker = RuntimeExternalAttemptStart(
+        call_id="research_read:run-1:candidate-1:attempt:1",
+        purpose="read",
+        item_id="candidate-1",
+        attempt=1,
+        started_at="2026-08-27T12:00:00+00:00",
+    )
+    started = begin_external_attempt(ResearchRuntimeCursor(phase="reading"), marker)
+
+    recovered = recover_interrupted_external_attempt(started)
+
+    assert recovered.inflight_external_call is None
+    assert recovered.failures[-1] == RuntimeFailure(
+        code="interrupted_unknown",
+        phase="reading",
+        item_id=marker.call_id,
+    )
+
+
+def test_pre_b5_v1_cursor_loads_with_no_external_call_inflight() -> None:
+    legacy = ResearchRuntimeCursor(phase="searching").to_dict()
+    del legacy["inflight_external_call"]
+
+    restored = ResearchRuntimeCursor.from_dict(legacy)
+
+    assert restored.inflight_external_call is None
 
 
 def test_model_attempt_completion_requires_matching_inflight_call() -> None:

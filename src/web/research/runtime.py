@@ -20,6 +20,7 @@ CLAIM_ENGINE_RUNTIME_CONTEXT_KEY = "claim_engine_runtime"
 RESEARCH_RUNTIME_SCHEMA_VERSION = "research-runtime-v1"
 
 RuntimeLoadStatus = Literal["absent", "available", "unavailable"]
+RuntimeExternalPurpose = Literal["search", "read"]
 RuntimePhase = Literal[
     "bootstrap",
     "planning",
@@ -248,6 +249,49 @@ class RuntimeFailure:
 
 
 @dataclass(frozen=True)
+class RuntimeExternalAttemptStart:
+    """Durable pre-call marker for a read-only external operation.
+
+    A process crash can leave the remote side completed while the local result
+    was never checkpointed.  The marker therefore records an unknown attempt;
+    it is never interpreted as proof that the external call did not happen.
+    """
+
+    call_id: str
+    purpose: RuntimeExternalPurpose
+    item_id: str
+    attempt: int
+    started_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "purpose": self.purpose,
+            "item_id": self.item_id,
+            "attempt": self.attempt,
+            "started_at": self.started_at,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "RuntimeExternalAttemptStart":
+        data = _strict_mapping(
+            raw,
+            {"call_id", "purpose", "item_id", "attempt", "started_at"},
+            "runtime external attempt",
+        )
+        purpose = _required_text(data.get("purpose"), 50, "external purpose")
+        if purpose not in {"search", "read"}:
+            raise ValueError("invalid runtime external purpose")
+        return cls(
+            call_id=_required_text(data.get("call_id"), 300, "external call id"),
+            purpose=purpose,  # type: ignore[arg-type]
+            item_id=_required_text(data.get("item_id"), 300, "external item id"),
+            attempt=_bounded_int(data.get("attempt"), 1, 2, "external attempt"),
+            started_at=_required_text(data.get("started_at"), 100, "external started_at"),
+        )
+
+
+@dataclass(frozen=True)
 class ResearchRuntimeCursor:
     round_index: int = 0
     phase: RuntimePhase = "bootstrap"
@@ -258,6 +302,7 @@ class ResearchRuntimeCursor:
     read_outcomes: tuple[RuntimeReadOutcome, ...] = ()
     model_calls: tuple[ResearchModelCallAudit, ...] = ()
     inflight_model_call: ResearchModelAttemptStart | None = None
+    inflight_external_call: RuntimeExternalAttemptStart | None = None
     failures: tuple[RuntimeFailure, ...] = ()
     schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION
 
@@ -283,13 +328,23 @@ class ResearchRuntimeCursor:
             "inflight_model_call": (
                 self.inflight_model_call.to_dict() if self.inflight_model_call else None
             ),
+            "inflight_external_call": (
+                self.inflight_external_call.to_dict()
+                if self.inflight_external_call
+                else None
+            ),
             "failures": [item.to_dict() for item in self.failures],
         }
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "ResearchRuntimeCursor":
+        # B5 added the external pre-call marker to the existing v1 cursor.  A
+        # pre-B5 cursor has no such call in flight; accept only that one absent
+        # field so a durable checkpoint is not made unreadable by the upgrade.
+        compatible = dict(raw)
+        compatible.setdefault("inflight_external_call", None)
         data = _strict_mapping(
-            raw,
+            compatible,
             {
                 "schema_version",
                 "round_index",
@@ -301,6 +356,7 @@ class ResearchRuntimeCursor:
                 "read_outcomes",
                 "model_calls",
                 "inflight_model_call",
+                "inflight_external_call",
                 "failures",
             },
             "research runtime cursor",
@@ -336,6 +392,14 @@ class ResearchRuntimeCursor:
                 _as_mapping(inflight_raw, "inflight_model_call")
             )
         )
+        external_raw = data.get("inflight_external_call")
+        external_inflight = (
+            None
+            if external_raw is None
+            else RuntimeExternalAttemptStart.from_dict(
+                _as_mapping(external_raw, "inflight_external_call")
+            )
+        )
         cursor = cls(
             round_index=_bounded_int(data.get("round_index"), 0, 1000, "round_index"),
             phase=phase,  # type: ignore[arg-type]
@@ -348,6 +412,7 @@ class ResearchRuntimeCursor:
             read_outcomes=read_outcomes,
             model_calls=model_calls,
             inflight_model_call=inflight,
+            inflight_external_call=external_inflight,
             failures=failures,
         )
         _validate_cursor_links(cursor)
@@ -437,6 +502,44 @@ def recover_interrupted_model_attempt(
     )
 
 
+def begin_external_attempt(
+    cursor: ResearchRuntimeCursor,
+    marker: RuntimeExternalAttemptStart,
+) -> ResearchRuntimeCursor:
+    if cursor.inflight_external_call is not None:
+        raise ValueError("research runtime already has an inflight external call")
+    return replace(cursor, inflight_external_call=marker)
+
+
+def finish_external_attempt(
+    cursor: ResearchRuntimeCursor,
+    *,
+    call_id: str,
+) -> ResearchRuntimeCursor:
+    inflight = cursor.inflight_external_call
+    if inflight is None or inflight.call_id != call_id:
+        raise ValueError("research external completion does not match inflight call")
+    return replace(cursor, inflight_external_call=None)
+
+
+def recover_interrupted_external_attempt(
+    cursor: ResearchRuntimeCursor,
+) -> ResearchRuntimeCursor:
+    inflight = cursor.inflight_external_call
+    if inflight is None:
+        return cursor
+    failure = RuntimeFailure(
+        code="interrupted_unknown",
+        phase=cursor.phase,
+        item_id=inflight.call_id,
+    )
+    return replace(
+        cursor,
+        inflight_external_call=None,
+        failures=(*cursor.failures, failure),
+    )
+
+
 def _validate_cursor_links(cursor: ResearchRuntimeCursor) -> None:
     planned_query_ids = [item.id for item in cursor.planned_queries]
     if len(planned_query_ids) != len(set(planned_query_ids)):
@@ -469,6 +572,8 @@ def _validate_cursor_links(cursor: ResearchRuntimeCursor) -> None:
         raise ValueError("runtime model audit call ids must be unique")
     if cursor.inflight_model_call and cursor.inflight_model_call.call_id in set(call_ids):
         raise ValueError("completed model call cannot remain inflight")
+    if cursor.inflight_model_call and cursor.inflight_external_call:
+        raise ValueError("model and external calls cannot both remain inflight")
 
 
 def _object_tuple(value: Any, parser: Any, label: str) -> tuple[Any, ...]:
@@ -533,12 +638,16 @@ __all__ = [
     "RuntimeCandidate",
     "RuntimeCursorLoadResult",
     "RuntimeFailure",
+    "RuntimeExternalAttemptStart",
     "RuntimePlannedQuery",
     "RuntimeQueryOutcome",
     "RuntimeReadOutcome",
     "attach_runtime_cursor",
     "begin_model_attempt",
+    "begin_external_attempt",
+    "finish_external_attempt",
     "finish_model_attempt",
     "load_runtime_cursor",
     "recover_interrupted_model_attempt",
+    "recover_interrupted_external_attempt",
 ]

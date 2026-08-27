@@ -59,6 +59,81 @@ describe("ChatResearchRecovery", () => {
     expect(container.textContent ?? "").toContain("2");
   });
 
+  it("shows the active Evidence Gate phase and all four bounded counters", () => {
+    const { container } = render(
+      <ChatResearchRecovery
+        run={null}
+        progress={{
+          run_id: "research-active-gating",
+          status: "running",
+          stage: "gating",
+          provider_status: "",
+          stop_reason: "",
+          error: "",
+          query_attempt_count: 3,
+          selected_source_count: 2,
+          candidate_count: 12,
+          read_count: 5,
+          cluster_count: 3,
+          open_critical_gap_count: 1,
+          active_phase: "gating",
+          gate_status: null,
+          version: 8,
+        }}
+        isBusy={false}
+        canRetry={false}
+        canResume={false}
+        useInChat={false}
+        onRetry={vi.fn()}
+        onResume={vi.fn()}
+      />,
+    );
+
+    expect(container).toHaveTextContent("正在执行 Evidence Gate");
+    expect(container).toHaveTextContent("候选 12");
+    expect(container).toHaveTextContent("已读 5");
+    expect(container).toHaveTextContent("独立证据簇 3");
+    expect(container).toHaveTextContent("未闭合关键缺口 1");
+  });
+
+  it.each([
+    ["completed", "evidence_gate_pass", "Evidence Gate 已通过"],
+    ["partial", "evidence_gap_open", "仍有关键证据缺口"],
+    ["partial", "evidence_budget_exhausted", "研究预算已用尽"],
+    ["failed", "active_runtime_unavailable", "未把未经校验的结果当成结论"],
+  ] as const)("renders explicit active terminal truth for %s / %s", (status, stopReason, copy) => {
+    const { container } = render(
+      <ChatResearchRecovery
+        run={null}
+        progress={{
+          run_id: `research-active-${stopReason}`,
+          status,
+          stage: "completed",
+          provider_status: status === "completed" ? "found" : "insufficient",
+          stop_reason: stopReason,
+          error: "",
+          query_attempt_count: 2,
+          selected_source_count: 2,
+          candidate_count: 8,
+          read_count: 2,
+          cluster_count: 2,
+          open_critical_gap_count: status === "completed" ? 0 : 1,
+          gate_status: status === "completed" ? "pass" : "block",
+          version: 9,
+        }}
+        isBusy={false}
+        canRetry={false}
+        canResume={false}
+        useInChat={false}
+        onRetry={vi.fn()}
+        onResume={vi.fn()}
+      />,
+    );
+
+    expect(container).toHaveTextContent(copy);
+    expect(container).toHaveTextContent("候选 8");
+  });
+
   it("offers a formal retry for a failed chat-owned ResearchRun", () => {
     const onRetry = vi.fn();
     const { container } = render(
