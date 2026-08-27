@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from src.web.research.claim_planner import (
+    RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+    RuntimeClaimPlanner,
+)
+from src.web.research.contracts import ResearchBudget
+from src.web.research.model_gateway import (
+    ResearchModelAttemptStart,
+    ResearchModelCallAudit,
+    ResearchModelGateway,
+)
+from src.web.research.runtime import (
+    CLAIM_ENGINE_RUNTIME_CONTEXT_KEY,
+    ResearchRuntimeCursor,
+    RuntimeCandidate,
+    RuntimePlannedQuery,
+    RuntimeQueryOutcome,
+    attach_runtime_cursor,
+    begin_model_attempt,
+    finish_model_attempt,
+    load_runtime_cursor,
+    recover_interrupted_model_attempt,
+)
+
+
+class _FakeClient:
+    def __init__(self, outcomes: list[Any]) -> None:
+        self.outcomes = list(outcomes)
+        self.with_options_calls: list[dict[str, Any]] = []
+        self.create_calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def with_options(self, **kwargs: Any) -> "_FakeClient":
+        self.with_options_calls.append(dict(kwargs))
+        return self
+
+    def _create(self, **kwargs: Any) -> Any:
+        self.create_calls.append(dict(kwargs))
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _response(
+    content: str,
+    *,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+) -> Any:
+    total_tokens = (
+        None
+        if prompt_tokens is None or completion_tokens is None
+        else prompt_tokens + completion_tokens
+    )
+    usage = (
+        None
+        if total_tokens is None
+        else SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+    )
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content),
+                finish_reason="stop",
+            )
+        ],
+        usage=usage,
+    )
+
+
+def _gateway(outcomes: list[Any]) -> tuple[ResearchModelGateway, _FakeClient]:
+    client = _FakeClient(outcomes)
+    gateway = ResearchModelGateway(
+        provider_profile="openai",
+        model_profile="flash",
+        model_name="test-model",
+        client=client,
+        timeout_seconds=9.0,
+        max_attempts=2,
+        now=lambda: "2026-08-27T12:00:00+00:00",
+        monotonic=_Monotonic(),
+    )
+    return gateway, client
+
+
+class _Monotonic:
+    def __init__(self) -> None:
+        self.value = 100.0
+
+    def __call__(self) -> float:
+        self.value += 0.25
+        return self.value
+
+
+def _budget() -> ResearchBudget:
+    return ResearchBudget(
+        max_candidates=20,
+        max_reads=8,
+        soft_timeout_seconds=45.0,
+        hard_timeout_seconds=60.0,
+        max_total_chars=48_000,
+    )
+
+
+def _valid_claim_payload() -> str:
+    return (
+        '{"schema_version":"research-runtime-claim-plan-v1","claims":['
+        '{"surface":"What is the current API rate limit?","kind":"factual",'
+        '"priority":"critical","policy_profile":"current_fact"}]}'
+    )
+
+
+def _attempt_marker(call_id: str = "logical:attempt:1") -> ResearchModelAttemptStart:
+    return ResearchModelAttemptStart(
+        call_id=call_id,
+        logical_call_id="logical",
+        purpose="research_claim_planning",
+        provider_profile="openai",
+        model_profile="flash",
+        model_name="test-model",
+        attempt=1,
+        started_at="2026-08-27T12:00:00+00:00",
+        response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+        input_sha256="a" * 64,
+        input_chars=12,
+        data_categories=("user_question",),
+        data_counts=(("user_question", 1),),
+    )
+
+
+def _audit(call_id: str = "logical:attempt:1") -> ResearchModelCallAudit:
+    return ResearchModelCallAudit(
+        call_id=call_id,
+        logical_call_id="logical",
+        purpose="research_claim_planning",
+        provider_profile="openai",
+        model_profile="flash",
+        model_name="test-model",
+        attempt=1,
+        started_at="2026-08-27T12:00:00+00:00",
+        completed_at="2026-08-27T12:00:01+00:00",
+        elapsed_seconds=1.0,
+        status="completed",
+        response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+        input_sha256="a" * 64,
+        input_chars=12,
+        response_sha256="b" * 64,
+        response_chars=20,
+    )
+
+
+def test_model_gateway_disables_hidden_retries_and_audits_explicit_attempts() -> None:
+    gateway, client = _gateway(
+        [
+            _response("not-json"),
+            _response('{"ok":true}', prompt_tokens=11, completion_tokens=3),
+        ]
+    )
+    events: list[str] = []
+
+    result = gateway.complete_structured(
+        logical_call_id="claim:run-1:1",
+        purpose="research_claim_planning",
+        messages=[{"role": "user", "content": "PRIVATE-MARKER"}],
+        audit_payload={"question": "public question"},
+        response_schema_version="test-v1",
+        parse=lambda value: value["ok"],
+        data_categories=("user_question",),
+        data_counts={"user_question": 1},
+        on_attempt_started=lambda marker: events.append(f"start:{marker.attempt}"),
+        on_attempt_finished=lambda audit: events.append(f"finish:{audit.attempt}"),
+    )
+
+    assert result.completed is True
+    assert result.value is True
+    assert [item.status for item in result.audits] == ["attempt_failed", "completed"]
+    assert client.with_options_calls == [{"max_retries": 0}, {"max_retries": 0}]
+    assert events == ["start:1", "finish:1", "start:2", "finish:2"]
+    assert result.audits[1].input_tokens == 11
+    assert result.audits[1].output_tokens == 3
+    assert result.audits[1].total_tokens == 14
+    assert all(call["response_format"] == {"type": "json_object"} for call in client.create_calls)
+    assert "PRIVATE-MARKER" not in str([item.to_dict() for item in result.audits])
+
+
+def test_model_gateway_exhaustion_is_unavailable_without_token_estimates() -> None:
+    gateway, _ = _gateway([TimeoutError("one"), TimeoutError("two")])
+
+    result = gateway.complete_structured(
+        logical_call_id="claim:run-2:1",
+        purpose="research_claim_planning",
+        messages=[{"role": "user", "content": "question"}],
+        audit_payload={"question": "question"},
+        response_schema_version="test-v1",
+        parse=lambda value: value,
+    )
+
+    assert result.status == "unavailable"
+    assert result.value is None
+    assert result.reason == "model_call_attempts_exhausted"
+    assert len(result.audits) == 2
+    assert all(item.status == "attempt_failed" for item in result.audits)
+    assert all(item.input_tokens is None for item in result.audits)
+    assert all(item.output_tokens is None for item in result.audits)
+    assert all(item.total_tokens is None for item in result.audits)
+
+
+def test_claim_planner_defaults_to_shadow_and_code_owns_policy_and_ids() -> None:
+    gateway, _ = _gateway([_response(_valid_claim_payload())])
+    planner = RuntimeClaimPlanner(gateway)
+
+    result = planner.plan(
+        run_id="run-1",
+        question="What is the current API rate limit?",
+        reference_date="2026-08-27",
+        budget=_budget(),
+        freshness_requested=True,
+        freshness_days=7,
+        timestamp="2026-08-27T12:00:00+00:00",
+    )
+
+    assert result.completed is True
+    state = result.state
+    assert state is not None
+    assert state.mode == "shadow"
+    assert state.reference_date == "2026-08-27"
+    assert len(state.claims) == 1
+    claim = state.claims[0]
+    assert claim.id.startswith("claim_")
+    assert claim.created_by == "runtime_claim_planner"
+    assert claim.evidence_requirement.source_roles == (
+        "primary",
+        "authoritative_secondary",
+        "independent_secondary",
+    )
+    assert claim.evidence_requirement.max_age_days == 7
+    assert claim.evidence_requirement.requires_dated_evidence is True
+    assert state.gaps[0].id.startswith("gap_")
+    assert [item.sequence for item in state.trace] == [0, 1]
+    assert [item.event_type for item in state.trace] == ["claim_created", "gap_created"]
+
+
+def test_claim_planner_allows_active_only_when_explicitly_requested() -> None:
+    gateway, _ = _gateway([_response(_valid_claim_payload())])
+
+    result = RuntimeClaimPlanner(gateway).plan(
+        run_id="run-active",
+        question="What is the current API rate limit?",
+        reference_date="2026-08-27",
+        budget=_budget(),
+        mode="active",
+    )
+
+    assert result.completed is True
+    assert result.state is not None
+    assert result.state.mode == "active"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        (
+            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
+            '{"surface":"Explain the cause","kind":"factual",'
+            '"priority":"critical","policy_profile":"causal_analysis"}]}'
+        ),
+        (
+            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
+            '{"surface":"A fact","kind":"factual","priority":"major",'
+            '"policy_profile":"current_fact"}]}'
+        ),
+        (
+            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
+            '{"surface":"A fact","kind":"factual","priority":"critical",'
+            '"policy_profile":"current_fact","evidence_id":"model-owned"}]}'
+        ),
+    ],
+)
+def test_claim_planner_invalid_schema_or_policy_fails_closed(payload: str) -> None:
+    gateway, _ = _gateway([_response(payload), _response(payload)])
+
+    result = RuntimeClaimPlanner(gateway).plan(
+        run_id="run-invalid",
+        question="Question",
+        reference_date="2026-08-27",
+        budget=_budget(),
+    )
+
+    assert result.status == "unavailable"
+    assert result.state is None
+    assert len(result.audits) == 2
+    assert all(item.status == "attempt_failed" for item in result.audits)
+
+
+def test_runtime_cursor_round_trip_and_attach_preserves_unrelated_context() -> None:
+    query = RuntimePlannedQuery(
+        id="q1",
+        gap_id="g1",
+        claim_id="c1",
+        intent="primary",
+        query="official source query",
+        desired_source_role="primary",
+    )
+    candidate = RuntimeCandidate(
+        id="candidate_1",
+        url="https://example.test/official",
+        title="Official source",
+        query_ids=("q1",),
+        intents=("primary",),
+        providers=("searxng",),
+        first_seen_rank=1,
+    )
+    cursor = ResearchRuntimeCursor(
+        round_index=1,
+        phase="searching",
+        planned_queries=(query,),
+        query_outcomes=(
+            RuntimeQueryOutcome(
+                query_id="q1",
+                status="ok",
+                result_count=1,
+                providers=("searxng",),
+            ),
+        ),
+        candidates=(candidate,),
+        planned_read_ids=("candidate_1",),
+    )
+
+    restored = ResearchRuntimeCursor.from_dict(cursor.to_dict())
+    assert restored == cursor
+    context = attach_runtime_cursor({"legacy": {"keep": True}}, cursor)
+    assert context["legacy"] == {"keep": True}
+    assert context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]["schema_version"] == "research-runtime-v1"
+    loaded = load_runtime_cursor(context)
+    assert loaded.available is True
+    assert loaded.cursor == cursor
+
+
+def test_corrupt_runtime_cursor_fails_safe_without_throwing() -> None:
+    result = load_runtime_cursor(
+        {CLAIM_ENGINE_RUNTIME_CONTEXT_KEY: {"schema_version": "old"}}
+    )
+    assert result.status == "unavailable"
+    assert result.cursor is None
+    assert result.reason == "invalid_claim_engine_runtime"
+
+
+def test_runtime_cursor_rejects_unknown_query_and_candidate_references() -> None:
+    with pytest.raises(ValueError, match="unknown query"):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "planned_queries": [],
+                "query_outcomes": [
+                    RuntimeQueryOutcome(
+                        query_id="missing",
+                        status="empty",
+                        result_count=0,
+                    ).to_dict()
+                ],
+            }
+        )
+
+    with pytest.raises(ValueError, match="unknown candidate"):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "planned_read_ids": ["missing"],
+            }
+        )
+
+
+def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
+    started = begin_model_attempt(ResearchRuntimeCursor(phase="planning"), _attempt_marker())
+    assert started.inflight_model_call is not None
+
+    recovered = recover_interrupted_model_attempt(started)
+    assert recovered.inflight_model_call is None
+    assert recovered.failures[-1].code == "interrupted_unknown"
+    assert recovered.failures[-1].item_id == "logical:attempt:1"
+
+
+def test_model_attempt_completion_requires_matching_inflight_call() -> None:
+    cursor = begin_model_attempt(ResearchRuntimeCursor(), _attempt_marker())
+    completed = finish_model_attempt(cursor, _audit())
+    assert completed.inflight_model_call is None
+    assert completed.model_calls == (_audit(),)
+
+    with pytest.raises(ValueError, match="does not match"):
+        finish_model_attempt(
+            begin_model_attempt(ResearchRuntimeCursor(), _attempt_marker()),
+            _audit("other:attempt:1"),
+        )
+
+
+def test_a4a_production_modules_do_not_import_eval_code() -> None:
+    research_dir = Path(__file__).resolve().parents[1] / "src" / "web" / "research"
+    for name in ("model_gateway.py", "claim_planner.py", "runtime.py"):
+        text = (research_dir / name).read_text(encoding="utf-8")
+        assert "src.evals" not in text
