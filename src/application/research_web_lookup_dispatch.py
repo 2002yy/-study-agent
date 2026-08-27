@@ -27,36 +27,6 @@ _PROVIDER_AUDIT_SCHEMA_VERSION = "research-provider-audit-v1"
 ActiveGatewayFactory = Callable[[], ActiveResearchGateway]
 
 
-class _AuditRecordingGateway:
-    """Record one bounded audit slot per active search during one execution.
-
-    Deep research may append multiple query attempts before its next durable
-    checkpoint. ``ActiveResearchGateway.last_search_audit()`` intentionally only
-    exposes the latest call, so this execution-local wrapper records each call
-    immediately and lets the repository proxy drain them in order. A ``None``
-    slot means the backend failed before a safe audit payload existed.
-    """
-
-    def __init__(self, gateway: ActiveResearchGateway) -> None:
-        self._gateway = gateway
-        self._pending_audits: list[dict[str, Any] | None] = []
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._gateway, name)
-
-    def search(self, query: str, *, max_items: int = 10) -> list[dict[str, Any]]:
-        try:
-            return self._gateway.search(query, max_items=max_items)
-        finally:
-            audit = self._gateway.last_search_audit()
-            self._pending_audits.append(dict(audit) if audit is not None else None)
-
-    def drain_search_audits(self) -> list[dict[str, Any] | None]:
-        pending = self._pending_audits
-        self._pending_audits = []
-        return pending
-
-
 class _AuditedRepositoryProxy:
     """Delegate repository operations while enriching authoritative attempts."""
 
@@ -232,15 +202,14 @@ class ClaimEngineDispatchWebLookupService(WebLookupService):
             )
 
         active_gateway = self._active_gateway_factory()
-        recording_gateway = _AuditRecordingGateway(active_gateway)
         proxy = _AuditedRepositoryProxy(
             self.repository,
-            recording_gateway,
+            active_gateway,
             initial_attempt_count=len(run.query_attempts),
         )
         active_service = WebLookupService(
             cast(WebLookupRepository, proxy),
-            gateway=cast(WebLookupGateway, recording_gateway),
+            gateway=active_gateway,
             planner=self.planner,
         )
         return active_service.execute(
