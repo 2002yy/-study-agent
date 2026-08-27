@@ -7,6 +7,7 @@ import pytest
 from src.application import runtime_repository
 from src.application.research_web_lookup_dispatch import (
     ClaimEngineDispatchWebLookupService,
+    _AuditRecordingGateway,
     _AuditedRepositoryProxy,
     _dispatch_mode,
 )
@@ -197,7 +198,9 @@ def test_dispatch_service_switches_gateway_only_for_valid_active_run(
         active_gateway_factory=active_factory,
     )
     assert active_service.execute("active") == active_run
-    assert executed_gateways[-1] is active_created[-1]
+    executed = executed_gateways[-1]
+    assert isinstance(executed, _AuditRecordingGateway)
+    assert executed._gateway is active_created[-1]
     assert len(active_created) == 1
 
 
