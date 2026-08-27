@@ -392,9 +392,11 @@ def get_learner_model_service():
 
 @lru_cache(maxsize=1)
 def get_web_lookup_service():
-    from src.application.web_lookup_service import WebLookupService
+    from src.application.research_web_lookup_dispatch import (
+        ClaimEngineDispatchWebLookupService,
+    )
 
-    return WebLookupService(get_web_lookup_repository())
+    return ClaimEngineDispatchWebLookupService(get_web_lookup_repository())
 
 
 @lru_cache(maxsize=1)
