@@ -270,7 +270,7 @@ class ResearchModelGateway:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.provider_profile = (
-            provider_profile or os.getenv("LLL_PROVIDER_PROFILE") or "openai"
+            provider_profile or os.getenv("LLM_PROVIDER_PROFILE") or "openai"
         ).strip().lower()
         self.model_profile = model_profile
         self._model_name = model_name
@@ -311,8 +311,10 @@ class ResearchModelGateway:
         )
         input_hash = _sha256_text(payload_json)
         categories = tuple(
-            dict.fromkeys(_required_text(item, 100, "data category" for item in data_categories)
-         )
+            dict.fromkeys(
+                _required_text(item, 100, "data category") for item in data_categories
+            )
+        )
         counts = tuple(
             sorted(
                 (
