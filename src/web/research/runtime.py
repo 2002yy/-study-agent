@@ -266,7 +266,7 @@ class ResearchRuntimeCursor:
         return tuple(dict.fromkeys(item.query_id for item in self.query_outcomes))
 
     @property
-    def completed_read_ids(self) -> tuple[str, ..]:
+    def completed_read_ids(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(item.candidate_id for item in self.read_outcomes))
 
     def to_dict(self) -> dict[str, Any]:
@@ -332,7 +332,9 @@ class ResearchRuntimeCursor:
         inflight = (
             None
             if inflight_raw is None
-            else ResearchModelAttemptStart.from_dict(_as_mapping(inflight_raw, "inflight_model_call"))
+            else ResearchModelAttemptStart.from_dict(
+                _as_mapping(inflight_raw, "inflight_model_call")
+            )
         )
         cursor = cls(
             round_index=_bounded_int(data.get("round_index"), 0, 1000, "round_index"),
@@ -340,7 +342,9 @@ class ResearchRuntimeCursor:
             planned_queries=planned_queries,
             query_outcomes=query_outcomes,
             candidates=candidates,
-            planned_read_ids=_text_tuple(data.get("planned_read_ids"), _MAX_CURSOR_ITEMS, 300),
+            planned_read_ids=_text_tuple(
+                data.get("planned_read_ids"), _MAX_CURSOR_ITEMS, 300
+            ),
             read_outcomes=read_outcomes,
             model_calls=model_calls,
             inflight_model_call=inflight,
@@ -479,7 +483,9 @@ def _as_mapping(value: Any, label: str) -> Mapping[str, Any]:
     return value
 
 
-def _strict_mapping(raw: Mapping[str, Any], allowed: set[str], label: str) -> dict[str, Any]:
+def _strict_mapping(
+    raw: Mapping[str, Any], allowed: set[str], label: str
+) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise TypeError(f"{label} must be an object")
     data = dict(raw)
