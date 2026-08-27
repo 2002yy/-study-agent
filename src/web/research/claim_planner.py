@@ -25,6 +25,8 @@ from src.web.research.contracts import (
     build_research_state,
 )
 from src.web.research.model_gateway import (
+    AttemptFinishedHook,
+    AttemptStartedHook,
     ResearchModelCallAudit,
     ResearchModelGateway,
 )
@@ -89,6 +91,9 @@ class RuntimeClaimPlanner:
         freshness_days: int | None = None,
         timestamp: str | None = None,
         mode: ResearchMode = "shadow",
+        timeout_seconds: float | None = None,
+        on_attempt_started: AttemptStartedHook | None = None,
+        on_attempt_finished: AttemptFinishedHook | None = None,
     ) -> ClaimBootstrapResult:
         normalized_run_id = _required_text(run_id, 300, "run_id")
         if mode not in {"shadow", "active"}:
@@ -123,8 +128,11 @@ class RuntimeClaimPlanner:
                 "user_question": 1,
                 "question_chars": len(normalized_question),
             },
-            max_tokens=900,
+            max_tokens=4000,
             temperature=0.0,
+            timeout_seconds=timeout_seconds,
+            on_attempt_started=on_attempt_started,
+            on_attempt_finished=on_attempt_finished,
         )
         if not result.completed or result.value is None:
             return ClaimBootstrapResult(

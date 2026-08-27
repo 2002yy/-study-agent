@@ -17,8 +17,12 @@ from src.infrastructure.sqlite.database import RuntimeDatabase
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.contracts import (
+    EvidenceGap,
+    EvidenceRequirement,
     ResearchBudget,
+    ResearchClaim,
     ResearchEvidence,
+    ResearchQuestion,
     build_research_state,
 )
 from src.web.research.state import attach_claim_engine_state
@@ -80,6 +84,52 @@ def _selected_source() -> dict[str, Any]:
         },
         "read_status": "read",
     }
+
+
+def _active_context_with_open_claim() -> dict[str, Any]:
+    question = ResearchQuestion(
+        id="question_active",
+        question_surface="bounded factual query",
+        priority="critical",
+        state="unresolved",
+    )
+    claim = ResearchClaim(
+        id="claim_active",
+        question_id=question.id,
+        text="bounded factual query",
+        kind="factual",
+        priority="critical",
+        state="pending",
+        evidence_requirement=EvidenceRequirement(
+            source_roles=("primary", "independent_secondary"),
+            min_independent_sources=1,
+        ),
+    )
+    gap = EvidenceGap(
+        id="gap_active",
+        claim_id=claim.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="critical",
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim,),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(gap,),
+        conflict_gaps=(),
+        budget=_budget(),
+        reference_date="2026-08-27",
+        known_evidence_ids=(),
+    )
+    return attach_claim_engine_state(
+        {"source_truth_version": 2},
+        state,
+        known_evidence_ids=(),
+    )
 
 
 def _server_owned_id_for_source(source: dict[str, Any]) -> str:
@@ -195,6 +245,19 @@ def test_dispatch_service_switches_gateway_only_for_valid_active_run(
         cast(WebLookupRepository, FakeRepository(active_run)),
         gateway=cast(Any, legacy_gateway),
         active_gateway_factory=active_factory,
+        active_runtime_factory=lambda repository, gateway: cast(
+            Any,
+            type(
+                "FakeRuntime",
+                (),
+                {
+                    "execute": lambda self, run_id, **kwargs: (
+                        executed_gateways.append(gateway)
+                        or repository.get(run_id)
+                    )
+                },
+            )(),
+        ),
     )
     assert active_service.execute("active") == active_run
     assert executed_gateways[-1] is active_created[-1]
@@ -368,7 +431,7 @@ def test_active_dispatch_persists_provider_audit_in_real_repository(
 
     repository = WebLookupRepository(RuntimeDatabase(tmp_path / "dispatch.sqlite"))
     context = build_research_context("bounded factual query").to_dict()
-    context.update(_claim_engine_context("active"))
+    context.update(_active_context_with_open_claim())
     run = repository.create(
         WebLookupRun(
             id="run_active_integration",
@@ -388,8 +451,9 @@ def test_active_dispatch_persists_provider_audit_in_real_repository(
 
     completed = service.execute(run.id)
 
-    assert completed.status == "completed"
-    assert completed.provider_status == "empty"
+    assert completed.status == "partial"
+    assert completed.provider_status == "insufficient"
+    assert completed.stop_reason == "evidence_gap_open"
     assert completed.query_attempts
     audit = completed.query_attempts[0]["provider_audit"]
     assert audit["schema_version"] == "research-provider-audit-v1"

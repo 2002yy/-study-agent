@@ -293,6 +293,7 @@ class ResearchModelGateway:
         data_counts: Mapping[str, int] | None = None,
         max_tokens: int = 800,
         temperature: float = 0.0,
+        timeout_seconds: float | None = None,
         on_attempt_started: AttemptStartedHook | None = None,
         on_attempt_finished: AttemptFinishedHook | None = None,
     ) -> ResearchModelResult[T]:
@@ -306,6 +307,8 @@ class ResearchModelGateway:
 
         model_name = self._resolved_model_name()
         timeout = self._resolved_timeout()
+        if timeout_seconds is not None:
+            timeout = min(timeout, max(1.0, min(float(timeout_seconds), 120.0)))
         payload_json = json.dumps(
             dict(audit_payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )

@@ -3,17 +3,46 @@ import type { ChatResearchProgress } from "../../types";
 import type { ResearchLookupResponse } from "./researchApi";
 
 const stageLabels: Record<string, string> = {
-  planned: "等待开始",
+  planned: "正在规划研究",
   searching: "正在搜索",
   assessing: "正在筛选来源",
   reading: "正在读取来源",
   synthesizing: "正在整理证据",
+  gating: "正在执行 Evidence Gate",
   completed: "研究完成",
   failed: "研究失败",
   cancelled: "研究已停止",
 };
 
+const stopReasonLabels: Record<string, string> = {
+  evidence_gate_pass: "Evidence Gate 已通过；本轮结论只使用通过校验的证据。",
+  evidence_gap_open: "Evidence Gate 未通过；仍有关键证据缺口，结论保持为部分结果。",
+  evidence_budget_exhausted: "研究预算已用尽；仍有关键证据缺口，结论保持为部分结果。",
+  active_runtime_unavailable: "主动研究链不可用；未把未经校验的结果当成结论。",
+  claim_planning_blocked_by_policy: "外部数据策略未授权研究规划；本轮未继续调用外部模型。",
+  user_cancelled: "已停止本次研究；已保存可确认的进度。",
+};
+
+function progressMetrics(progress: ChatResearchProgress): string {
+  return [
+    `候选 ${progress.candidate_count ?? 0}`,
+    `已读 ${progress.read_count ?? 0}`,
+    `独立证据簇 ${progress.cluster_count ?? 0}`,
+    `未闭合关键缺口 ${progress.open_critical_gap_count ?? 0}`,
+  ].join(" · ");
+}
+
+function terminalProgressDetail(progress: ChatResearchProgress): string {
+  if (progress.status === "failed") {
+    return `${stopReasonLabels[progress.stop_reason] || progress.error || "联网研究不可用"} 本回答未使用联网来源中的未经校验内容。`;
+  }
+  return stopReasonLabels[progress.stop_reason] ?? progress.stop_reason ?? "联网研究已结束";
+}
+
 function runDetail(run: ResearchLookupResponse): string {
+  if (stopReasonLabels[run.stop_reason]) {
+    return stopReasonLabels[run.stop_reason];
+  }
   if (run.status === "partial") {
     return "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
   }
@@ -73,8 +102,7 @@ export function ChatResearchRecovery({
             {isDeep ? `（第 ${progress.round} 轮）` : ""}
           </strong>
           <span>
-            已记录 {progress.query_attempt_count} 次查询和{" "}
-            {progress.selected_source_count} 个来源
+            已发起 {progress.query_attempt_count} 次查询 · {progressMetrics(progress)}
             {isDeep && progress.notes_count
               ? `，已整理 ${progress.notes_count} 条笔记`
               : ""}
@@ -99,11 +127,15 @@ export function ChatResearchRecovery({
     return (
       <div className={`memory-note ${failed ? "warn" : ""}`} role="status">
         <div>
-          <strong>{stageLabels[progress.stage] ?? "联网研究已结束"}</strong>
+          <strong>
+            {progress.stop_reason === "evidence_gate_pass"
+              ? "研究完成 · Evidence Gate 已通过"
+              : progress.status === "partial"
+                ? "研究仅得到部分结果"
+                : stageLabels[progress.stage] ?? "联网研究已结束"}
+          </strong>
           <span>
-            {failed
-              ? `${progress.error || "联网搜索失败"}；本回答未使用联网来源。`
-              : progress.stop_reason || "联网研究已结束"}
+            {terminalProgressDetail(progress)} {progressMetrics(progress)}。
           </span>
         </div>
       </div>

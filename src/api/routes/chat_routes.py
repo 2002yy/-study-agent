@@ -281,11 +281,26 @@ async def chat_stream_endpoint(
 
 def _research_progress(run: Any) -> dict[str, Any]:
     deep = {}
+    active_metrics = {}
+    active_brief = {}
     context = getattr(run, "research_context", None)
     if isinstance(context, dict):
         candidate = context.get("deep")
         if isinstance(candidate, dict):
             deep = candidate
+        candidate = context.get("claim_engine_metrics")
+        if isinstance(candidate, dict):
+            active_metrics = candidate
+        candidate = context.get("claim_engine_evidence_brief")
+        if isinstance(candidate, dict):
+            active_brief = candidate
+
+    def count(name: str) -> int:
+        try:
+            return max(0, int(active_metrics.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     steps = [
         step for step in deep.get("steps", []) if isinstance(step, dict)
     ]
@@ -300,6 +315,12 @@ def _research_progress(run: Any) -> dict[str, Any]:
         "error": run.error,
         "query_attempt_count": len(run.query_attempts),
         "selected_source_count": len(run.selected_sources),
+        "candidate_count": count("candidate_count"),
+        "read_count": count("read_count"),
+        "cluster_count": count("cluster_count"),
+        "open_critical_gap_count": count("open_critical_gap_count"),
+        "active_phase": str(active_metrics.get("phase") or "") or None,
+        "gate_status": str(active_brief.get("gate_status") or "") or None,
         "version": run.version,
         # G18 deep-research journey fields.
         "round": int(deep.get("round_index") or 0) or None,
