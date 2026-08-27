@@ -1,0 +1,165 @@
+"""Injectable active-search gateway for the Research Quality Engine.
+
+This adapter deliberately does not decide rollout. ``WebLookupService`` keeps
+its legacy gateway by default; a later dispatch slice may inject this class only
+for a Claim Engine active run. Search uses the research-only multi-provider
+policy while reads continue through the existing ``ResearchWebGateway`` reader.
+
+Per-call audit intentionally excludes raw query text, result payloads, snippets,
+and page content. It is safe to checkpoint later without turning telemetry into
+a second evidence store.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from src.web.research.provider_search import ResearchProviderSearch
+from src.web.research_gateway import ResearchWebGateway
+
+
+class ResearchSearchExact(Protocol):
+    def search_exact(
+        self,
+        query: str,
+        *,
+        max_results: int = 5,
+    ) -> Mapping[str, Any]: ...
+
+
+class ResearchReadGateway(Protocol):
+    def read(self, url: str, *, max_chars: int = 6000) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class ActiveSearchCallAudit:
+    status: str
+    reason: str
+    providers_attempted: tuple[str, ...]
+    provider_errors: tuple[str, ...]
+    provider_audits: tuple[dict[str, Any], ...]
+    provider_outcomes: tuple[dict[str, Any], ...]
+    searched_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "providers_attempted": list(self.providers_attempted),
+            "provider_errors": list(self.provider_errors),
+            "provider_audits": [dict(item) for item in self.provider_audits],
+            "provider_outcomes": [dict(item) for item in self.provider_outcomes],
+            "searched_at": self.searched_at,
+        }
+
+
+class ActiveResearchGateway:
+    """Existing WebLookup gateway shape backed by all-enabled-provider search.
+
+    Construction is explicit so merely importing this module cannot activate the
+    new search policy. ``search()`` matches the legacy service contract;
+    ``search_detailed()`` preserves the structured provider payload for the
+    later checkpoint/dispatch slice.
+    """
+
+    def __init__(
+        self,
+        *,
+        search_backend: ResearchSearchExact | None = None,
+        read_gateway: ResearchReadGateway | None = None,
+    ) -> None:
+        self._search_backend = search_backend or ResearchProviderSearch()
+        self._read_gateway = read_gateway or ResearchWebGateway()
+        self._last_audit: ActiveSearchCallAudit | None = None
+        self._warnings: list[dict[str, str]] = []
+
+    def search_detailed(self, query: str, *, max_items: int = 10) -> dict[str, Any]:
+        payload = self._search_backend.search_exact(query, max_results=max_items)
+        if not isinstance(payload, Mapping):
+            raise ValueError("research search backend must return a mapping")
+        snapshot = dict(payload)
+        self._last_audit = _audit_from_payload(snapshot)
+        self._warnings = [
+            {
+                "source": "research_multi_provider",
+                "error_type": "provider_error",
+                "message": error,
+            }
+            for error in self._last_audit.provider_errors
+        ]
+        return snapshot
+
+    def search(self, query: str, *, max_items: int = 10) -> list[dict[str, Any]]:
+        payload = self.search_detailed(query, max_items=max_items)
+        status = _bounded_text(payload.get("status"), 100)
+        if status == "invalid_query":
+            raise ValueError("Web lookup query is required")
+        if status == "unavailable":
+            raise RuntimeError(
+                _bounded_text(payload.get("reason"), 200) or "web_search_unavailable"
+            )
+
+        normalized: list[dict[str, Any]] = []
+        raw_results = payload.get("results", [])
+        if not isinstance(raw_results, list):
+            return normalized
+        for raw in raw_results:
+            if not isinstance(raw, Mapping):
+                continue
+            record = dict(raw)
+            if record.get("url") and not record.get("link"):
+                record["link"] = record["url"]
+            if record.get("snippet") and not record.get("search_excerpt"):
+                record["search_excerpt"] = record["snippet"]
+            normalized.append(record)
+        return normalized
+
+    def read(self, url: str, *, max_chars: int = 6000) -> dict[str, Any]:
+        return self._read_gateway.read(url, max_chars=max_chars)
+
+    def warnings(self) -> list[dict[str, str]]:
+        return [dict(item) for item in self._warnings]
+
+    def last_search_audit(self) -> dict[str, Any] | None:
+        if self._last_audit is None:
+            return None
+        return self._last_audit.to_dict()
+
+
+def _audit_from_payload(payload: Mapping[str, Any]) -> ActiveSearchCallAudit:
+    return ActiveSearchCallAudit(
+        status=_bounded_text(payload.get("status"), 100),
+        reason=_bounded_text(payload.get("reason"), 200),
+        providers_attempted=_strings(payload.get("providers_attempted"), limit=12),
+        provider_errors=_strings(payload.get("provider_errors"), limit=24),
+        provider_audits=_mapping_tuple(payload.get("provider_audits"), limit=24),
+        provider_outcomes=_mapping_tuple(payload.get("provider_outcomes"), limit=12),
+        searched_at=_bounded_text(payload.get("searched_at"), 100),
+    )
+
+
+def _mapping_tuple(value: Any, *, limit: int) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict(item) for item in value[:limit] if isinstance(item, Mapping))
+
+
+def _strings(value: Any, *, limit: int) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            text
+            for item in value[:limit]
+            if (text := _bounded_text(item, 300))
+        )
+    )
+
+
+def _bounded_text(value: Any, limit: int) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+__all__ = ["ActiveResearchGateway", "ActiveSearchCallAudit"]
