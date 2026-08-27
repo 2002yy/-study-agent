@@ -221,12 +221,7 @@ def merge_candidate_pool(
             if not canonical or not title:
                 continue
             source = _bounded_text(raw.get("source"), 200)
-            result_provider = _bounded_text(raw.get("provider"), 100)
-            providers = tuple(
-                dict.fromkeys(
-                    value for value in (result_provider, *payload_providers) if value
-                )
-            )
+            providers = _candidate_providers(raw, payload_providers)
             existing_position = positions.get(canonical)
             if existing_position is not None:
                 existing = ordered[existing_position]
@@ -271,6 +266,17 @@ def merge_candidate_pool(
 def _ensure_active(check: CancellationCheck | None) -> None:
     if check is not None and check():
         raise CandidatePoolCancelled("candidate pool batch cancelled")
+
+
+def _candidate_providers(
+    raw: Mapping[str, Any], payload_providers: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Prefer exact result provenance, falling back only for legacy payloads."""
+
+    listed = _strings(raw.get("providers", []), limit=12)
+    singleton = _bounded_text(raw.get("provider"), 100)
+    precise = tuple(dict.fromkeys((*listed, singleton))) if singleton else listed
+    return precise or payload_providers
 
 
 def _strings(value: Any, *, limit: int) -> tuple[str, ...]:
