@@ -1,12 +1,12 @@
 """Research-only multi-provider search orchestration.
 
 Legacy ``GeneralWebGateway.search_exact`` intentionally keeps its first-nonempty
-provider semantics.  Deep research needs a different policy: every enabled
+provider semantics. Deep research needs a different policy: every enabled
 provider is attempted, transient failures get at most one explicit retry, and
 provider provenance is preserved without copying the underlying network
 transports.
 
-This module is not wired into ``WebLookupService`` yet.  It is a bounded adapter
+This module is not wired into ``WebLookupService`` yet. It is a bounded adapter
 for the later active-runtime slice and imports no evaluation helpers.
 """
 
@@ -115,8 +115,8 @@ class ResearchProviderSearch:
 
         The returned mapping intentionally resembles ``GeneralWebGateway`` so a
         later runtime slice can inject this method into CandidatePool without
-        changing query planning.  ``provider_audits`` is additional research
-        telemetry and never contains result/page content.
+        changing query planning. ``provider_audits`` is additional research
+        telemetry and never contains result/page content or raw provider errors.
         """
 
         focused = " ".join(str(query or "").split())
@@ -164,7 +164,7 @@ class ResearchProviderSearch:
 
         for provider in enabled:
             final_status: ProviderAttemptStatus = "failed"
-            final_reason = "provider_failed"
+            final_reason = "provider_error"
             final_results: tuple[Mapping[str, Any], ...] = ()
             attempts = 0
             for attempt in range(1, MAX_PROVIDER_ATTEMPTS + 1):
@@ -186,9 +186,8 @@ class ResearchProviderSearch:
                     )
                 except Exception as exc:
                     normalized_results = ()
-                    error = f"{provider}:{type(exc).__name__}:{exc}"
                     final_status = "failed"
-                    final_reason = _bounded_text(error, 300)
+                    final_reason = _exception_reason(exc)
                 elapsed = max(0.0, self._monotonic() - started)
                 audits.append(
                     ProviderAttemptAudit(
@@ -283,7 +282,7 @@ def _default_provider_call(
             timeout=timeout,
             categories=os.getenv("WEB_SEARXNG_CATEGORIES", "general"),
         )
-        results = [
+        results: list[Mapping[str, Any]] = [
             {
                 "title": str(item.get("title") or ""),
                 "url": str(item.get("link") or item.get("resolved_link") or ""),
@@ -313,10 +312,71 @@ def _classify_provider_response(
 ) -> tuple[ProviderAttemptStatus, str]:
     if results:
         return "ok", "results_found"
-    normalized = _bounded_text(error, 300)
-    if not normalized or normalized.endswith(":empty_response"):
+    if not error or "empty_response" in error.casefold():
         return "empty", "no_results"
-    return "failed", normalized
+    return "failed", _sanitize_provider_error(error)
+
+
+def _sanitize_provider_error(error: str) -> str:
+    """Collapse raw provider errors into bounded, non-sensitive categories."""
+
+    value = str(error or "").casefold()
+    if "challenge" in value or "captcha" in value or "bot" in value:
+        return "challenge"
+    status = _http_status(value)
+    if status:
+        return f"http_status:{status}"
+    if "timeout" in value or "timed out" in value:
+        return "timeout"
+    if "unresponsive_engines" in value:
+        return "unresponsive_engines"
+    if "unexpected content-type" in value or "unexpected_content_type" in value:
+        return "unexpected_content_type"
+    if "invalid_xml" in value or "parseerror" in value:
+        return "invalid_xml"
+    if "urlerror" in value or "name or service not known" in value:
+        return "url_error"
+    if any(
+        marker in value
+        for marker in (
+            "connection",
+            "connectionreset",
+            "connection reset",
+            "refused",
+            "broken pipe",
+        )
+    ):
+        return "connection_error"
+    if "ssl" in value or "tls" in value:
+        return "tls_error"
+    if "json" in value and ("decode" in value or "invalid" in value):
+        return "invalid_json"
+    return "provider_error"
+
+
+def _exception_reason(exc: Exception) -> str:
+    """Classify an exception by type only; never persist its message."""
+
+    name = type(exc).__name__.casefold()
+    if isinstance(exc, TimeoutError) or "timeout" in name:
+        return "timeout"
+    if "connection" in name or "brokenpipe" in name:
+        return "connection_error"
+    if "urlerror" in name:
+        return "url_error"
+    if "ssl" in name or "tls" in name:
+        return "tls_error"
+    return "provider_error"
+
+
+def _http_status(value: str) -> str:
+    marker = "http_status:"
+    index = value.find(marker)
+    if index < 0:
+        return ""
+    tail = value[index + len(marker) :]
+    digits = "".join(character for character in tail[:3] if character.isdigit())
+    return digits if len(digits) == 3 else ""
 
 
 def _overall_status(
@@ -346,14 +406,16 @@ def _round_robin_merge(
 ) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     positions: dict[str, int] = {}
-    max_depth = max((len(provider_results.get(provider, ())) for provider in enabled), default=0)
+    max_depth = max(
+        (len(provider_results.get(provider, ())) for provider in enabled),
+        default=0,
+    )
     for rank in range(max_depth):
         for provider in enabled:
             items = provider_results.get(provider, ())
             if rank >= len(items):
                 continue
-            raw = items[rank]
-            normalized = _normalize_result(raw, provider)
+            normalized = _normalize_result(items[rank], provider)
             if normalized is None:
                 continue
             key = normalized["canonical_url"]
@@ -396,23 +458,17 @@ def _normalize_result(
 
 
 def _is_transient_failure(reason: str) -> bool:
-    value = reason.casefold()
-    if "challenge" in value or "http_status:4" in value and "429" not in value:
-        return False
-    markers = (
-        "timeout",
-        "temporar",
-        "urlerror",
-        "connection",
-        "reset",
-        "unresponsive_engines",
-        "http_status:429",
-        "http_status:500",
-        "http_status:502",
-        "http_status:503",
-        "http_status:504",
-    )
-    return any(marker in value for marker in markers)
+    if reason in {"timeout", "url_error", "connection_error", "unresponsive_engines"}:
+        return True
+    if reason.startswith("http_status:"):
+        return reason in {
+            "http_status:429",
+            "http_status:500",
+            "http_status:502",
+            "http_status:503",
+            "http_status:504",
+        }
+    return False
 
 
 def _bounded_timeout(value: float | None) -> float:
