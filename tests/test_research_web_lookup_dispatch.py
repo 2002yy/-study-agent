@@ -13,6 +13,7 @@ from src.application.research_web_lookup_dispatch import (
 from src.application.web_lookup_service import WebLookupService
 from src.domain.evidence import build_evidence_snapshot
 from src.domain.runtime_entities import WebLookupRun
+from src.infrastructure.sqlite.database import RuntimeDatabase
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.contracts import (
@@ -21,6 +22,7 @@ from src.web.research.contracts import (
     build_research_state,
 )
 from src.web.research.state import attach_claim_engine_state
+from src.web.research_contract import build_research_context
 
 
 def _budget() -> ResearchBudget:
@@ -160,7 +162,9 @@ def test_dispatch_service_switches_gateway_only_for_valid_active_run(
     ) -> WebLookupRun:
         del raise_on_error, stale_after_seconds
         executed_gateways.append(self.gateway)
-        return self.repository.get(run_id)
+        result = self.repository.get(run_id)
+        assert result is not None
+        return result
 
     monkeypatch.setattr(WebLookupService, "execute", fake_execute)
 
@@ -289,7 +293,12 @@ def test_active_gateway_clears_stale_audit_before_backend_exception() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def search_exact(self, query: str, *, max_results: int = 5) -> dict[str, Any]:
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
             del query, max_results
             self.calls += 1
             if self.calls == 2:
@@ -316,11 +325,84 @@ def test_active_gateway_clears_stale_audit_before_backend_exception() -> None:
     assert gateway.warnings() == []
 
 
+def test_active_dispatch_persists_provider_audit_in_real_repository(
+    tmp_path: Any,
+) -> None:
+    class EmptyBackend:
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
+            del query, max_results
+            return {
+                "status": "empty",
+                "reason": "providers_returned_no_results",
+                "results": [],
+                "providers_attempted": ["searxng", "bing_rss"],
+                "provider_errors": [],
+                "provider_audits": [
+                    {
+                        "provider": "searxng",
+                        "attempt": 1,
+                        "status": "empty",
+                        "reason": "no_results",
+                        "result_count": 0,
+                        "elapsed_seconds": 0.01,
+                        "query_sha256": "0" * 64,
+                        "query_chars": 12,
+                    }
+                ],
+                "provider_outcomes": [
+                    {
+                        "provider": "searxng",
+                        "status": "empty",
+                        "reason": "no_results",
+                        "attempts": 1,
+                        "result_count": 0,
+                    }
+                ],
+                "searched_at": "2026-08-27T00:00:00+00:00",
+            }
+
+    repository = WebLookupRepository(RuntimeDatabase(tmp_path / "dispatch.sqlite"))
+    context = build_research_context("bounded factual query").to_dict()
+    context.update(_claim_engine_context("active"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_integration",
+            query="bounded factual query",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(
+            search_backend=EmptyBackend()
+        ),
+    )
+
+    completed = service.execute(run.id)
+
+    assert completed.status == "completed"
+    assert completed.provider_status == "empty"
+    assert completed.query_attempts
+    audit = completed.query_attempts[0]["provider_audit"]
+    assert audit["schema_version"] == "research-provider-audit-v1"
+    assert audit["status"] == "empty"
+    assert audit["providers_attempted"] == ["searxng", "bing_rss"]
+    assert "results" not in audit
+
+
 def test_runtime_factory_returns_dispatch_service(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("STUDY_AGENT_RUNTIME_DB", str(tmp_path / "dispatch.sqlite"))
+    monkeypatch.setenv("STUDY_AGENT_RUNTIME_DB", str(tmp_path / "factory.sqlite"))
     runtime_repository.get_web_lookup_service.cache_clear()
     runtime_repository.get_web_lookup_repository.cache_clear()
     try:
