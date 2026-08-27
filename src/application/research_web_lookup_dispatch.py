@@ -1,13 +1,13 @@
 """Per-run search dispatch for the Research Quality Claim Engine.
 
-The durable ``WebLookupRun`` remains the source of rollout truth.  This module
+The durable ``WebLookupRun`` remains the source of rollout truth. This module
 only selects the search gateway for one execution: absent, shadow, corrupt, or
 otherwise unverifiable Claim Engine state keeps the legacy gateway; a fully
 validated ``active`` state gets the research-only multi-provider gateway.
 
-The existing ``WebLookupService`` still owns the execution loop.  A narrow
+The existing ``WebLookupService`` still owns the execution loop. A narrow
 repository proxy enriches its already-authoritative query-attempt checkpoints
-with bounded provider audit metadata from ``ActiveResearchGateway``.  It never
+with bounded provider audit metadata from ``ActiveResearchGateway``. It never
 writes a second run state and never treats audit metadata as evidence.
 """
 
@@ -27,17 +27,50 @@ _PROVIDER_AUDIT_SCHEMA_VERSION = "research-provider-audit-v1"
 ActiveGatewayFactory = Callable[[], ActiveResearchGateway]
 
 
+class _AuditRecordingGateway:
+    """Record one bounded audit slot per active search during one execution.
+
+    Deep research may append multiple query attempts before its next durable
+    checkpoint. ``ActiveResearchGateway.last_search_audit()`` intentionally only
+    exposes the latest call, so this execution-local wrapper records each call
+    immediately and lets the repository proxy drain them in order. A ``None``
+    slot means the backend failed before a safe audit payload existed.
+    """
+
+    def __init__(self, gateway: ActiveResearchGateway) -> None:
+        self._gateway = gateway
+        self._pending_audits: list[dict[str, Any] | None] = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._gateway, name)
+
+    def search(self, query: str, *, max_items: int = 10) -> list[dict[str, Any]]:
+        try:
+            return self._gateway.search(query, max_items=max_items)
+        finally:
+            audit = self._gateway.last_search_audit()
+            self._pending_audits.append(dict(audit) if audit is not None else None)
+
+    def drain_search_audits(self) -> list[dict[str, Any] | None]:
+        pending = self._pending_audits
+        self._pending_audits = []
+        return pending
+
+
 class _AuditedRepositoryProxy:
     """Delegate repository operations while enriching authoritative attempts."""
 
     def __init__(
         self,
         repository: WebLookupRepository,
-        gateway: ActiveResearchGateway,
+        gateway: _AuditRecordingGateway,
+        *,
+        initial_attempt_count: int = 0,
     ) -> None:
         self._repository = repository
         self._gateway = gateway
         self._audits_by_attempt_index: dict[int, dict[str, Any]] = {}
+        self._attempt_count = max(0, int(initial_attempt_count))
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._repository, name)
@@ -140,14 +173,21 @@ class _AuditedRepositoryProxy:
         query_attempts: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         attempts = [dict(item) for item in query_attempts]
-        audit = self._gateway.last_search_audit()
-        if audit is not None and attempts:
-            last_index = len(attempts) - 1
-            if last_index not in self._audits_by_attempt_index:
-                self._audits_by_attempt_index[last_index] = {
+        pending = self._gateway.drain_search_audits()
+        new_attempt_count = max(0, len(attempts) - self._attempt_count)
+        if pending:
+            # One active search produces one query attempt in WebLookupService.
+            # Bind only the suffix created since the previous durable write.
+            bind_count = min(len(pending), new_attempt_count)
+            start = len(attempts) - bind_count
+            for offset, audit in enumerate(pending[-bind_count:] if bind_count else []):
+                if audit is None:
+                    continue
+                self._audits_by_attempt_index[start + offset] = {
                     "schema_version": _PROVIDER_AUDIT_SCHEMA_VERSION,
                     **dict(audit),
                 }
+        self._attempt_count = len(attempts)
         for index, saved_audit in self._audits_by_attempt_index.items():
             if index >= len(attempts):
                 continue
@@ -187,10 +227,15 @@ class ClaimEngineDispatchWebLookupService(WebLookupService):
             )
 
         active_gateway = self._active_gateway_factory()
-        proxy = _AuditedRepositoryProxy(self.repository, active_gateway)
+        recording_gateway = _AuditRecordingGateway(active_gateway)
+        proxy = _AuditedRepositoryProxy(
+            self.repository,
+            recording_gateway,
+            initial_attempt_count=len(run.query_attempts),
+        )
         active_service = WebLookupService(
             cast(WebLookupRepository, proxy),
-            gateway=active_gateway,
+            gateway=cast(WebLookupGateway, recording_gateway),
             planner=self.planner,
         )
         return active_service.execute(
