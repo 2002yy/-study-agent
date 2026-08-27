@@ -36,6 +36,7 @@ _PROVIDER_OUTCOME_FIELDS = (
     "attempts",
     "result_count",
 )
+_PENDING_AUDIT_CAP = 32
 
 
 class ResearchSearchExact(Protocol):
@@ -91,25 +92,31 @@ class ActiveResearchGateway:
         self._search_backend = search_backend or ResearchProviderSearch()
         self._read_gateway = read_gateway or ResearchWebGateway()
         self._last_audit: ActiveSearchCallAudit | None = None
+        self._pending_audits: list[dict[str, Any] | None] = []
         self._warnings: list[dict[str, str]] = []
 
     def search_detailed(self, query: str, *, max_items: int = 10) -> dict[str, Any]:
         self._last_audit = None
         self._warnings = []
-        payload = self._search_backend.search_exact(query, max_results=max_items)
-        if not isinstance(payload, Mapping):
-            raise ValueError("research search backend must return a mapping")
-        snapshot = dict(payload)
-        self._last_audit = _audit_from_payload(snapshot)
-        self._warnings = [
-            {
-                "source": "research_multi_provider",
-                "error_type": "provider_error",
-                "message": error,
-            }
-            for error in self._last_audit.provider_errors
-        ]
-        return snapshot
+        try:
+            payload = self._search_backend.search_exact(query, max_results=max_items)
+            if not isinstance(payload, Mapping):
+                raise ValueError("research search backend must return a mapping")
+            snapshot = dict(payload)
+            self._last_audit = _audit_from_payload(snapshot)
+            self._warnings = [
+                {
+                    "source": "research_multi_provider",
+                    "error_type": "provider_error",
+                    "message": error,
+                }
+                for error in self._last_audit.provider_errors
+            ]
+            return snapshot
+        finally:
+            self._pending_audits.append(self.last_search_audit())
+            if len(self._pending_audits) > _PENDING_AUDIT_CAP:
+                self._pending_audits = self._pending_audits[-_PENDING_AUDIT_CAP:]
 
     def search(self, query: str, *, max_items: int = 10) -> list[dict[str, Any]]:
         payload = self.search_detailed(query, max_items=max_items)
@@ -146,6 +153,11 @@ class ActiveResearchGateway:
         if self._last_audit is None:
             return None
         return self._last_audit.to_dict()
+
+    def drain_search_audits(self) -> list[dict[str, Any] | None]:
+        pending = self._pending_audits
+        self._pending_audits = []
+        return [dict(item) if item is not None else None for item in pending]
 
 
 def _audit_from_payload(payload: Mapping[str, Any]) -> ActiveSearchCallAudit:
