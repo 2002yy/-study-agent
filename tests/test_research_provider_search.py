@@ -112,6 +112,7 @@ def test_transient_failure_retries_once_then_recovers() -> None:
         "failed",
         "ok",
     ]
+    assert payload["provider_audits"][0]["reason"] == "timeout"
     assert payload["provider_outcomes"][0]["attempts"] == 2
 
 
@@ -148,6 +149,7 @@ def test_mixed_failure_and_empty_is_partial_not_empty() -> None:
 
     assert payload["status"] == "partial"
     assert payload["provider_outcomes"][0]["status"] == "failed"
+    assert payload["provider_outcomes"][0]["reason"] == "http_status:403"
     assert payload["provider_outcomes"][1]["status"] == "empty"
 
 
@@ -187,6 +189,37 @@ def test_attempt_audit_is_bounded_and_excludes_result_text() -> None:
     audit = payload["provider_audits"][0]
     assert audit["query_chars"] == len("research query")
     assert len(audit["query_sha256"]) == 64
+
+
+def test_raw_provider_error_and_exception_messages_are_not_persisted() -> None:
+    marker = "PRIVATE-QUERY-OR-URL-MARKER"
+    calls = 0
+
+    def call(provider: str, query: str, limit: int, timeout: float):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [], f"bing_rss:TimeoutError:{marker}"
+        raise TimeoutError(marker)
+
+    payload = ResearchProviderSearch(
+        provider_call=call,
+        provider_enabled=lambda provider: provider == "bing_rss",
+        monotonic=_Clock(),
+    ).search_exact("query")
+
+    assert calls == 2
+    durable_text = str(
+        {
+            "provider_errors": payload["provider_errors"],
+            "provider_audits": payload["provider_audits"],
+            "provider_outcomes": payload["provider_outcomes"],
+        }
+    )
+    assert marker not in durable_text
+    assert payload["status"] == "unavailable"
+    assert payload["provider_errors"] == ["bing_rss:timeout"]
+    assert all(item["reason"] == "timeout" for item in payload["provider_audits"])
 
 
 def test_b1_module_does_not_import_eval_code() -> None:
