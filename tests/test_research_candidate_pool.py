@@ -112,7 +112,11 @@ def test_pool_canonicalizes_dedupes_and_preserves_discovery_provenance() -> None
             "providers_attempted": ["searxng" if calls == 1 else "bing_rss"],
             "results": [
                 {
-                    "title": "Official result" if calls == 1 else "Official result with detail",
+                    "title": (
+                        "Official result"
+                        if calls == 1
+                        else "Official result with detail"
+                    ),
                     "url": f"https://docs.example/item{suffix}",
                     "snippet": "short" if calls == 1 else "a longer useful snippet",
                     "source": "provider-a" if calls == 1 else "provider-b",
@@ -131,7 +135,7 @@ def test_pool_canonicalizes_dedupes_and_preserves_discovery_provenance() -> None
     assert item.snippet == "a longer useful snippet"
 
 
-def test_one_gateway_payload_preserves_all_attempted_providers() -> None:
+def test_result_provider_is_precise_while_outcome_preserves_all_attempts() -> None:
     def search(_query: str, *, max_results: int) -> dict[str, Any]:
         assert max_results == 5
         return {
@@ -155,12 +159,78 @@ def test_one_gateway_payload_preserves_all_attempted_providers() -> None:
         "duckduckgo_html",
     )
     assert result.outcomes[0].provider_errors == ("searxng:timeout",)
-    assert result.candidates[0].providers == (
-        "bing_rss",
-        "searxng",
-        "duckduckgo_html",
-    )
+    assert result.candidates[0].providers == ("bing_rss",)
     assert result.candidates[0].source == "Example Publisher"
+
+
+def test_result_provider_list_beats_payload_attempted_providers() -> None:
+    def search(_query: str, *, max_results: int) -> dict[str, Any]:
+        assert max_results == 5
+        return {
+            "status": "ok",
+            "providers_attempted": ["searxng", "bing_rss", "duckduckgo_html"],
+            "results": [
+                {
+                    "title": "Shared result",
+                    "url": "https://example.test/shared",
+                    "providers": ["bing_rss", "searxng", "bing_rss"],
+                }
+            ],
+        }
+
+    result = execute_candidate_pool_batch(_batch(1), search_exact=search)
+    assert result.candidates[0].providers == ("bing_rss", "searxng")
+
+
+def test_missing_or_malformed_result_provenance_uses_legacy_payload_fallback() -> None:
+    calls = 0
+
+    def search(_query: str, *, max_results: int) -> dict[str, Any]:
+        assert max_results == 5
+        nonlocal calls
+        calls += 1
+        return {
+            "status": "ok",
+            "providers_attempted": ["searxng" if calls == 1 else "bing_rss"],
+            "results": [
+                {
+                    "title": "Legacy result",
+                    "url": "https://example.test/legacy",
+                    "providers": "not-a-list" if calls == 1 else [],
+                    "provider": "",
+                }
+            ],
+        }
+
+    result = execute_candidate_pool_batch(_batch(2), search_exact=search)
+    assert len(result.candidates) == 1
+    assert result.candidates[0].providers == ("searxng", "bing_rss")
+
+
+def test_duplicate_candidate_unions_only_providers_that_returned_it() -> None:
+    calls = 0
+
+    def search(_query: str, *, max_results: int) -> dict[str, Any]:
+        assert max_results == 5
+        nonlocal calls
+        calls += 1
+        provider = "bing_rss" if calls == 1 else "searxng"
+        return {
+            "status": "ok",
+            "providers_attempted": ["searxng", "bing_rss", "duckduckgo_html"],
+            "results": [
+                {
+                    "title": "Same result",
+                    "url": f"https://example.test/same?utm_source={calls}",
+                    "provider": provider,
+                }
+            ],
+        }
+
+    result = execute_candidate_pool_batch(_batch(2), search_exact=search)
+    assert len(result.candidates) == 1
+    assert result.candidates[0].providers == ("bing_rss", "searxng")
+    assert "duckduckgo_html" not in result.candidates[0].providers
 
 
 def test_provider_failure_empty_and_success_remain_distinguishable() -> None:
