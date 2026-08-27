@@ -94,6 +94,8 @@ class ActiveResearchGateway:
         self._warnings: list[dict[str, str]] = []
 
     def search_detailed(self, query: str, *, max_items: int = 10) -> dict[str, Any]:
+        self._last_audit = None
+        self._warnings = []
         payload = self._search_backend.search_exact(query, max_results=max_items)
         if not isinstance(payload, Mapping):
             raise ValueError("research search backend must return a mapping")
