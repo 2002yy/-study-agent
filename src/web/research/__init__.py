@@ -54,6 +54,50 @@ from src.web.research.stop_gate import (
     evaluate_shadow_stop,
     safe_evaluate_shadow_stop,
 )
+from src.web.research.gap_planner import (
+    DEFAULT_QUERIES_PER_GAP,
+    GapQueryBatch,
+    GapSearchIntent,
+    PlannedGapQuery,
+    focus_claim_surface,
+    plan_gap_queries,
+)
+from src.web.research.candidate_pool import (
+    CandidatePoolBatchResult,
+    CandidatePoolCancelled,
+    CandidatePoolItem,
+    CandidatePoolProgress,
+    QuerySearchOutcome,
+    execute_candidate_pool_batch,
+    merge_candidate_pool,
+)
+from src.web.research.source_cluster import (
+    CandidateClusterAssignment,
+    CandidateClusteringResult,
+    CandidateSourceCluster,
+    CandidateSourceProfile,
+    cluster_candidate_sources,
+)
+from src.web.research.candidate_ranking import (
+    CandidateEligibility,
+    CandidateSemanticAssessment,
+    RankedCandidate,
+    SemanticRelevance,
+    rank_candidate_pool,
+)
+from src.web.research.candidate_assessment import (
+    CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+    CandidateAssessmentRequest,
+    build_candidate_assessment_request,
+    parse_candidate_assessment_response,
+)
+from src.web.research.scheduler import (
+    ReadSchedulerPolicy,
+    ReadSchedulingCancelled,
+    ReadWavePlan,
+    ReadWaveStatus,
+    plan_read_wave,
+)
 
 __all__ = [
     "RESEARCH_STATE_SCHEMA_VERSION",
@@ -94,4 +138,36 @@ __all__ = [
     "ShadowStopDecision",
     "evaluate_shadow_stop",
     "safe_evaluate_shadow_stop",
+    "DEFAULT_QUERIES_PER_GAP",
+    "GapQueryBatch",
+    "GapSearchIntent",
+    "PlannedGapQuery",
+    "focus_claim_surface",
+    "plan_gap_queries",
+    "CandidatePoolBatchResult",
+    "CandidatePoolCancelled",
+    "CandidatePoolItem",
+    "CandidatePoolProgress",
+    "QuerySearchOutcome",
+    "execute_candidate_pool_batch",
+    "merge_candidate_pool",
+    "CandidateClusterAssignment",
+    "CandidateClusteringResult",
+    "CandidateSourceCluster",
+    "CandidateSourceProfile",
+    "cluster_candidate_sources",
+    "CandidateEligibility",
+    "CandidateSemanticAssessment",
+    "RankedCandidate",
+    "SemanticRelevance",
+    "rank_candidate_pool",
+    "CANDIDATE_ASSESSMENT_SCHEMA_VERSION",
+    "CandidateAssessmentRequest",
+    "build_candidate_assessment_request",
+    "parse_candidate_assessment_response",
+    "ReadSchedulerPolicy",
+    "ReadSchedulingCancelled",
+    "ReadWavePlan",
+    "ReadWaveStatus",
+    "plan_read_wave",
 ]
