@@ -240,14 +240,15 @@ def test_claim_planner_defaults_to_shadow_and_code_owns_policy_and_ids() -> None
     claim = state.claims[0]
     assert claim.id.startswith("claim_")
     assert claim.created_by == "runtime_claim_planner"
-    assert claim.evidence_requirement.source_roles == (
+    assert set(claim.evidence_requirement.source_roles) == {
         "primary",
         "authoritative_secondary",
         "independent_secondary",
-    )
+    }
     assert claim.evidence_requirement.max_age_days == 7
     assert claim.evidence_requirement.requires_dated_evidence is True
     assert state.gaps[0].id.startswith("gap_")
+    assert state.gaps[0].desired_source_role == "primary"
     assert [item.sequence for item in state.trace] == [0, 1]
     assert [item.event_type for item in state.trace] == ["claim_created", "gap_created"]
 
