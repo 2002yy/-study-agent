@@ -1,8 +1,8 @@
 {
-  "schema_version": "research-quality-b5-active-smoke-v1",
-  "started_at": "2026-08-27T16:27:17.732901Z",
+  "schema_version": "research-quality-b5-active-smoke-v2",
+  "started_at": "2026-08-28T12:41:34.486452Z",
   "question": "What open-source license does the FastAPI project use?",
-  "reference_date": "2026-08-27",
+  "reference_date": "2026-08-28",
   "searxng_endpoint": "http://127.0.0.1:8080",
   "run": {
     "status": "partial",
@@ -13,22 +13,36 @@
   },
   "search": {
     "query_attempt_count": 2,
-    "providers": [],
+    "providers": [
+      "bing_rss",
+      "duckduckgo_html",
+      "searxng"
+    ],
+    "searxng_attempted": true,
+    "searxng_success": true,
     "provider_audits": [
       {
-        "query": "FastAPI project licensed under MIT License.",
-        "providers": null,
+        "query": "FastAPI project s license MIT License.",
+        "providers_attempted": [
+          "searxng",
+          "bing_rss",
+          "duckduckgo_html"
+        ],
         "provider_audit": true
       },
       {
-        "query": "FastAPI project licensed under MIT License. official documentation primary source",
-        "providers": null,
+        "query": "FastAPI project s license MIT License. official documentation primary source",
+        "providers_attempted": [
+          "searxng",
+          "bing_rss",
+          "duckduckgo_html"
+        ],
         "provider_audit": true
       }
     ]
   },
   "candidates": {
-    "count": 8,
+    "count": 7,
     "clusters": []
   },
   "reads": {
@@ -40,12 +54,12 @@
     "status": "partial",
     "eligible_evidence_count": 0,
     "open_critical_claim_ids": [
-      "claim_273abdc688f6b828783be3d1"
+      "claim_e427e39006b952c20f33d1b0"
     ],
     "stop_reason": "evidence_budget_exhausted",
     "budget": {
-      "candidates_used": 8,
-      "elapsed_seconds": 64.79700000002049,
+      "candidates_used": 7,
+      "elapsed_seconds": 75.29700000002049,
       "hard_timeout_seconds": 60.0,
       "max_candidates": 20,
       "max_reads": 8,
@@ -55,7 +69,7 @@
     }
   },
   "metrics": {
-    "candidate_count": 8,
+    "candidate_count": 7,
     "cluster_count": 0,
     "open_critical_gap_count": 1,
     "phase": "assessing",
@@ -70,7 +84,7 @@
     "error": "",
     "query_attempt_count": 2,
     "selected_source_count": 0,
-    "candidate_count": 8,
+    "candidate_count": 7,
     "read_count": 0,
     "cluster_count": 0,
     "open_critical_gap_count": 1,
@@ -92,6 +106,6 @@
   },
   "brief_excerpt": {
     "summary": "",
-    "conditional_wording_required": null
+    "conditional_wording_required": true
   }
 }

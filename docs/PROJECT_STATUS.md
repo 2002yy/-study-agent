@@ -46,13 +46,68 @@
 
 **B5 Exit Gate：**聚焦测试和全量现有门禁通过；exact active synthetic journey 证明 server-owned IDs、逐调用审计、checkpoint/recovery、strict evidence eligibility、Gate 终态和 Evidence Brief；慢调用记录实测上限；真实 SearXNG smoke 有证据；off/shadow/legacy 回归零行为变化；UI 三 viewport 明确显示阶段与非完整结论。未满足任一项均为 **NO-GO**。
 
-### 0.2 RQCE-P1 B5 implementation status（2026-08-27，本地未提交）
+### 0.2 RQCE-P1 B5 implementation status（2026-08-27，已合并 PR #132 / main@5d620fe0，CI GREEN）
 
 - **B5 施工状态：IMPLEMENTATION COMPLETE（本地全绿）/ 未提交。** active executor 全链（claim plan → gap query batch → CandidatePool → semantic assessment → role-aware rank → cluster-diverse read → strict extraction → Evidence Gate → durable continuation）已落地并通过全部本地门禁；仍遵守冻结边界：无多轮饱和、无独立 synthesis、live 10 不作为 CI 硬门。
 - **真实 SearXNG active smoke（合同 item 12）：PASS（negative-path）。** 工具 `tools/run_research_active_smoke.py`；产物 `docs/research_quality/B5_ACTIVE_SEARXNG_SMOKE.json`。实测：1 次 claim planning（真实 DeepSeek）→ 2 条 gap-directed query（真实 SearXNG fixed digest @127.0.0.1:8080，provider audit 完整）→ 8 个候选 → hard budget 于 64.8s > 60s 耗尽 → assessment/read 未开始 → 终态 `partial / insufficient / evidence_budget_exhausted`（合同 item 7 映射正确）、UI progress 全字段（active_phase=assessing、candidate_count=8、open_critical_gap_count=1）。**判定：真实 hard-budget negative-path PASS；0 reads/0 cluster 是"阶段未执行"的自然结果，不登记为 clustering 缺陷；60s hard 在真实多-provider 搜索下的余量不足记为 bounded 性能风险观察，本批不改冻结预算。** `conditional_wording_required=null` 的 terminal-partial 语义单独列为后续检查项。
 - **Claim Planner completion-budget 修复（900 → 4000）。** 根因实验锁定：`deepseek-v4-flash` JSON-mode 下合法 claim plan 需要 `output_tokens=1056`；`max_tokens=900` 时 `finish_reason=length`、JSON 截断不可解析（900 恰为 output_tokens 上限，A/B 对照：同一 prompt/parse/provider 仅改 4000 即 `finish_reason=stop` + parse 成功）。`RuntimeClaimPlanner.max_tokens=900 → 4000`，新增回归 `test_claim_planner_requests_full_completion_budget`；截断/非 object 仍 fail-closed（planner 既有 attempt_failed → unavailable 路径覆盖）。
 - **B5 类型债务清零。** 修复两处真实类型污染：1）runtime cursor 初始化显式非 Optional owner（`RuntimeCursorLoadResult.available` 的跨属性收窄限制）；2）`planned`（ClaimBootstrapResult）遮蔽同名循环变量 → 重命名 `bootstrap`。`active_research_runtime.py` 现 0 mypy diagnostics；全仓 current=122 ≤ baseline=128（与 B5 前一致，B5 零新增债务）。
 - **本地门禁（本批全绿）。** 后端全量 pytest 1370/1370（含 B5 聚焦 33：synthetic 全链、policy deny、畸形抽取+resume、四阶段取消、三慢调用 settle 实测 model 0.164s/provider 0.187s/reader 0.166s ≤ timeout+1s）；Ruff 全仓通过；expanded mypy baseline 122/128；前端 Vitest 349/349 + production build 通过；C1–C100 守恒 100；`git diff --check` 通过。detect-secrets/package helper/browser gates 由远程 CI 终审。
+
+### 0.3 RQCE-P1 B5 post-merge review debt（2026-08-28 Codex Review 审计 + B5-Hardening 执行结果）
+
+**正式状态：** RQCE-P1 B5 = MERGED（PR #132）+ CI GREEN + single-wave runtime delivered（main@5d620fe0）。不推翻 B5。**命名澄清：本节 P1/P2 为缺陷优先级（Codex Review 分级），与项目阶段 RQCE-P1/RQCE-P2 无关。** 本批 **RQCE-P1 B5-Hardening**（H1–H4 + H5）已全部执行完成（见文末执行记录），修完再进入 P1 后续；**不直接开始多轮 Saturation**，避免把恢复/预算/多 Claim 缺陷带进多轮研究放大。四条 debt 均已对照 main@5d620fe0 实际代码核实，非空穴来风。
+
+**Hardening 执行结果（2026-08-28，本地全绿）：**
+- **H1 ✅ checkpoint 边界调整。** `on_model_finished` 只更新内存 cursor（completed audit 不单独落盘）；caller 的 semantic-result checkpoint（planning 成功后新增显式 `checkpoint()`；assessment/extraction 原有成功路径 checkpoint）与 audit 同一 checkpoint 持久化。取消路径 `finish_cancel` 前补 checkpoint（终态审计完整且 inflight 已清）。新增回归 `test_model_crash_after_success_before_semantic_persist_recovers_via_new_attempt`：模型成功 + audit 回调完成 → 模拟 crash（wrapper fail 短路兜底，durable 停在最后 checkpoint）→ durable cursor 仍 inflight 且无 completed audit → resume → `interrupted_unknown` → 新 attempt 成功 → planning 恰 1 个 completed audit、call_id 无重复。
+- **H2 ✅ candidate 满额停止外部搜索。** 搜索循环在外部调用前增加 `len(cursor.candidates) >= max_candidates → break`。新增回归 `test_full_candidate_pool_stops_pending_external_searches`（flood 20 候选/首条 query → 第 2 条 planned query 跳过：`search.calls == 1`、`completed_query_ids == 1`、candidates == 20；flood 单 cluster 数据 gate 合法 partial，不作为主要断言）。
+- **H3 ✅ 拆 physical read / claim-evidence binding。** `_fair_read_plan` 返回 `(physical_reads, extraction_targets)`：① 跨 Claim 的 global candidate exclusion 删除，改为 **(candidate_id, claim_id) pair 去重**（同 claim 内不重复绑定，跨 claim 允许）；② **read budget 只限制新 physical candidate**——已计划候选对其他 claim 的 extraction-only 绑定不受 budget 门控（调度：每 claim/wave 先按排名+cluster-diverse 绑 reusable（零 read 成本），剩余 slots 给 `plan_read_wave` 调度 new candidates）；③ `source_record["extractions"]`（per-claim 复数）承载多 claim 提取，单数 `extraction` 保留为首个 eligible 摘要（UI/items/brief 回退兼容）；④ read plan 持久化 v2 dict（`physical_reads` + `extraction_targets`），`_load_read_plan` 兼容 v1 list（in-flight run 可 resume）；⑤ `_evidence_brief` record 查找优先 `extractions[claim_id]`。新增回归 `test_one_physical_read_serves_multiple_claims`：A/B 双 claim query 各发现 shared+a-only / shared+b-only → **provenance merge**（shared 候选 query_ids 含两 claim 的 query id）→ shared 恰 1 次 physical read → `(shared,A)`/`(shared,B)` 各绑定一次 → 同一 server-owned evidence_id 链到两个 claim。
+- **H4 ✅ smoke 读真实 provenance 字段。** `attempt.get("providers")` → `attempt.get("providers_attempted")`；新增 `searxng_attempted` 断言并纳入 exit 条件（SearXNG 未被调用时 smoke 必须失败）；smoke schema 升 **v2**；artifact 重新生成（真实 SearXNG fixed digest @127.0.0.1:8080）。
+- **H5 ✅ conditional_wording_required 成为 production contract field。** 根因确认：字段从未被 `_evidence_brief()` 生成，smoke `brief.get()` 得 null 只是 key 缺失。修复：brief 增加 `"conditional_wording_required": (gate is None or gate.status != "pass")`；`_format_evidence_brief()` 真正消费（conditional 时追加"结论约束：研究尚未通过完整证据核验；只能使用条件化措辞，不得输出无保留强结论。"）——不是 dead metadata。断言：gate pass → False；malformed/block 路径 → True 且 `source_block` 含该约束文本。smoke v2 一致性断言（`conditional_ok == (gate != "pass")`）纳入 exit 条件。
+- **真实 SearXNG smoke v2（重新生成）：PASS。** `docs/research_quality/B5_ACTIVE_SEARXNG_SMOKE.json`（schema v2）：2 条 gap-directed query、`providers_attempted = ['searxng','bing_rss','duckduckgo_html']`（逐 query 真实记录）、`searxng_attempted = true`、5 candidates、hard budget 75.0s > 60s 耗尽 → `partial / insufficient / evidence_budget_exhausted`、`conditional_wording_required = true`（与 partial gate 一致）。negative-path PASS 形态与 B5 一致（frozen 60s 预算不改）。
+- **门禁（本批全绿）。** 全量后端 pytest **1373/1373**（+3 hardening 回归）；B5 聚焦 + dispatch **36/36**；Ruff 全仓通过；expanded mypy baseline **122/128**（hardening 零新增债务）；`git diff --check` 通过。前端无本批改动（B5 已验 Vitest 349/349 + build）。
+
+**Codex Review round 2（2026-08-28，同一 PR #133 分支补修）：**
+- **H6 ✅ searxng_success 证明成功而非仅尝试。** `providers_attempted` 列出全部 enabled provider（无论成败，`provider_search.py` 中 `providers_attempted=enabled`）——attempted ≠ success。smoke 新增 `_searxng_success()`：从持久化 `provider_audit.provider_outcomes` 断言 `provider=="searxng" AND status=="ok" AND result_count>0`，并纳入 exit 条件（searxng 失败 + Bing 给结果 + partial 不再能通过 smoke）。回归覆盖三种形态：ok+有结果 / failed+attempted / ok+零结果。真实 smoke v2 复跑 `searxng_success=true`。
+- **H7 ✅ 共享 evidence 的 per-claim anchor 保留。** 根因：`_add_extracted_evidence` 每次以当前 extraction 重建同 evidence_id 的 `ResearchEvidence`（source-level identity），多 claim 时 locator/anchored_spans 被最后写入者覆盖 → brief 行混配（Claim A locator + Claim B spans）。修复：`_evidence_brief()` 构造 claim row 时 locator/anchored_spans/caveats 优先取 `record["extractions"][link.claim_id]`（claim-specific anchor 层），`ResearchEvidence` 保持 source-level identity 不动。回归：multiclaim 测试改用 **claim_text 确定性且真实存在于 excerpt** 的双 anchor（"release date" / "2026-08-01"，适配 `_parse_extraction` 的 anti-hallucination 严格校验——stub 输出必须由输入决定且锚点在正文中），断言两条 brief 行各自保留自己的 locator/spans 且互不相同。
+- **H8 ✅ cluster diversity 跨 reusable+fresh。** 根因：reusable 先占 cluster 后，`plan_read_wave(fresh)` 只保证 fresh 内部 cluster-diverse，fresh 接受循环无已占 cluster 检查 → 同 claim 浪费 slot 读取同 cluster 候选。修复：per-claim 跨波累计 `claim_clusters`（`_bind` 时登记），reusable 与 fresh 接受循环均检查已占 cluster，fresh 被跳过**不消耗 slot**（继续扫描后续候选）。回归：直接单测 `_fair_read_plan`（claim_B rankings = [P(X) 已绑, Q(X) fresh, R(Y) fresh]，wave2 必须跳 Q 取 R，physical 不含 Q）。
+- **Round 2 门禁（全绿）。** 全量后端 pytest **1375/1375**（+2：H8/H6 回归）；focused **38/38**；Ruff 通过；mypy **122/128**；`git diff --check` 通过；真实 SearXNG smoke v2 复跑 exit 0（7 candidates、`searxng_attempted=true`、`searxng_success=true`、conditional 一致）。
+
+**Codex Review round 3（2026-08-28，同分支补修）：**
+- **H9 ✅ reusable 遵循与 fresh 相同的调度资格谓词。** 根因：H3/H8 后 reusable 候选只检查 `eligibility == "rejected"`，而 fresh 走 `plan_read_wave()` 还有 `lead_only` 无 provenance 级 gain signal 不可调度的更严规则（`scheduler.py`）→ 已物理读过的 lead_only 无信号候选会被错误绑定到新 claim（占 wave slot + 触发多余 extraction 调用）。修复：抽共享谓词 `is_schedulable_candidate()`（rejected 不可调度；lead_only 需 new_primary/new_provenance_lead/new_contradiction 之一），`plan_read_wave()` 与 `_fair_read_plan()` reusable 路径统一使用，两条路径不再漂移。回归：claim_B rankings = [X(lead_only 无信号, 已物理读), Y(eligible fresh), Z(lead_only 有 new_primary)] → X 不被绑定、Y 正常占位、Z 仍可调度（证明不是整波被清空）。
+- **Round 3 门禁（全绿）。** 全量后端 pytest **1376/1376**（+1 H9 回归）；focused **39/39**；Ruff 通过；mypy **122/128**；`git diff --check` 通过。
+
+| Debt | 判定 | 影响 | 执行时机 |
+| --- | --- | --- | --- |
+| H1 P1 model semantic-result crash consistency | 成立，严重 | 崩溃恢复可能从"可恢复"变成 runtime failure | 下一批第 1 个修 |
+| H2 P1 candidate cap does not stop external searches | 成立 | 白烧 60s budget，可能没时间 assessment/read | 第 2 个修 |
+| H3 P2 physical-read dedupe suppresses cross-claim binding | 成立 | 多 Claim 场景可能错误留下 open gap | P1 hardening 后修（多 Claim/saturation 前 mandatory） |
+| H4 P2 SearXNG smoke reads wrong provenance field | 成立，验收缺陷 | smoke 并没有真正证明使用了 SearXNG | 很小，与 H1/H2 同批 + 重新生成 smoke artifact |
+
+**H1 / P1：model semantic-result crash consistency（model result/audit 非 crash-consistent）。**
+- 根因：`on_model_finished(audit)` 内 `finish_model_attempt` → `checkpoint()` 已把"模型调用完成"持久化；但 semantic result（claim plan / assessment / extraction，如 `state = bootstrap.state`）要等 `claim_planner.plan()` 整体返回后才写进运行状态。
+- 崩溃窗口：模型成功 → audit 已 checkpoint →【进程崩溃】→ semantic result 尚未持久化。恢复后 durable cursor 认为 attempt:1 = completed，业务状态认为 claim plan 不存在 → 重调同一逻辑调用 → cursor 禁止"已 completed 的 call_id 再次成为 inflight"，`_validate_cursor_links()` 报 `completed model call cannot remain inflight` → 本应 `interrupted_unknown → retry/resume` 的窗口升级为 terminal runtime failure。
+- 与 B5 冻结的 "durable exactly-once truth + bounded at-least-once read-only execution" 直接冲突。
+- 修法（不做复杂事务，调整 checkpoint 边界）：`on_model_started` → 持久化 inflight marker（保持现状）；模型结束 → `on_model_finished` 只更新内存 cursor，**暂不 checkpoint**；caller 接收到 semantic result → semantic result + audit 在**同一个 checkpoint** 持久化。效果：死在模型返回后 → durable truth 仍只有 inflight → 恢复自然走 `interrupted_unknown → 新 attempt ID → bounded retry`，完全符合原设计。
+- 新增针对性回归：model remote success → audit callback 完成 → 模拟 crash before semantic persist → reload → interrupted_unknown → 新 attempt → 成功恢复。
+
+**H2 / P1：candidate budget must bound external search work。**
+- 现状：搜索循环只检查 `elapsed() >= hard_timeout_seconds: break`；CandidatePool 全局上限 `max_candidates=20`；满额后新搜索候选仍被 `_merge_runtime_candidates(..., max_candidates=20)` 截断，但外部搜索已真实发生（白烧预算）→ 可能把 hard deadline 花在注定不进 CandidatePool 的搜索上，assessment/read 没剩时间。
+- 修复（很小，放在外部调用之前）：`for planned in cursor.planned_queries: if len(cursor.candidates) >= state.budget.max_candidates: break`。
+- **重要修正（不得篡改历史结论）：这不是 B5 64.8s/0 reads smoke 的根因**——那次 candidates=8 < 20（未满额），64.8s 是 DeepSeek planning + 两批真实搜索本身吃满 60s。H2 是另一个未来可能造成类似症状的问题。
+
+**H3 / P2：deduplicate reads, not claim-evidence bindings。**
+- 现状：`_fair_read_plan()` 全局 `selected_ids: set[str]`，每个 Claim 排名时过滤已选 candidate → 一个来源只能服务一个 Claim。现实里一个 primary source 很可能同时证明多个 Claim（例：FastAPI 官方 LICENSE 页面 → Claim A "FastAPI 使用 MIT License" + Claim B "MIT license text 存在于官方 repository"）。
+- 后果：物理页面已读，但第二个 Claim 永远不会从该正文提取 Evidence → Claim B 仍 unresolved → 继续搜或 Gate block。深层原因：read-plan entry 绑定 `(candidate_id, claim_id, cluster_id, source_role)`，extractor 只按 `item["claim_id"]` 取单个 claim —— 一次 entry = 只对一个 claim extraction。
+- 正确设计（不是临时删 `selected_ids`）：拆两个概念——Physical Read `(candidate_id)` 只读一次；Extraction / Claim Binding `(candidate_id, claim_id)` 可多个（source-X ├─ extract for Claim A ├─ Claim B └─ Claim C）。
+- 改动比 H2 大：`RuntimeReadOutcome` 以 candidate_id 唯一，`source_record["extraction"]` 目前是单个 extraction 不是多 Claim collection → 需正规拆 `physical_read_plan` + `claim_extraction_targets`。
+
+**H4 / P2：real-SearXNG smoke must assert persisted provider provenance。**
+- 根因：生产代码真实保存 `"providers_attempted": list(outcome.providers_attempted)`；smoke 工具读取 `attempt.get("providers")` → 产物变成 `"providers": []`、`"provider_audits": [{"providers": null}]`（main 中已提交的 smoke artifact 即如此）。
+- **表述修正：runtime execution 大概率正确（真实用了 SearXNG），但 smoke evidence extraction 错误，当前 artifact 没有证明该事实。** 两者分开记录：runtime execution 可能正确 / smoke evidence extraction 错误。
+- 修复：① smoke 读 `attempt.get("providers_attempted")`；② smoke 成功条件不能只是"partial 合法 terminal state"，必须明确要求 `expected provider == "searxng"` 存在于 providers_attempted（否则 SearXNG 根本没被调用 + 其他 provider 返回 candidates + partial 也能错误通过 smoke）；③ 重新生成 smoke artifact。
+
+**H5（独立项，不与 H1–H4 混为一谈）：** `conditional_wording_required=null` 语义确认——当前 artifact 仍为 null，独立检查项照旧。
 
 
 ## 1. 当前结论

@@ -112,9 +112,7 @@ def plan_read_wave(
     for item in ranked:
         if len(selected) >= min(wave_size, available):
             break
-        if item.eligibility == "rejected":
-            continue
-        if item.eligibility == "lead_only" and not _lead_is_schedulable(item, policy):
+        if not is_schedulable_candidate(item):
             continue
         cluster_id = item.assessment.cluster_id
         if cluster_id in selected_clusters:
@@ -143,11 +141,37 @@ def plan_read_wave(
     return _finish(plan, should_cancel, checkpoint)
 
 
+def is_schedulable_candidate(item: RankedCandidate) -> bool:
+    """Shared eligibility predicate for every read-scheduling path (H9).
+
+    Rejected candidates are never schedulable; lead_only candidates are only
+    schedulable when they carry a provenance-grade gain signal. Both
+    plan_read_wave (fresh candidates) and the reusable-candidate binding in
+    the fair read plan must use this one predicate so the two paths cannot
+    drift apart again.
+    """
+    if item.eligibility == "rejected":
+        return False
+    if (
+        item.eligibility == "lead_only"
+        and not _LEAD_SCHEDULABLE_SIGNALS.intersection(item.assessment.expected_gain_signals)
+    ):
+        return False
+    return True
+
+
+_LEAD_SCHEDULABLE_SIGNALS = {
+    "new_primary",
+    "new_provenance_lead",
+    "new_contradiction",
+}
+
+
 def _lead_is_schedulable(item: RankedCandidate, policy: ReadSchedulerPolicy) -> bool:
     if not policy.allow_provenance_leads:
         return False
     return bool(
-        {"new_primary", "new_provenance_lead", "new_contradiction"}
+        _LEAD_SCHEDULABLE_SIGNALS
         & set(item.assessment.expected_gain_signals)
     )
 
@@ -214,5 +238,6 @@ __all__ = [
     "ReadSchedulingCancelled",
     "ReadWavePlan",
     "ReadWaveStatus",
+    "is_schedulable_candidate",
     "plan_read_wave",
 ]
