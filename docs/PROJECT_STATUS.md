@@ -77,6 +77,8 @@
 - **H9 ✅ reusable 遵循与 fresh 相同的调度资格谓词。** 根因：H3/H8 后 reusable 候选只检查 `eligibility == "rejected"`，而 fresh 走 `plan_read_wave()` 还有 `lead_only` 无 provenance 级 gain signal 不可调度的更严规则（`scheduler.py`）→ 已物理读过的 lead_only 无信号候选会被错误绑定到新 claim（占 wave slot + 触发多余 extraction 调用）。修复：抽共享谓词 `is_schedulable_candidate()`（rejected 不可调度；lead_only 需 new_primary/new_provenance_lead/new_contradiction 之一），`plan_read_wave()` 与 `_fair_read_plan()` reusable 路径统一使用，两条路径不再漂移。回归：claim_B rankings = [X(lead_only 无信号, 已物理读), Y(eligible fresh), Z(lead_only 有 new_primary)] → X 不被绑定、Y 正常占位、Z 仍可调度（证明不是整波被清空）。
 - **Round 3 门禁（全绿）。** 全量后端 pytest **1376/1376**（+1 H9 回归）；focused **39/39**；Ruff 通过；mypy **122/128**；`git diff --check` 通过。
 
+**B5-Hardening 正式收口（2026-08-28）：** H1–H9 全部修复（PR #133，merge commit `fe30871`，round 3 head `c4745dc`）。四轮 Codex exact-head review 收敛轨迹：round 1 → H6/H7/H8（3×P2）；round 2 → H9（1×P2）；round 3+4 → 零 findings（exact-head review clean）。本地门禁 pytest 1376/1376、Ruff、mypy 122≤128、smoke v2 `searxng_success=true`；PR CI 与 **main exact-head CI（`fe30871`）均 completed success**。**正式判定：B5 + B5-Hardening = REMOTE GO / DELIVERED。** 下一批冻结目标（路线已定）：**P1-C 子批 1 = Evidence Gain + Saturation contracts**（确定性 gain evaluator，per-gap/per-claim saturation 计数，不做 runtime loop），随后子批 2 = multi-wave durable runtime loop、子批 3 = Stop Gate + bounded validation，之后才是 bounded 12-case qualification 与 P2。
+
 | Debt | 判定 | 影响 | 执行时机 |
 | --- | --- | --- | --- |
 | H1 P1 model semantic-result crash consistency | 成立，严重 | 崩溃恢复可能从"可恢复"变成 runtime failure | 下一批第 1 个修 |
