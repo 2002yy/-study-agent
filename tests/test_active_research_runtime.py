@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from json import loads
+from pathlib import Path
 from types import SimpleNamespace
 from collections.abc import Callable
 from threading import Event, Thread
@@ -131,6 +132,16 @@ class _StructuredClient:
                 ],
             }
         else:
+            # H7: anchors must differ per claim AND exist in the read excerpt
+            # (the strict parser rejects anchors absent from the excerpt), and
+            # the fake output must be deterministic per claim input.
+            claim_text = str(request["claim_text"])
+            if "official project" in claim_text:
+                locator = "2026-08-01"
+                anchored_spans = ["2026-08-01"]
+            else:
+                locator = "release date"
+                anchored_spans = ["release date"]
             payload = {
                 "schema_version": "research-evidence-extraction-v1",
                 "candidate_id": (
@@ -143,8 +154,8 @@ class _StructuredClient:
                 "source_cluster_id": request["source_cluster_id"],
                 "relation": "supports",
                 "strength": 0.95,
-                "locator": "Verified fact",
-                "anchored_spans": ["Verified fact"],
+                "locator": locator,
+                "anchored_spans": anchored_spans,
                 "caveats": [],
                 "published_at": request["published_at"],
             }
@@ -706,6 +717,31 @@ def test_one_physical_read_serves_multiple_claims(tmp_path: Any) -> None:
     )
     assert set((record.get("extractions") or {})) == set(queries_by_claim)
 
+    # H7: each claim row keeps its own anchor on the shared evidence.
+    brief_rows = completed.research_context[ACTIVE_RESEARCH_BRIEF_KEY][
+        "eligible_evidence"
+    ]
+    rows_by_claim = {
+        row["claim_id"]: row
+        for row in brief_rows
+        if row["evidence_id"] == shared_evidence_id
+    }
+    assert len(rows_by_claim) == 2
+    state = _dispatch_state(repository.get(run.id))
+    assert state is not None
+    anchors = {}
+    for claim in state.claims:
+        row = rows_by_claim[claim.id]
+        if "official project" in claim.text:
+            assert row["locator"] == "2026-08-01"
+            assert row["anchored_spans"] == ["2026-08-01"]
+            anchors[claim.id] = (row["locator"], tuple(row["anchored_spans"]))
+        else:
+            assert row["locator"] == "release date"
+            assert row["anchored_spans"] == ["release date"]
+            anchors[claim.id] = (row["locator"], tuple(row["anchored_spans"]))
+    assert len(set(anchors.values())) == 2
+
 
 def test_active_cancel_during_claim_planning_settles_durably(tmp_path: Any) -> None:
     repository = WebLookupRepository(RuntimeDatabase(tmp_path / "cancel-model.sqlite"))
@@ -871,3 +907,162 @@ def test_slow_active_stage_cancel_settles_within_call_timeout_plus_one(
         f"settle_seconds={settle_seconds:.3f} "
         f"bound_seconds={declared_timeout_seconds + 1.0:.1f}"
     )
+
+def test_read_plan_cluster_diversity_spans_reusable_and_fresh() -> None:
+    """B5-H8: fresh selections must skip clusters the claim already covers.
+
+    Wave 1 binds the reusable shared candidate (cluster X) to claim_B; wave 2
+    must skip the fresh same-cluster candidate Q without wasting the slot, and
+    still take R (cluster Y).
+    """
+    from src.application.active_research_runtime import _fair_read_plan
+    from src.web.research.candidate_assessment import CandidateSemanticAssessment
+    from src.web.research.candidate_pool import CandidatePoolItem
+    from src.web.research.candidate_ranking import RankedCandidate
+    from src.web.research.contracts import (
+        EvidenceRequirement,
+        ResearchClaim,
+        ResearchQuestion,
+    )
+
+    question = ResearchQuestion(id="q1", question_surface="question")
+    question_tuple = (question,)
+
+    def claim(claim_id: str) -> ResearchClaim:
+        return ResearchClaim(
+            id=claim_id,
+            question_id="q1",
+            text="claim",
+            kind="factual",
+            priority="critical",
+            state="pending",
+            evidence_requirement=EvidenceRequirement(),
+        )
+
+    def ranked(candidate_id: str, cluster_id: str, rank: int) -> RankedCandidate:
+        candidate = CandidatePoolItem(
+            id=candidate_id,
+            canonical_url=f"https://x.example/{candidate_id}",
+            url=f"https://x.example/{candidate_id}",
+            title=candidate_id,
+            snippet="",
+            source="",
+            published_at="",
+            query_ids=("q1",),
+            intents=(),
+            providers=("searxng",),
+            first_seen_rank=rank,
+        )
+        assessment = CandidateSemanticAssessment(
+            candidate_id=candidate_id,
+            relevance="answer_relevant",
+            relevance_confidence=0.9,
+            source_role="primary",
+            source_role_confidence=0.9,
+            cluster_id=cluster_id,
+            expected_gain_signals=("new_primary",),
+            freshness_score=0.5,
+            estimated_read_cost=1.0,
+        )
+        return RankedCandidate(
+            candidate=candidate,
+            assessment=assessment,
+            rank=rank,
+            eligibility="eligible",
+            reason_codes=(),
+            new_cluster=False,
+            expected_information_gain=1,
+        )
+
+    state = build_research_state(
+        mode="active",
+        questions=question_tuple,
+        claims=(claim("claim_A"), claim("claim_B")),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    rankings = {
+        "claim_A": (ranked("P", "cluster_X", 1),),
+        "claim_B": (
+            ranked("P", "cluster_X", 1),
+            ranked("Q", "cluster_X", 2),
+            ranked("R", "cluster_Y", 3),
+        ),
+    }
+
+    physical, targets = _fair_read_plan(state, rankings)
+
+    b_pairs = {
+        (item["candidate_id"], item["cluster_id"])
+        for item in targets
+        if item["claim_id"] == "claim_B"
+    }
+    assert ("P", "cluster_X") in b_pairs
+    # H8: Q shares cluster X with the already-bound P, so it must be skipped
+    # while R (cluster Y) still fills the slot.
+    assert ("Q", "cluster_X") not in b_pairs
+    assert ("R", "cluster_Y") in b_pairs
+    assert "Q" not in {item["candidate_id"] for item in physical}
+
+
+def _load_smoke_module() -> Any:
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "run_research_active_smoke.py"
+    spec = importlib.util.spec_from_file_location("run_research_active_smoke", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_smoke_searxng_success_requires_ok_results() -> None:
+    """B5-H6: attempted is not success; only a successful result-bearing
+    searxng outcome proves the real-SearXNG smoke ran against SearXNG."""
+    module = _load_smoke_module()
+
+    success = [
+        {
+            "provider_audit": {
+                "provider_outcomes": [
+                    {"provider": "searxng", "status": "ok", "result_count": 3}
+                ]
+            }
+        }
+    ]
+    assert module._searxng_success(success) is True
+
+    failed_but_attempted = [
+        {
+            "provider_audit": {
+                "provider_outcomes": [
+                    {"provider": "searxng", "status": "failed", "result_count": 0},
+                    {"provider": "bing_rss", "status": "ok", "result_count": 5},
+                ]
+            }
+        }
+    ]
+    assert module._searxng_success(failed_but_attempted) is False
+
+    ok_but_empty = [
+        {
+            "provider_audit": {
+                "provider_outcomes": [
+                    {"provider": "searxng", "status": "ok", "result_count": 0}
+                ]
+            }
+        }
+    ]
+    assert module._searxng_success(ok_but_empty) is False

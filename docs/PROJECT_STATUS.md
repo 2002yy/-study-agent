@@ -67,6 +67,12 @@
 - **真实 SearXNG smoke v2（重新生成）：PASS。** `docs/research_quality/B5_ACTIVE_SEARXNG_SMOKE.json`（schema v2）：2 条 gap-directed query、`providers_attempted = ['searxng','bing_rss','duckduckgo_html']`（逐 query 真实记录）、`searxng_attempted = true`、5 candidates、hard budget 75.0s > 60s 耗尽 → `partial / insufficient / evidence_budget_exhausted`、`conditional_wording_required = true`（与 partial gate 一致）。negative-path PASS 形态与 B5 一致（frozen 60s 预算不改）。
 - **门禁（本批全绿）。** 全量后端 pytest **1373/1373**（+3 hardening 回归）；B5 聚焦 + dispatch **36/36**；Ruff 全仓通过；expanded mypy baseline **122/128**（hardening 零新增债务）；`git diff --check` 通过。前端无本批改动（B5 已验 Vitest 349/349 + build）。
 
+**Codex Review round 2（2026-08-28，同一 PR #133 分支补修）：**
+- **H6 ✅ searxng_success 证明成功而非仅尝试。** `providers_attempted` 列出全部 enabled provider（无论成败，`provider_search.py` 中 `providers_attempted=enabled`）——attempted ≠ success。smoke 新增 `_searxng_success()`：从持久化 `provider_audit.provider_outcomes` 断言 `provider=="searxng" AND status=="ok" AND result_count>0`，并纳入 exit 条件（searxng 失败 + Bing 给结果 + partial 不再能通过 smoke）。回归覆盖三种形态：ok+有结果 / failed+attempted / ok+零结果。真实 smoke v2 复跑 `searxng_success=true`。
+- **H7 ✅ 共享 evidence 的 per-claim anchor 保留。** 根因：`_add_extracted_evidence` 每次以当前 extraction 重建同 evidence_id 的 `ResearchEvidence`（source-level identity），多 claim 时 locator/anchored_spans 被最后写入者覆盖 → brief 行混配（Claim A locator + Claim B spans）。修复：`_evidence_brief()` 构造 claim row 时 locator/anchored_spans/caveats 优先取 `record["extractions"][link.claim_id]`（claim-specific anchor 层），`ResearchEvidence` 保持 source-level identity 不动。回归：multiclaim 测试改用 **claim_text 确定性且真实存在于 excerpt** 的双 anchor（"release date" / "2026-08-01"，适配 `_parse_extraction` 的 anti-hallucination 严格校验——stub 输出必须由输入决定且锚点在正文中），断言两条 brief 行各自保留自己的 locator/spans 且互不相同。
+- **H8 ✅ cluster diversity 跨 reusable+fresh。** 根因：reusable 先占 cluster 后，`plan_read_wave(fresh)` 只保证 fresh 内部 cluster-diverse，fresh 接受循环无已占 cluster 检查 → 同 claim 浪费 slot 读取同 cluster 候选。修复：per-claim 跨波累计 `claim_clusters`（`_bind` 时登记），reusable 与 fresh 接受循环均检查已占 cluster，fresh 被跳过**不消耗 slot**（继续扫描后续候选）。回归：直接单测 `_fair_read_plan`（claim_B rankings = [P(X) 已绑, Q(X) fresh, R(Y) fresh]，wave2 必须跳 Q 取 R，physical 不含 Q）。
+- **Round 2 门禁（全绿）。** 全量后端 pytest **1375/1375**（+2：H8/H6 回归）；focused **38/38**；Ruff 通过；mypy **122/128**；`git diff --check` 通过；真实 SearXNG smoke v2 复跑 exit 0（7 candidates、`searxng_attempted=true`、`searxng_success=true`、conditional 一致）。
+
 | Debt | 判定 | 影响 | 执行时机 |
 | --- | --- | --- | --- |
 | H1 P1 model semantic-result crash consistency | 成立，严重 | 崩溃恢复可能从"可恢复"变成 runtime failure | 下一批第 1 个修 |

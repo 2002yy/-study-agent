@@ -1007,6 +1007,10 @@ def _fair_read_plan(
     targets: list[dict[str, str]] = []
     physical_ids: set[str] = set()
     target_pairs: set[tuple[str, str]] = set()
+    # H8: cluster diversity must span every wave of a claim, including
+    # selections already bound through reusable candidates, so the fresh
+    # acceptance loop skips clusters this claim already covers.
+    claim_clusters: dict[str, set[str]] = {}
     reserve = ceil(state.budget.max_reads / 3)
     normal_limit = max(0, state.budget.max_reads - state.budget.reads_used - reserve)
 
@@ -1015,6 +1019,7 @@ def _fair_read_plan(
         if pair in target_pairs:
             return
         target_pairs.add(pair)
+        claim_clusters.setdefault(claim_id, set()).add(item.assessment.cluster_id)
         targets.append(
             {
                 "candidate_id": candidate_id,
@@ -1066,24 +1071,25 @@ def _fair_read_plan(
                 ]
 
             # Reusable bindings first (rank order, cluster-diverse within the
-            # wave); remaining wave slots go to new physical reads.
+            # claim across waves); remaining wave slots go to new physical
+            # reads, skipping clusters this claim already covers (H8) without
+            # wasting slots on the skipped entries.
             slots = wave_size
-            taken_clusters: set[str] = set()
             for item in reusable:
                 if slots <= 0:
                     break
                 if item.eligibility == "rejected":
                     continue
-                cluster_id = item.assessment.cluster_id
-                if cluster_id in taken_clusters:
+                if item.assessment.cluster_id in claim_clusters.get(claim_id, set()):
                     continue
-                taken_clusters.add(cluster_id)
                 _bind(item.candidate.id, claim_id, item)
                 slots -= 1
             for candidate_id in fresh_selected:
                 if slots <= 0:
                     break
                 item = by_id[candidate_id]
+                if item.assessment.cluster_id in claim_clusters.get(claim_id, set()):
+                    continue
                 _bind(candidate_id, claim_id, item)
                 if candidate_id not in physical_ids:
                     physical_ids.add(candidate_id)
@@ -1374,6 +1380,18 @@ def _evidence_brief(
             {},
         )
         item = record.get("item") if isinstance(record, Mapping) else {}
+        # H7: ResearchEvidence is the source-level identity, so its
+        # locator/spans are whatever the last extraction wrote; claim-specific
+        # anchors live in record["extractions"][claim_id] and must win when
+        # one physical read serves multiple claims.
+        claim_anchor: Mapping[str, Any] | None = None
+        if isinstance(record, Mapping):
+            extractions_map = record.get("extractions")
+            if isinstance(extractions_map, Mapping):
+                detail = extractions_map.get(link.claim_id)
+                if isinstance(detail, Mapping):
+                    claim_anchor = detail
+        anchors_source = claim_anchor if claim_anchor is not None else {}
         evidence_rows.append(
             {
                 "evidence_id": link.evidence_id,
@@ -1384,10 +1402,16 @@ def _evidence_brief(
                 "source_cluster_id": link.source_cluster_id,
                 "title": str(item.get("title") or "") if isinstance(item, Mapping) else "",
                 "url": str(item.get("url") or "") if isinstance(item, Mapping) else "",
-                "locator": link.locator,
-                "anchored_spans": list(evidence.anchored_spans),
+                "locator": str(
+                    anchors_source.get("locator") or link.locator or ""
+                ),
+                "anchored_spans": list(
+                    anchors_source.get("anchored_spans") or evidence.anchored_spans
+                ),
                 "published_at": evidence.published_at,
-                "caveats": list(link.caveats),
+                "caveats": list(
+                    anchors_source.get("caveats") or link.caveats
+                ),
             }
         )
     return {
