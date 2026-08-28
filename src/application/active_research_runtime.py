@@ -246,8 +246,13 @@ class ActiveResearchRuntimeExecutor:
 
         def on_model_finished(audit: ResearchModelCallAudit) -> None:
             nonlocal cursor
+            # B5-H1 crash-consistency: keep the completed audit in memory only.
+            # The caller persists it together with the semantic result in the
+            # next checkpoint, so a crash before that checkpoint leaves the
+            # durable truth as an inflight call that recovery resolves through
+            # interrupted_unknown with a bounded new attempt instead of a
+            # completed call_id that can never re-enter inflight.
             cursor = finish_model_attempt(cursor, audit)
-            checkpoint()
             ensure_active()
 
         def _append_failure(code: str, phase: str, item_id: str = "") -> None:
@@ -306,6 +311,9 @@ class ActiveResearchRuntimeExecutor:
                         reason=bootstrap.reason or "claim_plan_unavailable",
                     )
                 state = bootstrap.state
+                # B5-H1: persist the completed model audit together with the
+                # semantic result it produced (single checkpoint boundary).
+                checkpoint()
 
             # Deterministic query planning is resumable from the persisted cursor.
             if not cursor.planned_queries:
@@ -339,6 +347,11 @@ class ActiveResearchRuntimeExecutor:
                     continue
                 ensure_active()
                 if elapsed() >= state.budget.hard_timeout_seconds:
+                    break
+                # B5-H2: once the candidate pool is full, further external
+                # searches can only burn shared budget on results that would
+                # be dropped by the pool cap, so stop before any external call.
+                if len(cursor.candidates) >= state.budget.max_candidates:
                     break
                 attempt = _attempt_number(cursor, planned.id)
                 marker = RuntimeExternalAttemptStart(
@@ -462,14 +475,17 @@ class ActiveResearchRuntimeExecutor:
             cursor = replace(cursor, phase="ranking")
             checkpoint(stage="assessing")
 
-            read_plan = _load_read_plan(context)
-            if not read_plan:
-                read_plan = _fair_read_plan(state, claim_rankings)
-                context[ACTIVE_RESEARCH_READ_PLAN_KEY] = read_plan
+            physical_reads, extraction_targets = _load_read_plan(context)
+            if not physical_reads and not extraction_targets:
+                physical_reads, extraction_targets = _fair_read_plan(state, claim_rankings)
+                context[ACTIVE_RESEARCH_READ_PLAN_KEY] = {
+                    "physical_reads": physical_reads,
+                    "extraction_targets": extraction_targets,
+                }
                 cursor = replace(
                     cursor,
                     phase="reading",
-                    planned_read_ids=tuple(item["candidate_id"] for item in read_plan),
+                    planned_read_ids=tuple(item["candidate_id"] for item in physical_reads),
                 )
                 checkpoint(stage="reading")
 
@@ -487,7 +503,7 @@ class ActiveResearchRuntimeExecutor:
                 if isinstance(item, Mapping)
             )
             successful_reads = state.budget.reads_used
-            for item in read_plan:
+            for item in physical_reads:
                 candidate_id = item["candidate_id"]
                 if candidate_id in cursor.completed_read_ids:
                     continue
@@ -554,14 +570,26 @@ class ActiveResearchRuntimeExecutor:
             checkpoint(stage="reading")
 
             # A successful read is not evidence until strict extraction validates.
+            # B5-H3: extraction targets bind (candidate_id, claim_id) pairs, so
+            # one physical read can serve multiple claims.
             claims_by_id = {claim.id: claim for claim in state.claims}
-            for item in read_plan:
+            for item in extraction_targets:
                 candidate_id = item["candidate_id"]
+                claim_id = item["claim_id"]
                 source_record = _source_by_candidate(selected_sources, candidate_id)
                 if source_record is None or _read_status(source_record) != "read":
                     continue
-                extraction = source_record.get("extraction")
-                if isinstance(extraction, Mapping) and extraction.get("status") in {"eligible", "extractor_failed"}:
+                extractions = source_record.setdefault("extractions", {})
+                prior = extractions.get(claim_id)
+                if isinstance(prior, Mapping) and prior.get("status") in {"eligible", "extractor_failed"}:
+                    continue
+                legacy = source_record.get("extraction")
+                if (
+                    prior is None
+                    and isinstance(legacy, Mapping)
+                    and legacy.get("status") in {"eligible", "extractor_failed"}
+                    and legacy.get("claim_id") == claim_id
+                ):
                     continue
                 ensure_active()
                 ensure_budget()
@@ -571,7 +599,7 @@ class ActiveResearchRuntimeExecutor:
                     "bounded_public_page_excerpt",
                 )
                 if not model_allowed("research_evidence_extraction", extraction_categories):
-                    source_record["extraction"] = {"status": "extractor_failed", "reason": "blocked_by_policy"}
+                    extractions[claim_id] = {"status": "extractor_failed", "reason": "blocked_by_policy"}
                     _append_failure("extraction_blocked_by_policy", "extracting", candidate_id)
                     checkpoint()
                     continue
@@ -591,7 +619,7 @@ class ActiveResearchRuntimeExecutor:
                 )
                 ensure_active()
                 if extracted.status != "completed" or extracted.extraction is None:
-                    source_record["extraction"] = {
+                    extractions[claim_id] = {
                         "status": "extractor_failed",
                         "reason": extracted.reason or "extractor_unavailable",
                     }
@@ -599,7 +627,7 @@ class ActiveResearchRuntimeExecutor:
                     checkpoint()
                     continue
                 link = extracted.extraction
-                source_record["extraction"] = {
+                extraction_summary = {
                     "status": "eligible",
                     "claim_id": link.claim_id,
                     "relation": link.relation,
@@ -611,6 +639,15 @@ class ActiveResearchRuntimeExecutor:
                     "source_cluster_id": link.source_cluster_id,
                     "published_at": link.published_at,
                 }
+                extractions[claim_id] = dict(extraction_summary)
+                # Keep the singular field as a backward-compatible summary of
+                # the first eligible extraction for existing consumers.
+                current_summary = source_record.get("extraction")
+                if not (
+                    isinstance(current_summary, Mapping)
+                    and current_summary.get("status") == "eligible"
+                ):
+                    source_record["extraction"] = extraction_summary
                 evidence_id = _evidence_id_for_record(run_id, source_record, selected_sources, rejected_sources)
                 state = _add_extracted_evidence(state, evidence_id=evidence_id, link=link)
                 cursor = replace(
@@ -667,6 +704,13 @@ class ActiveResearchRuntimeExecutor:
                 final_status=final_status,
             )
         except (ActiveResearchCancelled, CandidatePoolCancelled, ReadSchedulingCancelled):
+            # B5-H1: persist the in-memory cursor so a cancel that lands after
+            # on_model_finished records the cleared inflight marker and any
+            # completed audit; the cancelled run is terminal and never resumes.
+            try:
+                checkpoint()
+            except Exception:
+                pass
             return self.repository.finish_cancel(run_id, operation_id=operation_id)
         except _HardBudgetReached:
             update_budget()
@@ -948,48 +992,110 @@ def _ranked_from_dict(raw: Mapping[str, Any]) -> RankedCandidate:
 def _fair_read_plan(
     state: ResearchState,
     rankings: Mapping[str, tuple[RankedCandidate, ...]],
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Return ``(physical_reads, extraction_targets)`` for the read stage.
+
+    B5-H3: deduplicate reads, not claim-evidence bindings. Physical reads are
+    unique per candidate and bounded by the shared read budget; extraction
+    targets bind ``(candidate_id, claim_id)`` pairs so one physical read can
+    serve evidence extraction for multiple claims. Read-budget exhaustion
+    never blocks binding an already-planned candidate to another claim: the
+    budget only limits new physical candidates, not extraction-only reuse.
+    """
     claims = {claim.id: claim for claim in state.claims}
-    selected: list[dict[str, str]] = []
-    selected_ids: set[str] = set()
+    physical: list[dict[str, str]] = []
+    targets: list[dict[str, str]] = []
+    physical_ids: set[str] = set()
+    target_pairs: set[tuple[str, str]] = set()
     reserve = ceil(state.budget.max_reads / 3)
     normal_limit = max(0, state.budget.max_reads - state.budget.reads_used - reserve)
 
+    def _bind(candidate_id: str, claim_id: str, item: RankedCandidate) -> None:
+        pair = (candidate_id, claim_id)
+        if pair in target_pairs:
+            return
+        target_pairs.add(pair)
+        targets.append(
+            {
+                "candidate_id": candidate_id,
+                "claim_id": claim_id,
+                "cluster_id": item.assessment.cluster_id,
+                "source_role": item.assessment.source_role,
+            }
+        )
+
     def schedule(claim_ids: list[str], wave_size: int, *, allow_reserve: bool = False) -> None:
         for claim_id in claim_ids:
-            remaining = state.budget.max_reads - state.budget.reads_used - len(selected)
-            if remaining <= 0 or (not allow_reserve and len(selected) >= normal_limit):
-                return
-            ranked = tuple(item for item in rankings.get(claim_id, ()) if item.candidate.id not in selected_ids)
+            ranked = tuple(
+                item
+                for item in rankings.get(claim_id, ())
+                if (item.candidate.id, claim_id) not in target_pairs
+            )
             if not ranked:
                 continue
+            # Reusable candidates are already in the physical plan: binding
+            # them to this claim costs extraction work only, never read budget.
+            reusable = tuple(item for item in ranked if item.candidate.id in physical_ids)
+            fresh = tuple(item for item in ranked if item.candidate.id not in physical_ids)
+            remaining = state.budget.max_reads - state.budget.reads_used - len(physical)
+            budget_open = remaining > 0 and (allow_reserve or len(physical) < normal_limit)
+
             conflict_open = any("new_contradiction" in item.assessment.expected_gain_signals for item in ranked)
             policy = ReadSchedulerPolicy(
                 critical_wave_size=wave_size,
                 major_wave_size=wave_size,
                 context_wave_size=0,
             )
-            budget = replace(state.budget, reads_used=state.budget.reads_used + len(selected))
-            plan = plan_read_wave(
-                ranked,
-                claim=claims[claim_id],
-                budget=budget,
-                policy=policy,
-                conflict_open=conflict_open,
-                preserve_conflict_reserve=not allow_reserve,
-            )
-            by_id = {item.candidate.id: item for item in ranked}
-            for candidate_id in plan.selected_candidate_ids:
-                item = by_id[candidate_id]
-                selected_ids.add(candidate_id)
-                selected.append(
-                    {
-                        "candidate_id": candidate_id,
-                        "claim_id": claim_id,
-                        "cluster_id": item.assessment.cluster_id,
-                        "source_role": item.assessment.source_role,
-                    }
+            fresh_selected: list[str] = []
+            by_id: dict[str, RankedCandidate] = {}
+            if budget_open and fresh:
+                budget = replace(state.budget, reads_used=state.budget.reads_used + len(physical))
+                plan = plan_read_wave(
+                    fresh,
+                    claim=claims[claim_id],
+                    budget=budget,
+                    policy=policy,
+                    conflict_open=conflict_open,
+                    preserve_conflict_reserve=not allow_reserve,
                 )
+                by_id = {item.candidate.id: item for item in fresh}
+                fresh_selected = [
+                    candidate_id
+                    for candidate_id in plan.selected_candidate_ids
+                    if candidate_id in by_id
+                ]
+
+            # Reusable bindings first (rank order, cluster-diverse within the
+            # wave); remaining wave slots go to new physical reads.
+            slots = wave_size
+            taken_clusters: set[str] = set()
+            for item in reusable:
+                if slots <= 0:
+                    break
+                if item.eligibility == "rejected":
+                    continue
+                cluster_id = item.assessment.cluster_id
+                if cluster_id in taken_clusters:
+                    continue
+                taken_clusters.add(cluster_id)
+                _bind(item.candidate.id, claim_id, item)
+                slots -= 1
+            for candidate_id in fresh_selected:
+                if slots <= 0:
+                    break
+                item = by_id[candidate_id]
+                _bind(candidate_id, claim_id, item)
+                if candidate_id not in physical_ids:
+                    physical_ids.add(candidate_id)
+                    physical.append(
+                        {
+                            "candidate_id": candidate_id,
+                            "claim_id": claim_id,
+                            "cluster_id": item.assessment.cluster_id,
+                            "source_role": item.assessment.source_role,
+                        }
+                    )
+                slots -= 1
 
     critical = [claim.id for claim in _ordered_claims(state) if claim.priority == "critical"]
     major = [claim.id for claim in _ordered_claims(state) if claim.priority == "major"]
@@ -1005,24 +1111,44 @@ def _fair_read_plan(
         )
     ]
     schedule(conflict_claims, reserve, allow_reserve=True)
-    return selected[: state.budget.max_reads - state.budget.reads_used]
+    read_cap = max(0, state.budget.max_reads - state.budget.reads_used)
+    return physical[:read_cap], targets
 
 
-def _load_read_plan(context: Mapping[str, Any]) -> list[dict[str, str]]:
-    raw = context.get(ACTIVE_RESEARCH_READ_PLAN_KEY)
+def _read_plan_entries(raw: Any, keys: tuple[str, ...]) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
     return [
-        {
-            "candidate_id": str(item["candidate_id"]),
-            "claim_id": str(item["claim_id"]),
-            "cluster_id": str(item["cluster_id"]),
-            "source_role": str(item["source_role"]),
-        }
+        {key: str(item[key]) for key in keys}
         for item in raw
-        if isinstance(item, Mapping)
-        and all(key in item for key in ("candidate_id", "claim_id", "cluster_id", "source_role"))
+        if isinstance(item, Mapping) and all(key in item for key in keys)
     ]
+
+
+def _load_read_plan(context: Mapping[str, Any]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Load the persisted read plan as ``(physical_reads, extraction_targets)``.
+
+    v2 persists both lists explicitly; the v1 format stored a single list of
+    claim-bound entries, which is converted so in-flight runs keep resuming.
+    """
+    raw = context.get(ACTIVE_RESEARCH_READ_PLAN_KEY)
+    if isinstance(raw, Mapping):
+        physical_keys = ("candidate_id", "claim_id", "cluster_id", "source_role")
+        return (
+            _read_plan_entries(raw.get("physical_reads"), physical_keys),
+            _read_plan_entries(raw.get("extraction_targets"), physical_keys),
+        )
+    if isinstance(raw, list):
+        physical_keys = ("candidate_id", "claim_id", "cluster_id", "source_role")
+        entries = _read_plan_entries(raw, physical_keys)
+        physical: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in entries:
+            if item["candidate_id"] not in seen:
+                seen.add(item["candidate_id"])
+                physical.append(item)
+        return physical, entries
+    return [], []
 
 
 def _candidate_by_id(cursor: ResearchRuntimeCursor, candidate_id: str) -> CandidatePoolItem:
@@ -1234,9 +1360,16 @@ def _evidence_brief(
             (
                 item
                 for item in records_by_id.values()
-                if isinstance(item.get("extraction"), Mapping)
-                and item["extraction"].get("claim_id") == link.claim_id
-                and item["extraction"].get("locator") == link.locator
+                if (
+                    isinstance(item.get("extractions"), Mapping)
+                    and isinstance(item["extractions"].get(link.claim_id), Mapping)
+                    and str(item["extractions"][link.claim_id].get("locator") or "") == link.locator
+                )
+                or (
+                    isinstance(item.get("extraction"), Mapping)
+                    and item["extraction"].get("claim_id") == link.claim_id
+                    and item["extraction"].get("locator") == link.locator
+                )
             ),
             {},
         )
@@ -1261,6 +1394,10 @@ def _evidence_brief(
         "schema_version": "research-evidence-brief-v1",
         "gate_status": gate.status if gate else "unavailable",
         "gate_reasons": list(gate.reasons) if gate else ["active_runtime_unavailable"],
+        # H5: the conclusion constraint is a first-class brief field so
+        # downstream consumers never present an unqualified strong conclusion
+        # unless the Evidence Gate actually passed.
+        "conditional_wording_required": (gate is None or gate.status != "pass"),
         "eligible_evidence": evidence_rows,
         "claim_links": [item.to_dict() for item in state.evidence_links if item.evidence_id in {row["evidence_id"] for row in evidence_rows}],
         "unresolved_conflicts": [item.to_dict() for item in (gate.conflicts if gate else state.conflict_gaps)],
@@ -1296,6 +1433,10 @@ def _format_evidence_brief(brief: Mapping[str, Any]) -> str:
         lines.append("未闭合关键结论：" + ", ".join(str(item) for item in open_claims))
     if conflicts:
         lines.append("仍有未解决冲突；回答必须并列呈现冲突证据。")
+    if brief.get("conditional_wording_required") is True:
+        lines.append(
+            "结论约束：研究尚未通过完整证据核验；只能使用条件化措辞，不得输出无保留强结论。"
+        )
     lines.append(str(brief.get("answer_instruction") or ""))
     return "\n".join(lines)[:20000]
 

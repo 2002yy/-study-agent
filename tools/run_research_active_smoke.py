@@ -40,7 +40,7 @@ from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: 
 from src.web.research.contracts import ResearchBudget, build_research_state  # noqa: E402
 from src.web.research.state import attach_claim_engine_state  # noqa: E402
 
-SMOKE_SCHEMA_VERSION = "research-quality-b5-active-smoke-v1"
+SMOKE_SCHEMA_VERSION = "research-quality-b5-active-smoke-v2"
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "research_quality" / "B5_ACTIVE_SEARXNG_SMOKE.json"
 DEFAULT_QUESTION = (
     "What open-source license does the FastAPI project use?"
@@ -113,12 +113,19 @@ def run_smoke(*, question: str, output: Path) -> dict[str, Any]:
     metrics = context.get(ACTIVE_RESEARCH_METRICS_KEY, {})
     progress = _research_progress(completed)
 
+    # B5-H4: read the persisted provenance field that production actually
+    # stores ("providers_attempted") and require SearXNG to be present, so a
+    # run served by other providers can never pass as a real-SearXNG smoke.
     providers = sorted(
         {
             provider
             for attempt in completed.query_attempts
-            for provider in (attempt.get("providers") or [])
+            for provider in (attempt.get("providers_attempted") or [])
         }
+    )
+    searxng_attempted = any(
+        "searxng" in (attempt.get("providers_attempted") or [])
+        for attempt in completed.query_attempts
     )
     artifact: dict[str, Any] = {
         "schema_version": SMOKE_SCHEMA_VERSION,
@@ -136,10 +143,11 @@ def run_smoke(*, question: str, output: Path) -> dict[str, Any]:
         "search": {
             "query_attempt_count": len(completed.query_attempts),
             "providers": providers,
+            "searxng_attempted": searxng_attempted,
             "provider_audits": [
                 {
                     "query": attempt.get("query"),
-                    "providers": attempt.get("providers"),
+                    "providers_attempted": attempt.get("providers_attempted"),
                     "provider_audit": bool(attempt.get("provider_audit")),
                 }
                 for attempt in completed.query_attempts
@@ -219,13 +227,26 @@ def main() -> int:
                 "reads": artifact["reads"]["selected_source_count"],
                 "clusters": artifact["candidates"]["clusters"],
                 "model_calls": artifact["model_calls"]["count"],
+                "searxng_attempted": artifact["search"]["searxng_attempted"],
             },
             ensure_ascii=False,
             sort_keys=True,
         )
     )
     gate = artifact["gate"]["status"]
-    return 0 if gate in {"pass", "partial"} else 2
+    provenance_ok = artifact["search"]["searxng_attempted"] is True
+    conditional_ok = (
+        artifact["brief_excerpt"]["conditional_wording_required"]
+        == (gate != "pass")
+    )
+    if not conditional_ok:
+        print(
+            json.dumps(
+                {"error": "conditional_wording_required inconsistent with gate"},
+                ensure_ascii=False,
+            )
+        )
+    return 0 if gate in {"pass", "partial"} and provenance_ok and conditional_ok else 2
 
 
 if __name__ == "__main__":
