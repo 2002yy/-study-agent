@@ -71,6 +71,7 @@ from src.web.research.runtime import (
 from src.web.research.scheduler import (
     ReadSchedulerPolicy,
     ReadSchedulingCancelled,
+    is_schedulable_candidate,
     plan_read_wave,
 )
 from src.web.research.source_cluster import cluster_candidate_sources
@@ -1038,9 +1039,15 @@ def _fair_read_plan(
             )
             if not ranked:
                 continue
-            # Reusable candidates are already in the physical plan: binding
-            # them to this claim costs extraction work only, never read budget.
-            reusable = tuple(item for item in ranked if item.candidate.id in physical_ids)
+            # Reusable candidates must obey the same scheduler eligibility
+            # predicate as fresh ones (H9): lead_only candidates without a
+            # provenance-grade gain signal are never schedulable, even when
+            # their physical read already exists.
+            reusable = tuple(
+                item
+                for item in ranked
+                if item.candidate.id in physical_ids and is_schedulable_candidate(item)
+            )
             fresh = tuple(item for item in ranked if item.candidate.id not in physical_ids)
             remaining = state.budget.max_reads - state.budget.reads_used - len(physical)
             budget_open = remaining > 0 and (allow_reserve or len(physical) < normal_limit)
@@ -1078,8 +1085,6 @@ def _fair_read_plan(
             for item in reusable:
                 if slots <= 0:
                     break
-                if item.eligibility == "rejected":
-                    continue
                 if item.assessment.cluster_id in claim_clusters.get(claim_id, set()):
                     continue
                 _bind(item.candidate.id, claim_id, item)

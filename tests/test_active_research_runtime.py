@@ -1066,3 +1066,120 @@ def test_smoke_searxng_success_requires_ok_results() -> None:
         }
     ]
     assert module._searxng_success(ok_but_empty) is False
+
+def test_reusable_candidates_obey_scheduler_eligibility() -> None:
+    """B5-H9: reusable candidates obey the same eligibility predicate as fresh.
+
+    Claim B ranks the already-read shared candidate X as lead_only without any
+    provenance-grade gain signal: it must not be bound to claim B even though
+    its physical read exists, while a legitimate fresh Y is still selected and
+    a lead_only candidate carrying a gain signal (Z) is not rejected.
+    """
+    from src.application.active_research_runtime import _fair_read_plan
+    from src.web.research.candidate_assessment import CandidateSemanticAssessment
+    from src.web.research.candidate_pool import CandidatePoolItem
+    from src.web.research.candidate_ranking import RankedCandidate
+    from src.web.research.contracts import (
+        EvidenceRequirement,
+        ResearchClaim,
+        ResearchQuestion,
+    )
+
+    question = ResearchQuestion(id="q1", question_surface="question")
+
+    def claim(claim_id: str) -> ResearchClaim:
+        return ResearchClaim(
+            id=claim_id,
+            question_id="q1",
+            text="claim",
+            kind="factual",
+            priority="critical",
+            state="pending",
+            evidence_requirement=EvidenceRequirement(),
+        )
+
+    def ranked(
+        candidate_id: str,
+        cluster_id: str,
+        rank: int,
+        *,
+        eligibility: str = "eligible",
+        signals: tuple[str, ...] = ("new_primary",),
+    ) -> RankedCandidate:
+        candidate = CandidatePoolItem(
+            id=candidate_id,
+            canonical_url=f"https://x.example/{candidate_id}",
+            url=f"https://x.example/{candidate_id}",
+            title=candidate_id,
+            snippet="",
+            source="",
+            published_at="",
+            query_ids=("q1",),
+            intents=(),
+            providers=("searxng",),
+            first_seen_rank=rank,
+        )
+        assessment = CandidateSemanticAssessment(
+            candidate_id=candidate_id,
+            relevance="answer_relevant",
+            relevance_confidence=0.9,
+            source_role="primary",
+            source_role_confidence=0.9,
+            cluster_id=cluster_id,
+            expected_gain_signals=signals,
+            freshness_score=0.5,
+            estimated_read_cost=1.0,
+        )
+        return RankedCandidate(
+            candidate=candidate,
+            assessment=assessment,
+            rank=rank,
+            eligibility=eligibility,
+            reason_codes=(),
+            new_cluster=False,
+            expected_information_gain=1,
+        )
+
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim("claim_A"), claim("claim_B")),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    rankings = {
+        "claim_A": (ranked("X", "cluster_X", 1),),
+        "claim_B": (
+            ranked("X", "cluster_X", 1, eligibility="lead_only", signals=()),
+            ranked("Y", "cluster_Y", 2),
+            ranked("Z", "cluster_Z", 3, eligibility="lead_only", signals=("new_primary",)),
+        ),
+    }
+
+    physical, targets = _fair_read_plan(state, rankings)
+
+    b_pairs = {
+        (item["candidate_id"], item["cluster_id"])
+        for item in targets
+        if item["claim_id"] == "claim_B"
+    }
+    # H9: X is lead_only without gain signals, so it must not be bound to
+    # claim B even though it was already physically read for claim A.
+    assert ("X", "cluster_X") not in b_pairs
+    # The legitimate fresh candidate fills the wave; lead_only with a gain
+    # signal (Z) stays schedulable in the next wave.
+    assert ("Y", "cluster_Y") in b_pairs
+    assert ("Z", "cluster_Z") in b_pairs
+    assert "X" not in {item["candidate_id"] for item in physical if item["claim_id"] == "claim_B"}

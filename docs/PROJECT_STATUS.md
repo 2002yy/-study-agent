@@ -73,6 +73,10 @@
 - **H8 ✅ cluster diversity 跨 reusable+fresh。** 根因：reusable 先占 cluster 后，`plan_read_wave(fresh)` 只保证 fresh 内部 cluster-diverse，fresh 接受循环无已占 cluster 检查 → 同 claim 浪费 slot 读取同 cluster 候选。修复：per-claim 跨波累计 `claim_clusters`（`_bind` 时登记），reusable 与 fresh 接受循环均检查已占 cluster，fresh 被跳过**不消耗 slot**（继续扫描后续候选）。回归：直接单测 `_fair_read_plan`（claim_B rankings = [P(X) 已绑, Q(X) fresh, R(Y) fresh]，wave2 必须跳 Q 取 R，physical 不含 Q）。
 - **Round 2 门禁（全绿）。** 全量后端 pytest **1375/1375**（+2：H8/H6 回归）；focused **38/38**；Ruff 通过；mypy **122/128**；`git diff --check` 通过；真实 SearXNG smoke v2 复跑 exit 0（7 candidates、`searxng_attempted=true`、`searxng_success=true`、conditional 一致）。
 
+**Codex Review round 3（2026-08-28，同分支补修）：**
+- **H9 ✅ reusable 遵循与 fresh 相同的调度资格谓词。** 根因：H3/H8 后 reusable 候选只检查 `eligibility == "rejected"`，而 fresh 走 `plan_read_wave()` 还有 `lead_only` 无 provenance 级 gain signal 不可调度的更严规则（`scheduler.py`）→ 已物理读过的 lead_only 无信号候选会被错误绑定到新 claim（占 wave slot + 触发多余 extraction 调用）。修复：抽共享谓词 `is_schedulable_candidate()`（rejected 不可调度；lead_only 需 new_primary/new_provenance_lead/new_contradiction 之一），`plan_read_wave()` 与 `_fair_read_plan()` reusable 路径统一使用，两条路径不再漂移。回归：claim_B rankings = [X(lead_only 无信号, 已物理读), Y(eligible fresh), Z(lead_only 有 new_primary)] → X 不被绑定、Y 正常占位、Z 仍可调度（证明不是整波被清空）。
+- **Round 3 门禁（全绿）。** 全量后端 pytest **1376/1376**（+1 H9 回归）；focused **39/39**；Ruff 通过；mypy **122/128**；`git diff --check` 通过。
+
 | Debt | 判定 | 影响 | 执行时机 |
 | --- | --- | --- | --- |
 | H1 P1 model semantic-result crash consistency | 成立，严重 | 崩溃恢复可能从"可恢复"变成 runtime failure | 下一批第 1 个修 |
