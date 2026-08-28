@@ -167,12 +167,20 @@ def evaluate_evidence_gate(state: ResearchState) -> EvidenceGateResult:
     )
 
 
-def _link_is_eligible(
+def evidence_link_structurally_eligible(
     *,
     claim: ResearchClaim,
     link: ResearchClaimEvidenceLink,
     evidence: ResearchEvidence | None,
 ) -> bool:
+    """Single source of truth for structural link eligibility (R2).
+
+    Shared by the Evidence Gate and Evidence Gain so the two can never drift
+    into a second, weaker eligibility truth: the role must be one the claim's
+    requirement accepts, the link must carry a cluster, the evidence must be
+    extraction-eligible, and (unless the requirement waives it) it must come
+    from a successful read.
+    """
     if evidence is None:
         return False
     if link.source_role not in claim.evidence_requirement.source_roles:
@@ -186,12 +194,13 @@ def _link_is_eligible(
     return evidence.lifecycle_status != "rejected"
 
 
-def _link_meets_freshness(
+def evidence_link_meets_freshness(
     *,
     claim: ResearchClaim,
     evidence: ResearchEvidence | None,
     reference_date: str,
 ) -> bool:
+    """Single source of truth for freshness eligibility (shared with Gain)."""
     requirement = claim.evidence_requirement
     if requirement.max_age_days is None and not requirement.requires_dated_evidence:
         return True
@@ -208,6 +217,43 @@ def _link_meets_freshness(
     if requirement.max_age_days is not None and age_days > requirement.max_age_days:
         return False
     return True
+
+
+def evidence_link_eligibility(
+    *,
+    claim: ResearchClaim,
+    link: ResearchClaimEvidenceLink,
+    evidence: ResearchEvidence | None,
+    reference_date: str,
+) -> bool:
+    """Full (structural + freshness) eligibility, shared by Gate and Gain."""
+    return evidence_link_structurally_eligible(
+        claim=claim, link=link, evidence=evidence
+    ) and evidence_link_meets_freshness(
+        claim=claim, evidence=evidence, reference_date=reference_date
+    )
+
+
+def _link_is_eligible(
+    *,
+    claim: ResearchClaim,
+    link: ResearchClaimEvidenceLink,
+    evidence: ResearchEvidence | None,
+) -> bool:
+    return evidence_link_structurally_eligible(
+        claim=claim, link=link, evidence=evidence
+    )
+
+
+def _link_meets_freshness(
+    *,
+    claim: ResearchClaim,
+    evidence: ResearchEvidence | None,
+    reference_date: str,
+) -> bool:
+    return evidence_link_meets_freshness(
+        claim=claim, evidence=evidence, reference_date=reference_date
+    )
 
 
 def _conflict_for_claim(
