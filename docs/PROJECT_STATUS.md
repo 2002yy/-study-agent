@@ -1,7 +1,7 @@
 # Study Agent 当前状态
 
-> **唯一进度入口**  
-> 更新：2026-08-27
+> **唯一进度入口**
+> 更新：2026-08-28
 > 产品定义：**Study Agent 是长期保持“正在学什么、已经确认什么、还不会什么、下一步是什么”的个人学习工作台。**
 
 本文件只维护当前事实、可复核证据、缺口和执行顺序。不得新增并列长期 STATUS / ROADMAP / NEXT_PHASE / AUDIT 文档。
@@ -10,14 +10,13 @@
 
 > 新窗口 / 新 Agent 冷启动时先读本节，再按链接读取本轮所需合同；历史章节保留证据与决策时间语义，不拥有比本节更新的“当前下一步”。
 
-- **Delivery lineage：**本批基于 B4 merge commit `1b14df25e6cd6a572cc65dfbbe549081875c8d24`（拉取时 `main == origin/main`）构建；B5 作为其上的单一大批 successor 施工，精确交付 SHA 以最终 Git/CI 证据为准，避免状态文件自引用不可能固定的自身 SHA。
-- **Remote CI：**B4 exact head `4c20d6b85404b893cb80c09a7a9a5e8685552cae` 与 merge 后 `main@1b14df25e` 的 [#33067496392](https://github.com/2002yy/study-agent/actions/runs/33067496392) 均为 `completed / success`；pytest、RAG K1、Ruff、package、detect-secrets、expanded mypy baseline、frontend test/build、Browser Golden Journeys 与 real-stack browser gates 全绿。**B4 Decision：REMOTE GO / MERGED。**
-- **Current initiative：**Research Quality Claim Engine（RQCE）P1-B5 active single-wave runtime。A1–A4/B1–B4 的 query/candidate/assessment/ranking/scheduler、claim/model/runtime foundation、all-provider search、精确 provenance、injectable gateway 与 per-run active dispatch 已进入 `main`；本批只在持久化 `mode=active` 的 WebLookupRun 上接通单轮证据链，不新增第四条 research pipeline。
+- **Delivery lineage：**B5（PR #132）→ `main@5d620fe0`；B5-Hardening（PR #133，head `c4745dc`）→ merge commit `fe308718`；状态收尾 commit `163aa3e`。
+- **Remote CI：**PR #133 exact head `c4745dc` 全门禁 success；merge 后 `main@fe308718` 的 CI [#33178714333](https://github.com/2002yy/study-agent/actions/runs/33178714333) `completed / success`。**B5 + B5-Hardening = REMOTE GO / DELIVERED。**
+- **Current initiative：**RQCE-P1-C 子批 1：Evidence Gain + Saturation contracts。先冻结 deterministic gain evaluator、per-gap/per-claim saturation state 与测试矩阵；本批**不接** multi-wave runtime loop，不修改 `ActiveResearchRuntimeExecutor`。
+- **Runtime status：**active single-wave production executor 已交付并经 B5-Hardening（H1–H9 post-merge review debt 全部修复）：Claim Plan → Gap → query batch → CandidatePool → assessment/rank → cluster-diverse read → strict extraction → Evidence Gate → Evidence Brief → durable continuation；checkpoint 边界 crash-consistent、candidate cap 约束外部搜索、physical read 与 claim-evidence binding 分离、smoke v2 断言 `searxng_success`、brief 携带 `conditional_wording_required` 并被 formatter 消费、reusable/fresh 共享 scheduler eligibility 谓词。当前尚未实现 multi-wave saturation / ResearchStopGate production loop。
+- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + B5-Hardening = **REMOTE GO / DELIVERED**；P1 multi-wave = **NOT IMPLEMENTED**；RQ1 bounded default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
+- **唯一下一步：**只施工 Evidence Gain + Saturation contracts（`src/web/research/evidence_gain.py`：`EvidenceGainResult` / `SaturationState` / `evaluate_evidence_gain(before, after)` / per-gap/per-claim saturation 更新）；substantive gain 仅 6 类（new_eligible_evidence、new_independent_cluster、better_source_role、new_contradiction、new_provenance_lead、claim_status_improvement）；新 URL / 新 search result / result_count 增长 / 同 cluster 重复证据单独都不算 gain；连续 2 个 query batches 无实质 gain → SATURATED（per Gap / per Claim，非全局计数），Critical/Conflict 可额外获得第三批。完成后进入子批 2（multi-wave durable runtime loop）→ 子批 3（ResearchStopGate + budget + resume + steering）→ bounded 12-case qualification → P2。
 - **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0 A0–C5-C（contracts/state/trace/policy/gates/20-case harness/live semantic audit）；P1-A0 Truth Fix（四层 retrieval truth、50 候选独立人工审计、taxonomy 修正、V2 report aggregate 修正）。
-- **Runtime status：**B4 已实现 per-run dispatch：只有通过校验的 `claim_engine.mode=active` 使用 ActiveResearchGateway，off/shadow/缺失/损坏仍走 legacy；provider audit 已与 repository checkpoint 同批持久化。但 active 目前仍执行 legacy WebLookupService loop，Gap Planner、CandidatePool、严格 assessment、role-aware ranking、read scheduler、Extractor、Evidence Gate 与 Evidence Brief 尚未由 production executor 串联。
-- **GO / NO-GO：**RQCE-P0 foundation、P1-A0、A1–A4/B1–B4 = **REMOTE GO / DELIVERED**；B5 = **IMPLEMENTATION IN PROGRESS / NO-GO**；RQ1 bounded activation 与 G17-LAN 仍 **NO-GO**。B5 未经本节 Exit Gate 不得宣称 active research 已完整启用。
-- **唯一下一步：**实现并验证本节冻结的 B5 单轮 active runtime；同一大批完成文档、后端、UI、synthetic/慢取消/真实 SearXNG smoke 后统一提交。不得在本批引入多轮饱和、独立 synthesis 模型或 live 10 硬 CI。
-- **RQCE-P1 A1–A3 Gate：**focused 2–4 intent query + full planned-query batch；CandidatePool canonicalize/dedupe/provenance；保守 cluster proposal；独立于 eval 的 strict `candidate-assessment-v1`；硬 evidence requirement 优先的 semantic rerank；cluster-diverse small read wave、conflict reserve、deadline/budget/cancel/checkpoint。legacy `search_detailed()` / standard/deep 用户路径保持不变；无真实 active adapter 前只交付组件证据，不宣称 production research 已启用。
 - **P0-C5 当前事实：**已切断 Gold→Shadow 决策输入，Gold 只用于事后评分；freshness 已进入 EvidenceRequirement/Evidence/Gate；primary denominator、Useful Read 与 evidence-linked critical coverage 口径已修正。frozen 10 的新诊断为 false closure 7、gold-blind shadow caught 6、missed 1、overblocked 0；该结果仍是预记录 projection 的组件证据，不是 runtime observer 证据。
 - **Live 10 / 50-candidate Truth Fix：**Provider returned=50；production `worth_reading=true`=50；benchmark surface match=10；manual `ANSWER_RELEVANT`=5、`TOPIC_ONLY`=10、`OFF_TARGET`=35。新 taxonomy：`NO_ANSWER_RELEVANT_CANDIDATE=7`、`BENCHMARK_MATCH_FALSE_NEGATIVE=0`、`CLAIM_PROJECTION_UNAVAILABLE=2`、`COMPLETED_WITH_EVIDENCE=1`；旧 `RELEVANCE_FALSE_NEGATIVE=7` 结论已撤销。
 - **Dominant observed bottleneck：**pre-read retrieval quality。证据链指向自然语言 query 缺 focused intent、degraded-provider fallback、first-nonempty acceptance，以及 production assessor 对单词重合的 false positive；reader/Evidence Gate 不是本轮主瓶颈。P1 顺序固定为 SearchIntent + CandidatePool → role-aware/semantic rerank → Read Scheduler，而不是先调 relevance 阈值。

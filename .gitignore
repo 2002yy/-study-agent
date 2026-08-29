@@ -52,3 +52,4 @@ agent_core_roles_*.docx
 visual_assets_preview*.jpg
 .claude/
 frontend/playwright-g12-report/
+pytest_full.log
