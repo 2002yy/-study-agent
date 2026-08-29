@@ -139,7 +139,7 @@ class EvidenceGainResult:
                 raise ValueError(f"invalid {key}")
             if len(set(ids_raw)) != len(ids_raw):
                 raise ValueError(f"duplicate ids in {key}")
-        metrics_raw = raw.get("metrics") or {}
+        metrics_raw = raw.get("metrics", {})
         if not isinstance(metrics_raw, Mapping):
             raise ValueError("metrics must be an object")
         metrics: dict[str, int] = {}
@@ -147,7 +147,7 @@ class EvidenceGainResult:
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError("metrics must be non-negative integers")
             metrics[str(key)] = value
-        raw_by_claim = raw.get("gain_reasons_by_claim") or {}
+        raw_by_claim = raw.get("gain_reasons_by_claim", {})
         if not isinstance(raw_by_claim, Mapping):
             raise ValueError("gain_reasons_by_claim must be an object")
         reasons_by_claim: dict[str, tuple[EvidenceGainReason, ...]] = {}
@@ -585,7 +585,7 @@ class SaturationState:
             raise ValueError("saturation state must be an object")
 
         def counters(key: str) -> dict[str, int]:
-            raw_counters = raw.get(key) or {}
+            raw_counters = raw.get(key, {})
             if not isinstance(raw_counters, Mapping):
                 raise ValueError(f"{key} must be an object")
             result: dict[str, int] = {}

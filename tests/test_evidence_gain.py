@@ -685,12 +685,14 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
             {"substantive_gain": True, "gain_reasons": ["not_a_reason"]}
         )
     # R7: the by-claim mapping must agree with the batch-level truth.
+    # Payloads use JSON-real shapes (list values) so these guards actually
+    # execute the union/duplicate checks instead of the type check.
     with pytest.raises(ValueError):
         EvidenceGainResult.from_dict(
             {
                 "substantive_gain": True,
                 "gain_reasons": ["new_independent_cluster"],
-                "gain_reasons_by_claim": {"C1": ("new_contradiction",)},
+                "gain_reasons_by_claim": {"C1": ["new_contradiction"]},
                 "affected_claim_ids": ["C1"],
                 "affected_gap_ids": [],
             }
@@ -710,7 +712,9 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
             {
                 "substantive_gain": True,
                 "gain_reasons": ["new_independent_cluster"],
-                "gain_reasons_by_claim": {"C1": ("new_independent_cluster", "new_independent_cluster")},
+                "gain_reasons_by_claim": {
+                    "C1": ["new_independent_cluster", "new_independent_cluster"]
+                },
                 "affected_claim_ids": ["C1"],
                 "affected_gap_ids": [],
             }
@@ -723,6 +727,34 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
         EvidenceGainResult.from_dict("not an object")
     with pytest.raises(ValueError):
         SaturationState.from_dict("not an object")
+    # R11: a field present with the WRONG type (even empty) fails closed
+    # instead of being silently washed into an empty object.
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(
+            {
+                "substantive_gain": False,
+                "gain_reasons": [],
+                "gain_reasons_by_claim": [],
+                "affected_claim_ids": [],
+                "affected_gap_ids": [],
+                "metrics": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(
+            {
+                "substantive_gain": True,
+                "gain_reasons": ["new_independent_cluster"],
+                "gain_reasons_by_claim": {"C1": ["new_independent_cluster"]},
+                "affected_claim_ids": ["C1"],
+                "affected_gap_ids": [],
+                "metrics": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        SaturationState.from_dict(
+            {"no_gain_batches_by_claim": [], "no_gain_batches_by_gap": []}
+        )
 
 
 def test_weak_but_eligible_evidence_is_gain_by_contract() -> None:
