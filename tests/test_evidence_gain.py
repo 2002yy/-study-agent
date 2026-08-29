@@ -410,6 +410,7 @@ def test_gain_result_roundtrips_through_dict() -> None:
 
     assert restored.substantive_gain == result.substantive_gain
     assert restored.gain_reasons == result.gain_reasons
+    assert restored.gain_reasons_by_claim == result.gain_reasons_by_claim
     assert restored.affected_claim_ids == result.affected_claim_ids
     assert restored.affected_gap_ids == result.affected_gap_ids
     assert restored.metrics == result.metrics
@@ -615,11 +616,14 @@ def test_gap_attribution_is_not_broadcast_from_claim_gain() -> None:
     )
     assert evaluate_evidence_gain(before, after).substantive_gain is True
 
-    # This batch targeted G1 and G2; both are served by the claim-level gain.
+    # This batch targeted G1 and G2. G1 (desired primary) is credited by the
+    # R5 role rule (primary absent -> present); G2 is generic with no
+    # per-gap provenance and two targeted gaps on the claim, so R6 fail-closed
+    # refuses to credit it from the claim-level gain.
     result = evaluate_evidence_gain(before, after, target_gap_ids=("G1", "G2"))
-    assert result.affected_gap_ids == ("G1", "G2")
+    assert result.affected_gap_ids == ("G1",)
 
-    # But a batch targeting only G2 must not reset G1's saturation counter.
+    # A batch targeting only G2 must not reset G1's saturation counter.
     result_g2_only = evaluate_evidence_gain(before, after, target_gap_ids=("G2",))
     assert result_g2_only.affected_claim_ids == ("C1",)
     assert result_g2_only.affected_gap_ids == ("G2",)
@@ -661,12 +665,14 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
     valid = EvidenceGainResult(
         substantive_gain=True,
         gain_reasons=("new_independent_cluster",),
+        gain_reasons_by_claim={"C1": ("new_independent_cluster",)},
         affected_claim_ids=("C1",),
         affected_gap_ids=("G1",),
         metrics={"new_cluster_claims": 1},
     )
     restored = EvidenceGainResult.from_dict(valid.to_dict())
     assert restored.substantive_gain is True
+    assert restored.gain_reasons_by_claim == {"C1": ("new_independent_cluster",)}
 
     with pytest.raises(ValueError):
         EvidenceGainResult.from_dict({"substantive_gain": True, "gain_reasons": []})
@@ -678,6 +684,37 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
         EvidenceGainResult.from_dict(
             {"substantive_gain": True, "gain_reasons": ["not_a_reason"]}
         )
+    # R7: the by-claim mapping must agree with the batch-level truth.
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(
+            {
+                "substantive_gain": True,
+                "gain_reasons": ["new_independent_cluster"],
+                "gain_reasons_by_claim": {"C1": ("new_contradiction",)},
+                "affected_claim_ids": ["C1"],
+                "affected_gap_ids": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(
+            {
+                "substantive_gain": True,
+                "gain_reasons": ["new_independent_cluster"],
+                "gain_reasons_by_claim": {},
+                "affected_claim_ids": ["C1"],
+                "affected_gap_ids": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(
+            {
+                "substantive_gain": True,
+                "gain_reasons": ["new_independent_cluster"],
+                "gain_reasons_by_claim": {"C1": ("new_independent_cluster", "new_independent_cluster")},
+                "affected_claim_ids": ["C1"],
+                "affected_gap_ids": [],
+            }
+        )
     with pytest.raises(ValueError):
         SaturationState.from_dict({"no_gain_batches_by_claim": {"C1": -1}})
     with pytest.raises(ValueError):
@@ -686,6 +723,43 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
         EvidenceGainResult.from_dict("not an object")
     with pytest.raises(ValueError):
         SaturationState.from_dict("not an object")
+
+
+def test_weak_but_eligible_evidence_is_gain_by_contract() -> None:
+    """Frozen contract note for batch 2: Gain reuses the Gate's eligibility
+    layer only. The strength >= STRONG_EVIDENCE_THRESHOLD check is a Gate
+    closure layer and deliberately does NOT gate saturation credit — weak but
+    eligible evidence is still real evidence progress for saturation."""
+    before = _single_claim_state("C1")
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(
+            ResearchEvidence(
+                evidence_id="E1",
+                locator="anchor",
+                lifecycle_status="read",
+                extraction_status="eligible",
+            ),
+        ),
+        links=(
+            ResearchClaimEvidenceLink(
+                link=ClaimEvidenceLinkV1(
+                    claim_id="C1",
+                    evidence_id="E1",
+                    support_type="supports",
+                    confidence=0.5,
+                ),
+                source_role="primary",
+                source_cluster_id="CX",
+                locator="anchor",
+            ),
+        ),
+    )
+
+    result = evaluate_evidence_gain(before, after)
+
+    assert result.substantive_gain is True
+    assert "new_eligible_evidence" in result.gain_reasons
 
 def test_cross_claim_reason_leakage_is_blocked() -> None:
     """R4: Claim B's role gap must not be reset by Claim A's role upgrade."""
@@ -784,3 +858,73 @@ def test_desired_role_gap_credited_only_when_role_appears() -> None:
 
     assert result.substantive_gain is True
     assert result.affected_gap_ids == ("G",)
+
+def test_multi_target_attribution_requires_explicit_provenance() -> None:
+    """R6 fail-closed: with several targeted gaps and no provenance, a claim
+    gain is never broadcast to all of them."""
+    gap_g1 = _gap("G1", "C1", gap_type="independent_sources_missing")
+    gap_g2 = _gap("G2", "C1", gap_type="provenance_lead_missing")
+    before = _state(claims=(_claim("C1"),), gaps=(gap_g1, gap_g2))
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"), _evidence("E2")),
+        links=(
+            _link("C1", "E1", relation="supports", cluster_id="CX"),
+            _link("C1", "E2", relation="lead", cluster_id="CY"),
+        ),
+        gaps=(gap_g1, gap_g2),
+    )
+
+    result = evaluate_evidence_gain(before, after, target_gap_ids=("G1", "G2"))
+
+    assert result.substantive_gain is True
+    assert "new_provenance_lead" in result.gain_reasons
+    # Fail-closed: no per-gap provenance, so neither gap may claim the gain.
+    assert result.affected_gap_ids == ()
+    state = update_saturation(
+        SaturationState(no_gain_batches_by_gap={"G1": 1, "G2": 1}),
+        result,
+        handled_gap_ids=("G1", "G2"),
+    )
+    assert state.no_gain_batches_by_gap == {"G1": 2, "G2": 2}
+
+
+def test_gap_batch_delta_provenance_attributes_gain_to_owning_gap() -> None:
+    """R6: with explicit provenance, the gain credits only the gap that
+    produced it — G1 must increment while G2 resets."""
+    from src.web.research.evidence_gain import GapBatchDelta
+
+    gap_g1 = _gap("G1", "C1", gap_type="independent_sources_missing")
+    gap_g2 = _gap("G2", "C1", gap_type="provenance_lead_missing")
+    before = _state(claims=(_claim("C1"),), gaps=(gap_g1, gap_g2))
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"), _evidence("E2")),
+        links=(
+            _link("C1", "E1", relation="supports", cluster_id="CX"),
+            _link("C1", "E2", relation="lead", cluster_id="CY"),
+        ),
+        gaps=(gap_g1, gap_g2),
+    )
+
+    result = evaluate_evidence_gain(
+        before,
+        after,
+        target_gap_ids=("G1", "G2"),
+        gain_provenance_by_gap={
+            "G1": GapBatchDelta(gap_id="G1"),
+            "G2": GapBatchDelta(
+                gap_id="G2",
+                produced_provenance_lead_ids=("E2",),
+            ),
+        },
+    )
+
+    assert result.affected_gap_ids == ("G2",)
+    state = update_saturation(
+        SaturationState(no_gain_batches_by_gap={"G1": 1, "G2": 1}),
+        result,
+        handled_gap_ids=("G1", "G2"),
+    )
+    assert state.no_gain_batches_by_gap["G1"] == 2
+    assert state.no_gain_batches_by_gap["G2"] == 0

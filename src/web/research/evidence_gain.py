@@ -152,12 +152,29 @@ class EvidenceGainResult:
             raise ValueError("gain_reasons_by_claim must be an object")
         reasons_by_claim: dict[str, tuple[EvidenceGainReason, ...]] = {}
         for claim_id, claim_reasons in raw_by_claim.items():
+            if not isinstance(claim_id, str) or not claim_id:
+                raise ValueError("gain_reasons_by_claim keys must be non-empty strings")
             if not isinstance(claim_reasons, list) or any(
                 not isinstance(reason, str) or reason not in _GAIN_REASONS
                 for reason in claim_reasons
             ):
                 raise ValueError("invalid gain_reasons_by_claim entry")
-            reasons_by_claim[str(claim_id)] = tuple(claim_reasons)  # type: ignore[arg-type]
+            if len(set(claim_reasons)) != len(claim_reasons):
+                raise ValueError("duplicate reasons in gain_reasons_by_claim entry")
+            reasons_by_claim[claim_id] = tuple(claim_reasons)  # type: ignore[arg-type]
+        # R7: the by-claim mapping is a durable audit fact, so it must agree
+        # with the batch-level truth exactly.
+        if set(reasons_by_claim) != set(raw["affected_claim_ids"]):
+            raise ValueError("gain_reasons_by_claim keys must match affected_claim_ids")
+        union_reasons = {
+            reason
+            for claim_reasons in reasons_by_claim.values()
+            for reason in claim_reasons
+        }
+        if union_reasons != set(raw_reasons):
+            raise ValueError("gain_reasons_by_claim must union to gain_reasons")
+        if not substantive and (raw["affected_claim_ids"] or reasons_by_claim):
+            raise ValueError("no-gain result must not carry affected ids")
         return cls(
             substantive_gain=substantive,
             gain_reasons=tuple(raw_reasons),  # type: ignore[arg-type]
@@ -249,29 +266,69 @@ def _best_role_rank(links: Mapping[str, set[tuple[str, str, str]]], claim_id: st
     return max((_ROLE_RANK.get(role, 0) for role in roles), default=-1)
 
 
+@dataclass(frozen=True)
+class GapBatchDelta:
+    """Explicit per-gap provenance for one query batch (R6).
+
+    ``target_gap_ids`` only proves that a gap was processed; it cannot prove
+    which gain came from which gap once a claim serves several gaps in one
+    batch. Batch 2's runtime will record, per targeted gap, which evidence /
+    conflict gaps / provenance leads that gap actually produced. Gap-level
+    attribution then intersects this explicit provenance with the snapshot
+    diff instead of guessing from gain reason names.
+    """
+
+    gap_id: str
+    produced_evidence_ids: tuple[str, ...] = ()
+    produced_conflict_gap_ids: tuple[str, ...] = ()
+    produced_provenance_lead_ids: tuple[str, ...] = ()
+
+
 def _gap_credited(
     gap: Any,
     claim_reasons: set[EvidenceGainReason],
     before_links: Mapping[str, set[tuple[str, str, str]]],
     after_links: Mapping[str, set[tuple[str, str, str]]],
+    *,
+    delta: GapBatchDelta | None,
+    new_evidence_ids: set[str],
+    new_conflict_gap_ids: set[str],
+    new_lead_ids: set[str],
+    target_gap_count_for_claim: int,
 ) -> bool:
-    """R3/R5: decide whether a targeted gap is actually credited by this batch.
+    """R3/R5/R6: decide whether a targeted gap is actually credited.
 
     Attribution uses only the reasons of the gap's OWN claim (R4: no
-    cross-claim reason leakage), and a desired_source_role gap is credited by
-    comparing the actual Gate-eligible roles before vs after (R5) — gaining a
-    different role than the one the gap wants is real claim progress but not
-    progress for this gap.
+    cross-claim reason leakage). A desired_source_role gap is credited by
+    comparing the actual Gate-eligible roles before vs after (R5). A
+    conflict-flavoured or generic gap prefers explicit GapBatchDelta
+    provenance intersected with the snapshot diff (R6); without provenance,
+    generic attribution is only allowed when the claim served exactly one
+    target gap (fail-closed: with several targeted gaps and no provenance
+    the claim gain is never broadcast to all of them).
     """
     gap_type = str(getattr(gap, "gap_type", "")).casefold()
     if any(marker in gap_type for marker in _CONFLICT_GAP_MARKERS):
-        return "new_contradiction" in claim_reasons
+        if delta is not None:
+            if set(delta.produced_conflict_gap_ids) & new_conflict_gap_ids:
+                return True
+            return bool(set(delta.produced_evidence_ids) & new_evidence_ids) and (
+                "new_contradiction" in claim_reasons
+            )
+        return "new_contradiction" in claim_reasons and target_gap_count_for_claim == 1
     desired_role = str(getattr(gap, "desired_source_role", "") or "").strip()
     if desired_role:
         before_roles = {role for (_, role, _) in before_links.get(gap.claim_id, set())}
         after_roles = {role for (_, role, _) in after_links.get(gap.claim_id, set())}
         return desired_role not in before_roles and desired_role in after_roles
-    return bool(claim_reasons)
+    # Generic gap: explicit provenance first, fail-closed fallback second.
+    if delta is not None:
+        if set(delta.produced_evidence_ids) & new_evidence_ids:
+            return True
+        if set(delta.produced_provenance_lead_ids) & new_lead_ids:
+            return True
+        return "claim_status_improvement" in claim_reasons
+    return bool(claim_reasons) and target_gap_count_for_claim == 1
 
 
 def evaluate_evidence_gain(
@@ -279,15 +336,18 @@ def evaluate_evidence_gain(
     after: ResearchState,
     *,
     target_gap_ids: Iterable[str] = (),
+    gain_provenance_by_gap: Mapping[str, GapBatchDelta] | None = None,
 ) -> EvidenceGainResult:
     """Compare two ResearchState snapshots under the frozen 6-reason taxonomy.
 
     ``target_gap_ids`` are the gaps this batch actually served. Gap
     attribution is never broadcast from claim-level gains: only a targeted
-    gap whose own claim's gain reasons (R4) and actual role coverage (R5)
+    gap whose own claim's gain reasons (R4), actual role coverage (R5) and,
+    once a claim serves several gaps, explicit GapBatchDelta provenance (R6)
     were genuinely served by the batch is credited. The evaluation is pure
     and deterministic.
     """
+    provenance = dict(gain_provenance_by_gap or {})
     reasons: list[EvidenceGainReason] = []
     reasons_by_claim: dict[str, set[EvidenceGainReason]] = {}
     affected_claims: set[str] = set()
@@ -366,6 +426,17 @@ def evaluate_evidence_gain(
         _record("new_provenance_lead", [claim_id for claim_id, _ in new_leads])
     metrics["new_provenance_leads"] = len(new_leads)
 
+    # Snapshot diffs used by gap-level provenance intersection (R6).
+    new_evidence_ids = {
+        evidence_id
+        for claim_id, links in after_links.items()
+        for (evidence_id, _, _) in links
+        if evidence_id
+        not in {eid for (_, eid, _) in before_links.get(claim_id, set())}
+    }
+    new_conflict_gap_ids = {gap.id for gap in new_conflict_gaps}
+    new_lead_ids = {evidence_id for _, evidence_id in new_leads}
+
     # 6) claim_status_improvement: only the explicitly frozen improvement
     # edges count. Moving into "unresolved" is a legitimate terminal state,
     # never progress.
@@ -380,10 +451,16 @@ def evaluate_evidence_gain(
         _record("claim_status_improvement", improved_claims)
     metrics["claims_improved"] = len(improved_claims)
 
-    # R3/R4/R5: explicit gap attribution. Only targeted gaps whose OWN claim
-    # gained (R4: no cross-claim reason leakage) and whose type/role was
-    # genuinely served (R5: desired role must actually appear) are credited.
+    # R3/R4/R5/R6: explicit gap attribution. Only targeted gaps whose OWN
+    # claim gained (R4: no cross-claim reason leakage), whose type/role was
+    # genuinely served (R5: desired role must actually appear), and — once a
+    # claim serves several targeted gaps — whose explicit GapBatchDelta
+    # provenance intersects the snapshot diff (R6) are credited.
     targeted_ids = set(target_gap_ids)
+    targets_per_claim: dict[str, int] = {}
+    for gap in after.gaps:
+        if gap.id in targeted_ids and gap.claim_id in affected_claims:
+            targets_per_claim[gap.claim_id] = targets_per_claim.get(gap.claim_id, 0) + 1
     affected_gaps = sorted(
         gap.id
         for gap in after.gaps
@@ -393,6 +470,11 @@ def evaluate_evidence_gain(
             reasons_by_claim.get(gap.claim_id, set()),
             before_links,
             after_links,
+            delta=provenance.get(gap.id),
+            new_evidence_ids=new_evidence_ids,
+            new_conflict_gap_ids=new_conflict_gap_ids,
+            new_lead_ids=new_lead_ids,
+            target_gap_count_for_claim=targets_per_claim.get(gap.claim_id, 0),
         )
     )
 
