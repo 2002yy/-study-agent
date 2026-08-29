@@ -928,3 +928,158 @@ def test_gap_batch_delta_provenance_attributes_gain_to_owning_gap() -> None:
     )
     assert state.no_gain_batches_by_gap["G1"] == 2
     assert state.no_gain_batches_by_gap["G2"] == 0
+
+def test_delta_cannot_re_report_old_evidence_as_gain() -> None:
+    """R8: a delta re-reporting pre-existing evidence must not credit a gap."""
+    from src.web.research.evidence_gain import GapBatchDelta
+
+    gap = _gap("G", "C1", gap_type="independent_sources_missing")
+    before = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"),),
+        links=(_link("C1", "E1", source_role="primary", cluster_id="CX"),),
+        gaps=(gap,),
+    )
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"), _evidence("E2")),
+        links=(
+            _link("C1", "E1", source_role="primary", cluster_id="CX"),
+            _link("C1", "E2", source_role="independent_secondary", cluster_id="CY"),
+        ),
+        gaps=(gap,),
+    )
+
+    # Re-reporting the OLD evidence E1 must not credit the gap...
+    result_old = evaluate_evidence_gain(
+        before,
+        after,
+        target_gap_ids=("G",),
+        gain_provenance_by_gap={"G": GapBatchDelta(gap_id="G", produced_evidence_ids=("E1",))},
+    )
+    assert result_old.affected_gap_ids == ()
+
+    # ...while reporting the genuinely new E2 does.
+    result_new = evaluate_evidence_gain(
+        before,
+        after,
+        target_gap_ids=("G",),
+        gain_provenance_by_gap={"G": GapBatchDelta(gap_id="G", produced_evidence_ids=("E2",))},
+    )
+    assert result_new.affected_gap_ids == ("G",)
+
+
+def test_same_cluster_new_evidence_cannot_be_credited_via_delta() -> None:
+    """R9: a new evidence id without a frozen gain reason is not creditable."""
+    from src.web.research.evidence_gain import GapBatchDelta
+
+    gap = _gap("G", "C1", gap_type="independent_sources_missing")
+    before = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"),),
+        links=(_link("C1", "E1", source_role="primary", cluster_id="CX"),),
+        gaps=(gap,),
+    )
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"), _evidence("E2")),
+        links=(
+            _link("C1", "E1", source_role="primary", cluster_id="CX"),
+            _link("C1", "E2", source_role="primary", cluster_id="CX"),
+        ),
+        gaps=(gap,),
+    )
+
+    result = evaluate_evidence_gain(before, after)
+
+    assert result.substantive_gain is False
+    # Even a delta claiming E2 must not credit: E2 caused no frozen gain.
+    credited = evaluate_evidence_gain(
+        before,
+        after,
+        target_gap_ids=("G",),
+        gain_provenance_by_gap={"G": GapBatchDelta(gap_id="G", produced_evidence_ids=("E2",))},
+    )
+    assert credited.affected_gap_ids == ()
+
+
+def test_provenance_cannot_cross_claims() -> None:
+    """R9: Claim A's lead evidence must not credit Claim B's gap."""
+    from src.web.research.evidence_gain import GapBatchDelta
+
+    before = _state(
+        claims=(_claim("A"), _claim("B")),
+        gaps=(_gap("GB", "B", gap_type="provenance_lead_missing"),),
+    )
+    after = _state(
+        claims=(_claim("A"), _claim("B")),
+        evidence=(_evidence("EA"),),
+        links=(_link("A", "EA", relation="lead", cluster_id="CX"),),
+        gaps=(_gap("GB", "B", gap_type="provenance_lead_missing"),),
+    )
+
+    result = evaluate_evidence_gain(
+        before,
+        after,
+        target_gap_ids=("GB",),
+        gain_provenance_by_gap={
+            "GB": GapBatchDelta(gap_id="GB", produced_provenance_lead_ids=("EA",))
+        },
+    )
+
+    assert "A" in result.affected_claim_ids
+    assert "B" not in result.affected_claim_ids
+    assert result.affected_gap_ids == ()
+
+
+def test_provenance_keys_and_targets_fail_closed() -> None:
+    """R9: the provenance mapping must be self-consistent."""
+    from src.web.research.evidence_gain import GapBatchDelta
+    import pytest
+
+    gap_g1 = _gap("G1", "C1", gap_type="evidence")
+    gap_g2 = _gap("G2", "C1", gap_type="evidence")
+    before = _state(claims=(_claim("C1"),), gaps=(gap_g1, gap_g2))
+    after = _state(
+        claims=(_claim("C1"),),
+        evidence=(_evidence("E1"),),
+        links=(_link("C1", "E1", source_role="primary", cluster_id="CX"),),
+        gaps=(gap_g1, gap_g2),
+    )
+
+    # Mapping key does not match the delta's own gap id.
+    with pytest.raises(ValueError):
+        evaluate_evidence_gain(
+            before,
+            after,
+            target_gap_ids=("G1", "G2"),
+            gain_provenance_by_gap={
+                "G1": GapBatchDelta(gap_id="G2", produced_evidence_ids=("E1",))
+            },
+        )
+    # Delta references a gap that is not targeted.
+    with pytest.raises(ValueError):
+        evaluate_evidence_gain(
+            before,
+            after,
+            target_gap_ids=("G1",),
+            gain_provenance_by_gap={
+                "G2": GapBatchDelta(gap_id="G2", produced_evidence_ids=("E1",))
+            },
+        )
+
+
+def test_no_gain_result_cannot_carry_affected_gap_ids() -> None:
+    """R10: a no-gain batch must not deserialize with gap-level gains."""
+    import pytest
+
+    payload = {
+        "substantive_gain": False,
+        "gain_reasons": [],
+        "gain_reasons_by_claim": {},
+        "affected_claim_ids": [],
+        "affected_gap_ids": ["G1"],
+        "metrics": {},
+    }
+    with pytest.raises(ValueError):
+        EvidenceGainResult.from_dict(payload)

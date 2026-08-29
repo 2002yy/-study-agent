@@ -173,7 +173,9 @@ class EvidenceGainResult:
         }
         if union_reasons != set(raw_reasons):
             raise ValueError("gain_reasons_by_claim must union to gain_reasons")
-        if not substantive and (raw["affected_claim_ids"] or reasons_by_claim):
+        if not substantive and (
+            raw["affected_claim_ids"] or raw["affected_gap_ids"] or reasons_by_claim
+        ):
             raise ValueError("no-gain result must not carry affected ids")
         return cls(
             substantive_gain=substantive,
@@ -291,29 +293,34 @@ def _gap_credited(
     after_links: Mapping[str, set[tuple[str, str, str]]],
     *,
     delta: GapBatchDelta | None,
-    new_evidence_ids: set[str],
+    gain_evidence_ids: set[str],
+    lead_evidence_ids: set[str],
+    contradiction_evidence_ids: set[str],
     new_conflict_gap_ids: set[str],
-    new_lead_ids: set[str],
     target_gap_count_for_claim: int,
 ) -> bool:
-    """R3/R5/R6: decide whether a targeted gap is actually credited.
+    """R3/R5/R6/R9: decide whether a targeted gap is actually credited.
 
     Attribution uses only the reasons of the gap's OWN claim (R4: no
-    cross-claim reason leakage). A desired_source_role gap is credited by
-    comparing the actual Gate-eligible roles before vs after (R5). A
-    conflict-flavoured or generic gap prefers explicit GapBatchDelta
-    provenance intersected with the snapshot diff (R6); without provenance,
+    cross-claim reason leakage) and only per-claim evidence identities that
+    actually produced one of the six frozen reasons (R9: no flat batch-wide
+    sets, no bare "new evidence id" credit). A desired_source_role gap is
+    credited by comparing the actual Gate-eligible roles before vs after
+    (R5). A conflict-flavoured or generic gap prefers explicit GapBatchDelta
+    provenance intersected with those per-cause ids; without provenance,
     generic attribution is only allowed when the claim served exactly one
     target gap (fail-closed: with several targeted gaps and no provenance
-    the claim gain is never broadcast to all of them).
+    the claim gain is never broadcast to all of them). Claim-status
+    improvement is a claim-level fact with no evidence identity, so it never
+    credits a specific gap through a delta (R9).
     """
     gap_type = str(getattr(gap, "gap_type", "")).casefold()
     if any(marker in gap_type for marker in _CONFLICT_GAP_MARKERS):
         if delta is not None:
             if set(delta.produced_conflict_gap_ids) & new_conflict_gap_ids:
                 return True
-            return bool(set(delta.produced_evidence_ids) & new_evidence_ids) and (
-                "new_contradiction" in claim_reasons
+            return bool(
+                set(delta.produced_evidence_ids) & contradiction_evidence_ids
             )
         return "new_contradiction" in claim_reasons and target_gap_count_for_claim == 1
     desired_role = str(getattr(gap, "desired_source_role", "") or "").strip()
@@ -322,12 +329,16 @@ def _gap_credited(
         after_roles = {role for (_, role, _) in after_links.get(gap.claim_id, set())}
         return desired_role not in before_roles and desired_role in after_roles
     # Generic gap: explicit provenance first, fail-closed fallback second.
+    # Only evidence that actually caused a support/lead-side gain (R9) may
+    # credit it; claim_status_improvement has no evidence identity and no
+    # longer broadcasts through a delta.
     if delta is not None:
-        if set(delta.produced_evidence_ids) & new_evidence_ids:
+        credited_ids = gain_evidence_ids | lead_evidence_ids
+        if set(delta.produced_evidence_ids) & credited_ids:
             return True
-        if set(delta.produced_provenance_lead_ids) & new_lead_ids:
+        if set(delta.produced_provenance_lead_ids) & lead_evidence_ids:
             return True
-        return "claim_status_improvement" in claim_reasons
+        return False
     return bool(claim_reasons) and target_gap_count_for_claim == 1
 
 
@@ -352,6 +363,14 @@ def evaluate_evidence_gain(
     reasons_by_claim: dict[str, set[EvidenceGainReason]] = {}
     affected_claims: set[str] = set()
     metrics: dict[str, int] = {}
+    # R9: per-claim evidence identities that actually produced a frozen gain
+    # reason. Flat batch-wide sets cannot answer "whose evidence is this",
+    # and bare new-evidence-id credit would let same-cluster duplicates
+    # delay saturation again.
+    gain_evidence_ids: dict[str, set[str]] = {}
+    lead_evidence_ids: dict[str, set[str]] = {}
+    contradiction_evidence_ids: dict[str, set[str]] = {}
+    new_conflict_gap_ids: dict[str, set[str]] = {}
 
     def _record(reason: EvidenceGainReason, claim_ids: Iterable[str]) -> None:
         reasons.append(reason)
@@ -361,6 +380,15 @@ def evaluate_evidence_gain(
 
     before_links = _eligible_support_links(before)
     after_links = _eligible_support_links(after)
+
+    def _new_ids_for(claim_id: str) -> set[str]:
+        return {
+            evidence_id
+            for (evidence_id, _, _) in after_links.get(claim_id, set())
+        } - {
+            evidence_id
+            for (evidence_id, _, _) in before_links.get(claim_id, set())
+        }
 
     # 1) new_eligible_evidence: a claim's FIRST eligible evidence-bearing
     # evidence (0 -> 1). This is deliberately not "any new eligible
@@ -374,19 +402,39 @@ def evaluate_evidence_gain(
     )
     if first_evidence_claims:
         _record("new_eligible_evidence", first_evidence_claims)
+        for claim_id in first_evidence_claims:
+            gain_evidence_ids.setdefault(claim_id, set()).update(
+                _new_ids_for(claim_id)
+            )
     metrics["first_eligible_claims"] = len(first_evidence_claims)
 
     # 2) new_independent_cluster: a claim gains a support cluster (through an
     # evidence-bearing relation) it did not have in the before snapshot. A new
     # cluster that only carries background material is not gain.
+    before_clusters_by_claim = {
+        claim_id: {cluster for (_, _, cluster) in links}
+        for claim_id, links in before_links.items()
+    }
     new_cluster_claims = sorted(
         claim_id
         for claim_id, links in after_links.items()
         if {cluster for (_, _, cluster) in links}
-        - {cluster for (_, _, cluster) in before_links.get(claim_id, set())}
+        - before_clusters_by_claim.get(claim_id, set())
     )
     if new_cluster_claims:
         _record("new_independent_cluster", new_cluster_claims)
+        for claim_id in new_cluster_claims:
+            new_clusters = {cluster for (_, _, cluster) in after_links[claim_id]} - (
+                before_clusters_by_claim.get(claim_id, set())
+            )
+            gain_evidence_ids.setdefault(claim_id, set()).update(
+                {
+                    evidence_id
+                    for (evidence_id, _, cluster) in after_links[claim_id]
+                    if cluster in new_clusters
+                    and evidence_id in _new_ids_for(claim_id)
+                }
+            )
     metrics["new_cluster_claims"] = len(new_cluster_claims)
 
     # 3) better_source_role: a claim's best eligible evidence-bearing role
@@ -399,6 +447,16 @@ def evaluate_evidence_gain(
     )
     if role_upgraded_claims:
         _record("better_source_role", role_upgraded_claims)
+        for claim_id in role_upgraded_claims:
+            best_rank = _best_role_rank(after_links, claim_id)
+            gain_evidence_ids.setdefault(claim_id, set()).update(
+                {
+                    evidence_id
+                    for (evidence_id, role, _) in after_links[claim_id]
+                    if _ROLE_RANK.get(role, 0) == best_rank
+                    and evidence_id in _new_ids_for(claim_id)
+                }
+            )
     metrics["role_upgraded_claims"] = len(role_upgraded_claims)
 
     # 4) new_contradiction: a new contradicts link or a new conflict gap.
@@ -417,6 +475,12 @@ def evaluate_evidence_gain(
             [claim_id for claim_id, _ in new_contradiction_links]
             + [gap.claim_id for gap in new_conflict_gaps],
         )
+        for claim_id, evidence_id in new_contradiction_links:
+            contradiction_evidence_ids.setdefault(claim_id, set()).add(evidence_id)
+        for conflict_gap in new_conflict_gaps:
+            new_conflict_gap_ids.setdefault(conflict_gap.claim_id, set()).add(
+                conflict_gap.id
+            )
     metrics["new_contradicting_links"] = len(new_contradiction_links)
     metrics["new_conflict_gaps"] = len(new_conflict_gaps)
 
@@ -424,22 +488,14 @@ def evaluate_evidence_gain(
     new_leads = sorted(_provenance_lead_pairs(after) - _provenance_lead_pairs(before))
     if new_leads:
         _record("new_provenance_lead", [claim_id for claim_id, _ in new_leads])
+        for claim_id, evidence_id in new_leads:
+            lead_evidence_ids.setdefault(claim_id, set()).add(evidence_id)
     metrics["new_provenance_leads"] = len(new_leads)
-
-    # Snapshot diffs used by gap-level provenance intersection (R6).
-    new_evidence_ids = {
-        evidence_id
-        for claim_id, links in after_links.items()
-        for (evidence_id, _, _) in links
-        if evidence_id
-        not in {eid for (_, eid, _) in before_links.get(claim_id, set())}
-    }
-    new_conflict_gap_ids = {gap.id for gap in new_conflict_gaps}
-    new_lead_ids = {evidence_id for _, evidence_id in new_leads}
 
     # 6) claim_status_improvement: only the explicitly frozen improvement
     # edges count. Moving into "unresolved" is a legitimate terminal state,
-    # never progress.
+    # never progress. It has no evidence identity and never credits a gap
+    # through a delta (R9).
     before_claim_states = {claim.id: claim.state for claim in before.claims}
     improved_claims = sorted(
         claim.id
@@ -451,12 +507,23 @@ def evaluate_evidence_gain(
         _record("claim_status_improvement", improved_claims)
     metrics["claims_improved"] = len(improved_claims)
 
-    # R3/R4/R5/R6: explicit gap attribution. Only targeted gaps whose OWN
-    # claim gained (R4: no cross-claim reason leakage), whose type/role was
-    # genuinely served (R5: desired role must actually appear), and — once a
-    # claim serves several targeted gaps — whose explicit GapBatchDelta
-    # provenance intersects the snapshot diff (R6) are credited.
+    # R3/R4/R5/R6/R9: explicit gap attribution. Only targeted gaps whose OWN
+    # claim gained (R4), whose type/role was genuinely served (R5), and whose
+    # explicit GapBatchDelta provenance intersects the per-claim, per-cause
+    # evidence identities (R6/R9) are credited. Fail-closed checks: the
+    # provenance mapping key must match the delta's own gap id, the delta
+    # must target a known targeted gap (R9).
+    after_gap_ids = {gap.id for gap in after.gaps}
     targeted_ids = set(target_gap_ids)
+    for mapping_key, delta in provenance.items():
+        if mapping_key != delta.gap_id:
+            raise ValueError(
+                "gain_provenance_by_gap key must match GapBatchDelta.gap_id"
+            )
+        if delta.gap_id not in targeted_ids or delta.gap_id not in after_gap_ids:
+            raise ValueError(
+                "GapBatchDelta must reference a targeted gap that exists in after.gaps"
+            )
     targets_per_claim: dict[str, int] = {}
     for gap in after.gaps:
         if gap.id in targeted_ids and gap.claim_id in affected_claims:
@@ -471,9 +538,12 @@ def evaluate_evidence_gain(
             before_links,
             after_links,
             delta=provenance.get(gap.id),
-            new_evidence_ids=new_evidence_ids,
-            new_conflict_gap_ids=new_conflict_gap_ids,
-            new_lead_ids=new_lead_ids,
+            gain_evidence_ids=gain_evidence_ids.get(gap.claim_id, set()),
+            lead_evidence_ids=lead_evidence_ids.get(gap.claim_id, set()),
+            contradiction_evidence_ids=contradiction_evidence_ids.get(
+                gap.claim_id, set()
+            ),
+            new_conflict_gap_ids=new_conflict_gap_ids.get(gap.claim_id, set()),
             target_gap_count_for_claim=targets_per_claim.get(gap.claim_id, 0),
         )
     )
