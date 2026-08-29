@@ -8,6 +8,7 @@ components without changing off/shadow/legacy execution.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -45,13 +46,22 @@ from src.web.research.contracts import (
     build_research_state,
 )
 from src.web.research.evidence_gate import EvidenceGateResult, evaluate_evidence_gate
+from src.web.research.evidence_gain import (
+    GapBatchDelta,
+    SaturationState,
+    evaluate_evidence_gain,
+    saturated_claim_ids,
+    update_saturation,
+)
 from src.web.research.gap_planner import GapQueryBatch, GapSearchIntent, PlannedGapQuery, plan_gap_queries
 from src.web.research.model_gateway import (
+    MAX_RESEARCH_MODEL_ATTEMPTS,
     ResearchModelAttemptStart,
     ResearchModelCallAudit,
     ResearchModelGateway,
 )
 from src.web.research.runtime import (
+    MAX_RESEARCH_WAVES,
     ResearchRuntimeCursor,
     RuntimeCandidate,
     RuntimeExternalAttemptStart,
@@ -78,6 +88,8 @@ from src.web.research.source_cluster import cluster_candidate_sources
 from src.web.research.state import attach_claim_engine_state
 
 ACTIVE_RESEARCH_ASSESSMENTS_KEY = "claim_engine_assessments"
+ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY = "claim_engine_assessment_inputs"
+ACTIVE_RESEARCH_WAVE_BASELINE_KEY = "claim_engine_wave_baseline"
 ACTIVE_RESEARCH_READ_PLAN_KEY = "claim_engine_read_plan"
 ACTIVE_RESEARCH_BRIEF_KEY = "claim_engine_evidence_brief"
 ACTIVE_RESEARCH_METRICS_KEY = "claim_engine_metrics"
@@ -263,6 +275,93 @@ class ActiveResearchRuntimeExecutor:
                 failures=(*cursor.failures, RuntimeFailure(code=code, phase=phase, item_id=item_id)),
             )
 
+        def settle_completed_wave(
+            gate: EvidenceGateResult,
+            brief: Mapping[str, Any],
+        ) -> WebLookupRun | None:
+            """Advance or finish one gain-accounted wave exactly once."""
+
+            nonlocal cursor
+            open_gap_claims = {
+                gap.claim_id
+                for gap in state.gaps
+                if gap.state in {"open", "searching"}
+            }
+            extra_batch_claims = {
+                claim.id for claim in state.claims if claim.priority == "critical"
+            } | {conflict.claim_id for conflict in state.conflict_gaps}
+            saturated_claims = set(
+                saturated_claim_ids(
+                    SaturationState(
+                        no_gain_batches_by_claim=dict(
+                            cursor.no_gain_batches_by_claim
+                        )
+                    ),
+                    extra_batch_eligible_claim_ids=extra_batch_claims,
+                )
+            )
+
+            if gate.status == "pass":
+                final_status = "completed"
+                provider_status = "found"
+                reason = "evidence_gate_pass"
+                confidence = "high"
+            elif not open_gap_claims:
+                final_status = "partial"
+                provider_status = "insufficient"
+                reason = "evidence_gap_open"
+                confidence = "partial" if state.evidence else "none"
+            elif open_gap_claims <= saturated_claims:
+                final_status = "partial"
+                provider_status = "insufficient"
+                reason = "evidence_saturated"
+                confidence = "partial" if state.evidence else "none"
+            elif cursor.wave_index >= MAX_RESEARCH_WAVES:
+                # Implementation safety ceiling only: the run is not
+                # necessarily saturated, so the persisted reason must not
+                # claim evidence saturation. Product semantics for this
+                # terminal stop belong to the ResearchStopGate batch.
+                final_status = "partial"
+                provider_status = "insufficient"
+                reason = "wave_limit_exhausted"
+                confidence = "partial" if state.evidence else "none"
+            elif elapsed() >= state.budget.hard_timeout_seconds:
+                final_status = "partial"
+                provider_status = "insufficient"
+                reason = "evidence_budget_exhausted"
+                confidence = "partial"
+            else:
+                cursor = replace(
+                    cursor,
+                    wave_index=cursor.wave_index + 1,
+                    wave_id="",
+                    active_gap_ids=(),
+                    phase="searching",
+                )
+                checkpoint()
+                return None
+
+            cursor = replace(
+                cursor,
+                phase="completed" if gate.status == "pass" else "unavailable",
+            )
+            checkpoint()
+            return self.repository.complete(
+                run_id,
+                operation_id=operation_id,
+                items=_eligible_items(selected_sources),
+                source_block=_format_evidence_brief(brief),
+                warnings=_dedupe(warnings),
+                research_context=context,
+                query_attempts=query_attempts,
+                selected_sources=selected_sources,
+                rejected_sources=rejected_sources,
+                provider_status=provider_status,
+                stop_reason=reason,
+                answer_confidence=confidence,
+                final_status=final_status,
+            )
+
         try:
             ensure_active()
             checkpoint()
@@ -316,169 +415,296 @@ class ActiveResearchRuntimeExecutor:
                 # semantic result it produced (single checkpoint boundary).
                 checkpoint()
 
-            # Deterministic query planning is resumable from the persisted cursor.
-            if not cursor.planned_queries:
-                planned_queries: list[RuntimePlannedQuery] = []
-                claims = {claim.id: claim for claim in state.claims}
-                for gap in _ordered_gaps(state):
-                    claim = claims[gap.claim_id]
-                    batch = plan_gap_queries(
-                        gap,
-                        claim,
-                        reference_date=state.reference_date,
+            # P1-C batch 2: bounded multi-wave loop. Each wave durably plans
+            # queries for the still-open gaps, searches, assesses, reads,
+            # extracts and gates; the frozen Evidence Gain / Saturation
+            # contracts decide whether another wave runs. Every wave boundary
+            # is checkpointed, and a crash resumes inside the durable wave
+            # (completed queries/reads/extractions are never repeated).
+            while True:
+                if cursor.wave_index == 0:
+                    cursor = replace(cursor, wave_index=1)
+                wave_id = f"research_wave:{run_id}:{cursor.wave_index}"
+
+                # A crash after gain/saturation persisted but before terminal
+                # settlement must not account the same wave twice.
+                if len(cursor.gain_history) >= cursor.wave_index:
+                    gate = evaluate_evidence_gate(state)
+                    brief = _evidence_brief(state, gate, selected_sources)
+                    context[ACTIVE_RESEARCH_BRIEF_KEY] = brief
+                    settled = settle_completed_wave(gate, brief)
+                    if settled is not None:
+                        return settled
+                    continue
+
+                # Wave start marker (durable): freeze the wave identity, the
+                # gaps this wave decided to attempt (handled-truth, even when
+                # the planner only produces duplicate queries or search finds
+                # nothing new), and the baseline state snapshot the wave's
+                # Evidence Gain will be evaluated against. Crash after this
+                # checkpoint resumes the same wave with an intact baseline, so
+                # extraction persisted before a crash can never be lost to a
+                # reset baseline (no false no-gain).
+                if cursor.wave_id != wave_id:
+                    active_gap_ids = tuple(gap.id for gap in _ordered_gaps(state))
+                    cursor = replace(
+                        cursor,
+                        wave_id=wave_id,
+                        active_gap_ids=active_gap_ids,
                     )
-                    planned_queries.extend(_runtime_query(item) for item in batch.queries)
-                cursor = replace(
-                    cursor,
-                    phase="searching",
-                    planned_queries=tuple(planned_queries[:100]),
+                    context[ACTIVE_RESEARCH_WAVE_BASELINE_KEY] = state.to_dict()
+                    checkpoint()
+                baseline_raw = context.get(ACTIVE_RESEARCH_WAVE_BASELINE_KEY)
+                if not isinstance(baseline_raw, Mapping):
+                    raise ValueError("active wave baseline is unavailable")
+                wave_baseline = ResearchState.from_dict(
+                    baseline_raw,
+                    known_evidence_ids=tuple(
+                        item["evidence_id"]
+                        for item in baseline_raw.get("evidence", [])
+                        if isinstance(item, Mapping)
+                        and isinstance(item.get("evidence_id"), str)
+                    ),
                 )
+                # Semantic query identity is stable across waves. Re-entering a
+                # wave or reaching a later wave must not re-search the same text;
+                # no new query space is handled as a no-gain batch by Saturation.
+                cursor = _append_gap_queries(cursor, state)
+                cursor = replace(cursor, phase="searching")
                 checkpoint(stage="searching")
 
-            if self._required(run_id).stage != "searching":
-                self.repository.set_stage(
-                    run_id,
-                    stage="searching",
-                    operation_id=operation_id,
-                )
-
-            # Search every still-pending planned query until the shared hard budget.
-            for planned in cursor.planned_queries:
-                if planned.id in cursor.completed_query_ids:
-                    continue
-                ensure_active()
-                if elapsed() >= state.budget.hard_timeout_seconds:
-                    break
-                # B5-H2: once the candidate pool is full, further external
-                # searches can only burn shared budget on results that would
-                # be dropped by the pool cap, so stop before any external call.
-                if len(cursor.candidates) >= state.budget.max_candidates:
-                    break
-                attempt = _attempt_number(cursor, planned.id)
-                marker = RuntimeExternalAttemptStart(
-                    call_id=f"research_search:{run_id}:{planned.id}:attempt:{attempt}",
-                    purpose="search",
-                    item_id=planned.id,
-                    attempt=attempt,
-                    started_at=self.utc_now(),
-                )
-                cursor = begin_external_attempt(cursor, marker)
-                checkpoint()
-
-                audit: dict[str, Any] | None = None
-
-                def search_exact(query: str, *, max_results: int = 5) -> Mapping[str, Any]:
-                    nonlocal audit
-                    try:
-                        payload = self.gateway.search_detailed(query, max_items=max_results)
-                        audit = self.gateway.last_search_audit()
-                        return payload
-                    finally:
-                        pass
-
-                one_query = _gap_query_batch(planned)
-                try:
-                    batch_result = execute_candidate_pool_batch(
-                        one_query,
-                        search_exact=search_exact,
-                        should_cancel=lambda: self.repository.cancel_requested(
-                            run_id, operation_id=operation_id
-                        ),
-                        results_per_query=5,
-                        max_candidates=state.budget.max_candidates,
+                if self._required(run_id).stage != "searching":
+                    self.repository.set_stage(
+                        run_id,
+                        stage="searching",
+                        operation_id=operation_id,
                     )
-                finally:
-                    cursor = finish_external_attempt(cursor, call_id=marker.call_id)
+
+                # Search every still-pending planned query until the shared hard budget.
+                for planned in cursor.planned_queries:
+                    if planned.id in cursor.completed_query_ids:
+                        continue
+                    ensure_active()
+                    if elapsed() >= state.budget.hard_timeout_seconds:
+                        break
+                    # B5-H2: once the candidate pool is full, further external
+                    # searches can only burn shared budget on results that would
+                    # be dropped by the pool cap, so stop before any external call.
+                    if len(cursor.candidates) >= state.budget.max_candidates:
+                        break
+                    attempt = _attempt_number(cursor, planned.id)
+                    marker = RuntimeExternalAttemptStart(
+                        call_id=f"research_search:{run_id}:{planned.id}:attempt:{attempt}",
+                        purpose="search",
+                        item_id=planned.id,
+                        attempt=attempt,
+                        started_at=self.utc_now(),
+                    )
+                    cursor = begin_external_attempt(cursor, marker)
                     checkpoint()
-                ensure_active()
-                outcome = batch_result.outcomes[0]
-                cursor = replace(
-                    cursor,
-                    query_outcomes=(
-                        *cursor.query_outcomes,
-                        RuntimeQueryOutcome(
-                            query_id=planned.id,
-                            status=_runtime_query_status(outcome.status),
-                            result_count=outcome.result_count,
-                            providers=outcome.providers_attempted,
-                            error_code=outcome.reason if outcome.status == "unavailable" else "",
+
+                    audit: dict[str, Any] | None = None
+
+                    def search_exact(query: str, *, max_results: int = 5) -> Mapping[str, Any]:
+                        nonlocal audit
+                        try:
+                            payload = self.gateway.search_detailed(query, max_items=max_results)
+                            audit = self.gateway.last_search_audit()
+                            return payload
+                        finally:
+                            pass
+
+                    one_query = _gap_query_batch(planned)
+                    try:
+                        batch_result = execute_candidate_pool_batch(
+                            one_query,
+                            search_exact=search_exact,
+                            should_cancel=lambda: self.repository.cancel_requested(
+                                run_id, operation_id=operation_id
+                            ),
+                            results_per_query=5,
+                            max_candidates=state.budget.max_candidates,
+                        )
+                    finally:
+                        cursor = finish_external_attempt(cursor, call_id=marker.call_id)
+                        checkpoint()
+                    ensure_active()
+                    outcome = batch_result.outcomes[0]
+                    cursor = replace(
+                        cursor,
+                        query_outcomes=(
+                            *cursor.query_outcomes,
+                            RuntimeQueryOutcome(
+                                query_id=planned.id,
+                                status=_runtime_query_status(outcome.status),
+                                result_count=outcome.result_count,
+                                providers=outcome.providers_attempted,
+                                error_code=outcome.reason if outcome.status == "unavailable" else "",
+                            ),
                         ),
-                    ),
-                    candidates=_merge_runtime_candidates(
-                        cursor.candidates,
-                        batch_result.candidates,
-                        max_candidates=state.budget.max_candidates,
-                    ),
-                )
-                query_attempts.append(
-                    {
-                        "query": planned.query,
-                        "query_id": planned.id,
-                        "intent": planned.intent,
-                        "status": outcome.status,
-                        "reason": outcome.reason,
-                        "result_count": outcome.result_count,
-                        "providers_attempted": list(outcome.providers_attempted),
-                        "provider_errors": list(outcome.provider_errors),
-                        "run_attempt": context["run_attempt"],
-                        "operation_id": operation_id,
-                        **({"provider_audit": {"schema_version": "research-provider-audit-v1", **audit}} if audit else {}),
-                    }
-                )
-                checkpoint()
-
-            cursor = replace(cursor, phase="assessing")
-            checkpoint(stage="assessing")
-
-            # Strict semantic assessment and role-aware ranking, one claim at a time.
-            stored_assessments = _assessment_store(context)
-            claim_rankings: dict[str, tuple[RankedCandidate, ...]] = {}
-            for claim in _ordered_claims(state):
-                candidates = _candidates_for_claim(cursor, claim.id)
-                if not candidates:
-                    continue
-                saved = stored_assessments.get(claim.id)
-                if isinstance(saved, list) and saved:
-                    claim_rankings[claim.id] = tuple(_ranked_from_dict(item) for item in saved)
-                    continue
-                ensure_budget()
-                clusters = cluster_candidate_sources(candidates)
-                assignments = {item.candidate_id: item for item in clusters.assignments}
-                categories = ("public_research_claim", "public_candidate_metadata")
-                if not model_allowed("research_candidate_assessment", categories):
-                    _append_failure("candidate_assessment_blocked_by_policy", "assessing", claim.id)
-                    continue
-                assessed = self.candidate_assessor.assess(
-                    run_id=run_id,
-                    claim=claim,
-                    candidates=candidates,
-                    assignments=assignments,
-                    reference_date=state.reference_date,
-                    timeout_seconds=remaining_timeout(),
-                    on_attempt_started=on_model_started,
-                    on_attempt_finished=on_model_finished,
-                )
-                ensure_active()
-                if assessed.status != "completed" or not assessed.assessments:
-                    _append_failure(assessed.reason or "candidate_assessment_unavailable", "assessing", claim.id)
+                        candidates=_merge_runtime_candidates(
+                            cursor.candidates,
+                            batch_result.candidates,
+                            max_candidates=state.budget.max_candidates,
+                        ),
+                    )
+                    query_attempts.append(
+                        {
+                            "query": planned.query,
+                            "query_id": planned.id,
+                            "intent": planned.intent,
+                            "status": outcome.status,
+                            "reason": outcome.reason,
+                            "result_count": outcome.result_count,
+                            "providers_attempted": list(outcome.providers_attempted),
+                            "provider_errors": list(outcome.provider_errors),
+                            "run_attempt": context["run_attempt"],
+                            "operation_id": operation_id,
+                            **({"provider_audit": {"schema_version": "research-provider-audit-v1", **audit}} if audit else {}),
+                        }
+                    )
                     checkpoint()
-                    continue
-                ranked = rank_candidate_pool(
-                    candidates,
-                    claim=claim,
-                    assessments=assessed.assessments,
+
+                cursor = replace(cursor, phase="assessing")
+                checkpoint(stage="assessing")
+
+                # Strict semantic assessment and role-aware ranking, one claim at a time.
+                stored_assessments = _assessment_store(context)
+                assessed_inputs = _assessment_inputs_store(context)
+                claim_rankings: dict[str, tuple[RankedCandidate, ...]] = {}
+                for claim in _ordered_claims(state):
+                    candidates = _candidates_for_claim(cursor, claim.id)
+                    if not candidates:
+                        continue
+                    saved = stored_assessments.get(claim.id)
+                    candidate_ids = tuple(sorted(item.id for item in candidates))
+                    # P1-C batch 2: a later wave re-assesses a claim only when new
+                    # candidates appeared for it; unchanged candidate sets reuse
+                    # the durable rankings instead of burning model budget again.
+                    if (
+                        isinstance(saved, list)
+                        and saved
+                        and assessed_inputs.get(claim.id) == list(candidate_ids)
+                    ):
+                        claim_rankings[claim.id] = tuple(_ranked_from_dict(item) for item in saved)
+                        continue
+                    ensure_budget()
+                    clusters = cluster_candidate_sources(candidates)
+                    assignments = {item.candidate_id: item for item in clusters.assignments}
+                    categories = ("public_research_claim", "public_candidate_metadata")
+                    if not model_allowed("research_candidate_assessment", categories):
+                        _append_failure("candidate_assessment_blocked_by_policy", "assessing", claim.id)
+                        continue
+                    assessed = self.candidate_assessor.assess(
+                        run_id=run_id,
+                        claim=claim,
+                        candidates=candidates,
+                        assignments=assignments,
+                        reference_date=state.reference_date,
+                        timeout_seconds=remaining_timeout(),
+                        on_attempt_started=on_model_started,
+                        on_attempt_finished=on_model_finished,
+                        call_id_suffix=_assessment_call_suffix(
+                            cursor, claim.id, candidate_ids
+                        ),
+                        attempt_start=_model_attempt_start(
+                            cursor,
+                            f"research_candidate_assessment:{run_id}:{claim.id}:1"
+                            f"{_assessment_call_suffix(cursor, claim.id, candidate_ids)}",
+                        ),
+                    )
+                    ensure_active()
+                    if assessed.status != "completed" or not assessed.assessments:
+                        _append_failure(assessed.reason or "candidate_assessment_unavailable", "assessing", claim.id)
+                        checkpoint()
+                        continue
+                    ranked = rank_candidate_pool(
+                        candidates,
+                        claim=claim,
+                        assessments=assessed.assessments,
+                    )
+                    claim_rankings[claim.id] = ranked
+                    stored_assessments[claim.id] = [item.to_dict() for item in ranked]
+                    assessed_inputs[claim.id] = list(candidate_ids)
+                    context[ACTIVE_RESEARCH_ASSESSMENTS_KEY] = stored_assessments
+                    context[ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY] = assessed_inputs
+                    checkpoint()
+
+                cursor = replace(cursor, phase="ranking")
+                checkpoint(stage="assessing")
+
+                # P1-C batch 2: the read plan is recomputed at the start of every
+                # wave (deterministic from the current rankings); candidates whose
+                # physical read already completed are skipped by the read loop via
+                # completed_read_ids, so recomputation is resume-safe.
+                # P1-C batch 2: the read plan is recomputed at the start of
+                # every wave from the full rankings. PHYSICAL reads exclude
+                # candidates whose read already completed (otherwise a later
+                # wave re-selects the same already-read top candidates and
+                # never reads anything new); extraction targets keep every
+                # (candidate, claim) binding so an already-read candidate whose
+                # extraction crashed mid-wave is re-extracted on resume (the
+                # per-claim prior status skips completed extractions).
+                # P1-C batch 2: the read plan is recomputed at the start of
+                # every wave from the rankings MINUS candidates whose physical
+                # read already completed (otherwise a later wave re-selects the
+                # same already-read top candidates and never reads anything new).
+                # Extraction targets additionally keep already-read candidates
+                # whose extraction crashed mid-wave so resume re-extracts them
+                # (per-claim prior status skips completed extractions).
+                completed_read = set(cursor.completed_read_ids)
+                rankings_for_plan = {
+                    claim_id: tuple(
+                        ranked_candidate
+                        for ranked_candidate in ranked
+                        if ranked_candidate.candidate.id not in completed_read
+                    )
+                    for claim_id, ranked in claim_rankings.items()
+                }
+                physical_reads, extraction_targets = _fair_read_plan(
+                    state, rankings_for_plan
                 )
-                claim_rankings[claim.id] = ranked
-                stored_assessments[claim.id] = [item.to_dict() for item in ranked]
-                context[ACTIVE_RESEARCH_ASSESSMENTS_KEY] = stored_assessments
-                checkpoint()
-
-            cursor = replace(cursor, phase="ranking")
-            checkpoint(stage="assessing")
-
-            physical_reads, extraction_targets = _load_read_plan(context)
-            if not physical_reads and not extraction_targets:
-                physical_reads, extraction_targets = _fair_read_plan(state, claim_rankings)
+                # Already-read candidates whose extraction crashed mid-wave
+                # must stay extractable on resume. Restore per-claim bindings
+                # (candidate_id, claim_id) from the FULL rankings — a candidate
+                # served by two claims keeps both bindings even though its
+                # physical read completed; the per-claim extraction prior
+                # status skips claims whose extraction already finished.
+                targeted_pairs = {
+                    (target_item["candidate_id"], target_item["claim_id"])
+                    for target_item in extraction_targets
+                }
+                claims_by_candidate: dict[str, set[str]] = {}
+                for claim_id, ranked in claim_rankings.items():
+                    for ranked_candidate in ranked:
+                        claims_by_candidate.setdefault(
+                            ranked_candidate.candidate.id, set()
+                        ).add(claim_id)
+                for candidate_id in sorted(completed_read):
+                    for claim_id in sorted(claims_by_candidate.get(candidate_id, set())):
+                        if (candidate_id, claim_id) in targeted_pairs:
+                            continue
+                        record = _source_by_candidate(selected_sources, candidate_id)
+                        cluster_id = ""
+                        source_role = ""
+                        if record is not None:
+                            assessment = record.get("assessment")
+                            if isinstance(assessment, Mapping):
+                                cluster_id = str(
+                                    assessment.get("source_cluster_id") or ""
+                                )
+                                source_role = str(
+                                    assessment.get("source_role") or ""
+                                )
+                        extraction_targets = [
+                            *extraction_targets,
+                            {
+                                "candidate_id": candidate_id,
+                                "claim_id": claim_id,
+                                "cluster_id": cluster_id,
+                                "source_role": source_role,
+                            },
+                        ]
                 context[ACTIVE_RESEARCH_READ_PLAN_KEY] = {
                     "physical_reads": physical_reads,
                     "extraction_targets": extraction_targets,
@@ -490,220 +716,236 @@ class ActiveResearchRuntimeExecutor:
                 )
                 checkpoint(stage="reading")
 
-            if self._required(run_id).stage != "reading":
-                self.repository.set_stage(
-                    run_id,
-                    stage="reading",
-                    operation_id=operation_id,
-                )
+                if self._required(run_id).stage != "reading":
+                    self.repository.set_stage(
+                        run_id,
+                        stage="reading",
+                        operation_id=operation_id,
+                    )
 
-            # Read and checkpoint each selected source under the shared character budget.
-            used_chars = sum(
-                int(item.get("content_chars") or 0)
-                for item in context.get(ACTIVE_RESEARCH_METRICS_KEY, {}).get("reads", [])
-                if isinstance(item, Mapping)
-            )
-            successful_reads = state.budget.reads_used
-            for item in physical_reads:
-                candidate_id = item["candidate_id"]
-                if candidate_id in cursor.completed_read_ids:
-                    continue
-                ensure_active()
-                if successful_reads >= state.budget.max_reads or used_chars >= state.budget.max_total_chars:
-                    break
-                ensure_budget()
-                candidate = _candidate_by_id(cursor, candidate_id)
-                source_limit = min(6000, state.budget.max_total_chars - used_chars)
-                attempt = _attempt_number(cursor, candidate_id)
-                marker = RuntimeExternalAttemptStart(
-                    call_id=f"research_read:{run_id}:{candidate_id}:attempt:{attempt}",
-                    purpose="read",
-                    item_id=candidate_id,
-                    attempt=attempt,
-                    started_at=self.utc_now(),
+                # Read and checkpoint each selected source under the shared character budget.
+                used_chars = sum(
+                    int(item.get("content_chars") or 0)
+                    for item in context.get(ACTIVE_RESEARCH_METRICS_KEY, {}).get("reads", [])
+                    if isinstance(item, Mapping)
                 )
-                cursor = begin_external_attempt(cursor, marker)
-                checkpoint()
-                try:
-                    raw_read = dict(self.gateway.read(candidate.url, max_chars=source_limit) or {})
-                except Exception as exc:
-                    raw_read = {
-                        "ok": False,
-                        "status": "failed",
-                        "url": candidate.url,
-                        "error": type(exc).__name__,
-                    }
-                finally:
-                    cursor = finish_external_attempt(cursor, call_id=marker.call_id)
+                successful_reads = state.budget.reads_used
+                for plan_item in physical_reads:
+                    candidate_id = plan_item["candidate_id"]
+                    if candidate_id in cursor.completed_read_ids:
+                        continue
+                    ensure_active()
+                    if successful_reads >= state.budget.max_reads or used_chars >= state.budget.max_total_chars:
+                        break
+                    ensure_budget()
+                    candidate = _candidate_by_id(cursor, candidate_id)
+                    source_limit = min(6000, state.budget.max_total_chars - used_chars)
+                    attempt = _attempt_number(cursor, candidate_id)
+                    marker = RuntimeExternalAttemptStart(
+                        call_id=f"research_read:{run_id}:{candidate_id}:attempt:{attempt}",
+                        purpose="read",
+                        item_id=candidate_id,
+                        attempt=attempt,
+                        started_at=self.utc_now(),
+                    )
+                    cursor = begin_external_attempt(cursor, marker)
                     checkpoint()
-                ensure_active()
-                content = str(raw_read.get("content") or raw_read.get("readme") or "")[:source_limit]
-                ok = bool(raw_read.get("ok") is True and content.strip())
-                status = "success" if ok else "failed"
-                if ok:
-                    successful_reads += 1
-                    used_chars += len(content)
-                cursor = replace(
-                    cursor,
-                    read_outcomes=(
-                        *cursor.read_outcomes,
-                        RuntimeReadOutcome(
-                            candidate_id=candidate_id,
-                            status=status,
-                            content_chars=len(content) if ok else 0,
-                            error_code="" if ok else _bounded_text(raw_read.get("error") or "read_failed", 200),
+                    try:
+                        raw_read = dict(self.gateway.read(candidate.url, max_chars=source_limit) or {})
+                    except Exception as exc:
+                        raw_read = {
+                            "ok": False,
+                            "status": "failed",
+                            "url": candidate.url,
+                            "error": type(exc).__name__,
+                        }
+                    finally:
+                        cursor = finish_external_attempt(cursor, call_id=marker.call_id)
+                        checkpoint()
+                    ensure_active()
+                    content = str(raw_read.get("content") or raw_read.get("readme") or "")[:source_limit]
+                    ok = bool(raw_read.get("ok") is True and content.strip())
+                    status = "success" if ok else "failed"
+                    if ok:
+                        successful_reads += 1
+                        used_chars += len(content)
+                    cursor = replace(
+                        cursor,
+                        read_outcomes=(
+                            *cursor.read_outcomes,
+                            RuntimeReadOutcome(
+                                candidate_id=candidate_id,
+                                status=status,
+                                content_chars=len(content) if ok else 0,
+                                error_code="" if ok else _bounded_text(raw_read.get("error") or "read_failed", 200),
+                            ),
                         ),
-                    ),
-                )
-                record = _source_record(
-                    candidate,
-                    item,
-                    raw_read={**raw_read, "content": content, "status": "read" if ok else "failed"},
-                )
-                _upsert_source(selected_sources, record)
-                update_budget(reads_used=successful_reads)
-                context.setdefault(ACTIVE_RESEARCH_METRICS_KEY, {})["reads"] = [
-                    outcome.to_dict() for outcome in cursor.read_outcomes
-                ]
+                    )
+                    record = _source_record(
+                        candidate,
+                        plan_item,
+                        raw_read={**raw_read, "content": content, "status": "read" if ok else "failed"},
+                    )
+                    _upsert_source(selected_sources, record)
+                    update_budget(reads_used=successful_reads)
+                    context.setdefault(ACTIVE_RESEARCH_METRICS_KEY, {})["reads"] = [
+                        outcome.to_dict() for outcome in cursor.read_outcomes
+                    ]
+                    checkpoint()
+
+                cursor = replace(cursor, phase="extracting")
+                checkpoint(stage="reading")
+
+                # A successful read is not evidence until strict extraction validates.
+                # B5-H3: extraction targets bind (candidate_id, claim_id) pairs, so
+                # one physical read can serve multiple claims.
+                claims_by_id = {claim.id: claim for claim in state.claims}
+                for extraction_target in extraction_targets:
+                    candidate_id = extraction_target["candidate_id"]
+                    claim_id = extraction_target["claim_id"]
+                    source_record = _source_by_candidate(selected_sources, candidate_id)
+                    if source_record is None or _read_status(source_record) != "read":
+                        continue
+                    extractions = source_record.setdefault("extractions", {})
+                    prior = extractions.get(claim_id)
+                    if isinstance(prior, Mapping) and prior.get("status") in {"eligible", "extractor_failed"}:
+                        continue
+                    legacy = source_record.get("extraction")
+                    if (
+                        prior is None
+                        and isinstance(legacy, Mapping)
+                        and legacy.get("status") in {"eligible", "extractor_failed"}
+                        and legacy.get("claim_id") == claim_id
+                    ):
+                        continue
+                    ensure_active()
+                    ensure_budget()
+                    extraction_categories = (
+                        "public_research_claim",
+                        "public_candidate_metadata",
+                        "bounded_public_page_excerpt",
+                    )
+                    if not model_allowed("research_evidence_extraction", extraction_categories):
+                        extractions[claim_id] = {"status": "extractor_failed", "reason": "blocked_by_policy"}
+                        _append_failure("extraction_blocked_by_policy", "extracting", candidate_id)
+                        checkpoint()
+                        continue
+                    candidate = _candidate_by_id(cursor, candidate_id)
+                    claim = claims_by_id[extraction_target["claim_id"]]
+                    read = cast(Mapping[str, Any], source_record["read"])
+                    extracted = self.evidence_extractor.extract(
+                        run_id=run_id,
+                        claim=claim,
+                        candidate=candidate,
+                        source_role=extraction_target["source_role"],
+                        source_cluster_id=extraction_target["cluster_id"],
+                        content=str(read.get("content") or ""),
+                        timeout_seconds=remaining_timeout(),
+                        on_attempt_started=on_model_started,
+                        on_attempt_finished=on_model_finished,
+                        call_id_suffix=_extraction_call_suffix(
+                            cursor, candidate_id, claim_id
+                        ),
+                        attempt_start=_model_attempt_start(
+                            cursor,
+                            f"research_evidence_extract:{run_id}:{claim_id}:{candidate_id}:1"
+                            f"{_extraction_call_suffix(cursor, candidate_id, claim_id)}",
+                        ),
+                    )
+                    ensure_active()
+                    if extracted.status != "completed" or extracted.extraction is None:
+                        extractions[claim_id] = {
+                            "status": "extractor_failed",
+                            "reason": extracted.reason or "extractor_unavailable",
+                        }
+                        _append_failure(extracted.reason or "extractor_unavailable", "extracting", candidate_id)
+                        checkpoint()
+                        continue
+                    link = extracted.extraction
+                    extraction_summary = {
+                        "status": "eligible",
+                        "claim_id": link.claim_id,
+                        "relation": link.relation,
+                        "strength": link.strength,
+                        "locator": link.locator,
+                        "anchored_spans": list(link.anchored_spans),
+                        "caveats": list(link.caveats),
+                        "source_role": link.source_role,
+                        "source_cluster_id": link.source_cluster_id,
+                        "published_at": link.published_at,
+                    }
+                    extractions[claim_id] = dict(extraction_summary)
+                    # Keep the singular field as a backward-compatible summary of
+                    # the first eligible extraction for existing consumers.
+                    current_summary = source_record.get("extraction")
+                    if not (
+                        isinstance(current_summary, Mapping)
+                        and current_summary.get("status") == "eligible"
+                    ):
+                        source_record["extraction"] = extraction_summary
+                    evidence_id = _evidence_id_for_record(run_id, source_record, selected_sources, rejected_sources)
+                    state = _add_extracted_evidence(state, evidence_id=evidence_id, link=link)
+                    cursor = replace(
+                        cursor,
+                        read_outcomes=tuple(
+                            replace(outcome, evidence_id=evidence_id)
+                            if outcome.candidate_id == candidate_id
+                            else outcome
+                            for outcome in cursor.read_outcomes
+                        ),
+                    )
+                    checkpoint()
+
+                cursor = replace(cursor, phase="gating")
+                checkpoint(stage="gating")
+                gate = evaluate_evidence_gate(state)
+                state = _state_after_gate(state, gate)
+                brief = _evidence_brief(state, gate, selected_sources)
+                context[ACTIVE_RESEARCH_BRIEF_KEY] = brief
                 checkpoint()
 
-            cursor = replace(cursor, phase="extracting")
-            checkpoint(stage="reading")
-
-            # A successful read is not evidence until strict extraction validates.
-            # B5-H3: extraction targets bind (candidate_id, claim_id) pairs, so
-            # one physical read can serve multiple claims.
-            claims_by_id = {claim.id: claim for claim in state.claims}
-            for item in extraction_targets:
-                candidate_id = item["candidate_id"]
-                claim_id = item["claim_id"]
-                source_record = _source_by_candidate(selected_sources, candidate_id)
-                if source_record is None or _read_status(source_record) != "read":
-                    continue
-                extractions = source_record.setdefault("extractions", {})
-                prior = extractions.get(claim_id)
-                if isinstance(prior, Mapping) and prior.get("status") in {"eligible", "extractor_failed"}:
-                    continue
-                legacy = source_record.get("extraction")
-                if (
-                    prior is None
-                    and isinstance(legacy, Mapping)
-                    and legacy.get("status") in {"eligible", "extractor_failed"}
-                    and legacy.get("claim_id") == claim_id
-                ):
-                    continue
-                ensure_active()
-                ensure_budget()
-                extraction_categories = (
-                    "public_research_claim",
-                    "public_candidate_metadata",
-                    "bounded_public_page_excerpt",
+                # P1-C batch 2: wave-level Evidence Gain + Saturation using the
+                # frozen contracts. target gaps = the gaps frozen at wave start
+                # (active_gap_ids) — handled means "this wave's strategy ran
+                # for the gap", whether or not the planner found new queries or
+                # search produced anything new. The gain baseline is the
+                # durable wave-start snapshot, so extraction persisted before a
+                # crash is never lost to a reset baseline.
+                handled_gap_ids = tuple(cursor.active_gap_ids)
+                handled_claim_ids = tuple(
+                    dict.fromkeys(
+                        gap.claim_id
+                        for gap in state.gaps
+                        if gap.id in set(handled_gap_ids)
+                    )
                 )
-                if not model_allowed("research_evidence_extraction", extraction_categories):
-                    extractions[claim_id] = {"status": "extractor_failed", "reason": "blocked_by_policy"}
-                    _append_failure("extraction_blocked_by_policy", "extracting", candidate_id)
-                    checkpoint()
-                    continue
-                candidate = _candidate_by_id(cursor, candidate_id)
-                claim = claims_by_id[item["claim_id"]]
-                read = cast(Mapping[str, Any], source_record["read"])
-                extracted = self.evidence_extractor.extract(
-                    run_id=run_id,
-                    claim=claim,
-                    candidate=candidate,
-                    source_role=item["source_role"],
-                    source_cluster_id=item["cluster_id"],
-                    content=str(read.get("content") or ""),
-                    timeout_seconds=remaining_timeout(),
-                    on_attempt_started=on_model_started,
-                    on_attempt_finished=on_model_finished,
+                gain = evaluate_evidence_gain(
+                    wave_baseline,
+                    state,
+                    target_gap_ids=handled_gap_ids,
+                    gain_provenance_by_gap=_wave_gap_provenance(
+                        cursor, state, gate, handled_gap_ids
+                    ),
                 )
-                ensure_active()
-                if extracted.status != "completed" or extracted.extraction is None:
-                    extractions[claim_id] = {
-                        "status": "extractor_failed",
-                        "reason": extracted.reason or "extractor_unavailable",
-                    }
-                    _append_failure(extracted.reason or "extractor_unavailable", "extracting", candidate_id)
-                    checkpoint()
-                    continue
-                link = extracted.extraction
-                extraction_summary = {
-                    "status": "eligible",
-                    "claim_id": link.claim_id,
-                    "relation": link.relation,
-                    "strength": link.strength,
-                    "locator": link.locator,
-                    "anchored_spans": list(link.anchored_spans),
-                    "caveats": list(link.caveats),
-                    "source_role": link.source_role,
-                    "source_cluster_id": link.source_cluster_id,
-                    "published_at": link.published_at,
-                }
-                extractions[claim_id] = dict(extraction_summary)
-                # Keep the singular field as a backward-compatible summary of
-                # the first eligible extraction for existing consumers.
-                current_summary = source_record.get("extraction")
-                if not (
-                    isinstance(current_summary, Mapping)
-                    and current_summary.get("status") == "eligible"
-                ):
-                    source_record["extraction"] = extraction_summary
-                evidence_id = _evidence_id_for_record(run_id, source_record, selected_sources, rejected_sources)
-                state = _add_extracted_evidence(state, evidence_id=evidence_id, link=link)
+                saturation = update_saturation(
+                    SaturationState(
+                        no_gain_batches_by_claim=dict(cursor.no_gain_batches_by_claim),
+                        no_gain_batches_by_gap=dict(cursor.no_gain_batches_by_gap),
+                    ),
+                    gain,
+                    handled_claim_ids=handled_claim_ids,
+                    handled_gap_ids=handled_gap_ids,
+                )
                 cursor = replace(
                     cursor,
-                    read_outcomes=tuple(
-                        replace(outcome, evidence_id=evidence_id)
-                        if outcome.candidate_id == candidate_id
-                        else outcome
-                        for outcome in cursor.read_outcomes
-                    ),
+                    gain_history=(*cursor.gain_history, gain.to_dict()),
+                    no_gain_batches_by_claim=dict(saturation.no_gain_batches_by_claim),
+                    no_gain_batches_by_gap=dict(saturation.no_gain_batches_by_gap),
                 )
                 checkpoint()
-
-            cursor = replace(cursor, phase="gating")
-            checkpoint(stage="gating")
-            gate = evaluate_evidence_gate(state)
-            state = _state_after_gate(state, gate)
-            brief = _evidence_brief(state, gate, selected_sources)
-            context[ACTIVE_RESEARCH_BRIEF_KEY] = brief
-            cursor = replace(
-                cursor,
-                phase="completed" if gate.status == "pass" else "unavailable",
-            )
-            checkpoint()
-
-            if gate.status == "pass":
-                final_status = "completed"
-                provider_status = "found"
-                reason = "evidence_gate_pass"
-                confidence = "high"
-            elif gate.status == "partial":
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_budget_exhausted"
-                confidence = "partial"
-            else:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_gap_open"
-                confidence = "partial" if state.evidence else "none"
-            return self.repository.complete(
-                run_id,
-                operation_id=operation_id,
-                items=_eligible_items(selected_sources),
-                source_block=_format_evidence_brief(brief),
-                warnings=_dedupe(warnings),
-                research_context=context,
-                query_attempts=query_attempts,
-                selected_sources=selected_sources,
-                rejected_sources=rejected_sources,
-                provider_status=provider_status,
-                stop_reason=reason,
-                answer_confidence=confidence,
-                final_status=final_status,
-            )
+                settled = settle_completed_wave(gate, brief)
+                if settled is not None:
+                    return settled
         except (ActiveResearchCancelled, CandidatePoolCancelled, ReadSchedulingCancelled):
             # B5-H1: persist the in-memory cursor so a cancel that lands after
             # on_model_finished records the cleared inflight marker and any
@@ -860,6 +1102,43 @@ def _runtime_query(query: PlannedGapQuery) -> RuntimePlannedQuery:
     )
 
 
+def _append_gap_queries(
+    cursor: ResearchRuntimeCursor,
+    state: ResearchState,
+) -> ResearchRuntimeCursor:
+    """Append one wave's novel semantic queries exactly once.
+
+    Query IDs and normalized text stay stable across waves. Wave/call/attempt
+    identity belongs to the runtime markers, not to semantic query identity.
+    """
+
+    planned_text = {item.query.casefold() for item in cursor.planned_queries}
+    planned_ids = {item.id for item in cursor.planned_queries}
+    claims = {claim.id: claim for claim in state.claims}
+    new_planned: list[RuntimePlannedQuery] = []
+    for gap in _ordered_gaps(state):
+        claim = claims[gap.claim_id]
+        batch = plan_gap_queries(
+            gap,
+            claim,
+            reference_date=state.reference_date,
+        )
+        for item in batch.queries:
+            runtime_query = _runtime_query(item)
+            query_key = runtime_query.query.casefold()
+            if runtime_query.id in planned_ids or query_key in planned_text:
+                continue
+            new_planned.append(runtime_query)
+            planned_ids.add(runtime_query.id)
+            planned_text.add(query_key)
+    if not new_planned:
+        return cursor
+    return replace(
+        cursor,
+        planned_queries=tuple([*cursor.planned_queries, *new_planned])[:100],
+    )
+
+
 def _gap_query_batch(query: RuntimePlannedQuery) -> GapQueryBatch:
     planned = PlannedGapQuery(
         id=query.id,
@@ -950,6 +1229,71 @@ def _candidates_for_claim(cursor: ResearchRuntimeCursor, claim_id: str) -> tuple
 def _assessment_store(context: dict[str, Any]) -> dict[str, Any]:
     raw = context.get(ACTIVE_RESEARCH_ASSESSMENTS_KEY)
     return {str(key): value for key, value in raw.items()} if isinstance(raw, Mapping) else {}
+
+
+def _assessment_inputs_store(context: dict[str, Any]) -> dict[str, list[str]]:
+    """P1-C batch 2: per-claim candidate-id sets the stored rankings cover."""
+    raw = context.get(ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY)
+    if not isinstance(raw, Mapping):
+        return {}
+    inputs: dict[str, list[str]] = {}
+    for key, value in raw.items():
+        if isinstance(value, list):
+            inputs[str(key)] = [str(item) for item in value]
+    return inputs
+
+
+def _wave_gap_provenance(
+    cursor: ResearchRuntimeCursor,
+    state: ResearchState,
+    gate: EvidenceGateResult,
+    handled_gap_ids: tuple[str, ...],
+) -> dict[str, GapBatchDelta]:
+    """P1-C batch 2: per-gap GapBatchDelta provenance for one wave.
+
+    A gap's delta reports the evidence ids its planned queries' candidates
+    actually produced (read outcomes carrying an evidence id), the lead-
+    relation subset of those, and the gate-detected conflict gaps of the
+    gap's claim. The evaluator only credits ids that truly caused a frozen
+    gain reason, so over-reporting here fails closed.
+    """
+    query_to_gap = {query.id: query.gap_id for query in cursor.planned_queries}
+    evidence_id_by_candidate = {
+        outcome.candidate_id: outcome.evidence_id
+        for outcome in cursor.read_outcomes
+        if outcome.evidence_id
+    }
+    lead_evidence_ids = {
+        link.evidence_id for link in state.evidence_links if link.relation == "lead"
+    }
+    conflicts_by_claim: dict[str, set[str]] = {}
+    for conflict in gate.conflicts:
+        conflicts_by_claim.setdefault(conflict.claim_id, set()).add(conflict.id)
+    claim_by_gap = {gap.id: gap.claim_id for gap in state.gaps}
+
+    deltas: dict[str, GapBatchDelta] = {}
+    for gap_id in handled_gap_ids:
+        claim_id = claim_by_gap.get(gap_id, "")
+        produced_evidence: set[str] = set()
+        produced_leads: set[str] = set()
+        for candidate_id, evidence_id in evidence_id_by_candidate.items():
+            try:
+                candidate = _candidate_by_id(cursor, candidate_id)
+            except ValueError:
+                continue
+            if any(query_to_gap.get(query_id) == gap_id for query_id in candidate.query_ids):
+                produced_evidence.add(evidence_id)
+                if evidence_id in lead_evidence_ids:
+                    produced_leads.add(evidence_id)
+        deltas[gap_id] = GapBatchDelta(
+            gap_id=gap_id,
+            produced_evidence_ids=tuple(sorted(produced_evidence)),
+            produced_conflict_gap_ids=tuple(
+                sorted(conflicts_by_claim.get(claim_id, set()))
+            ),
+            produced_provenance_lead_ids=tuple(sorted(produced_leads)),
+        )
+    return deltas
 
 
 def _ranked_from_dict(raw: Mapping[str, Any]) -> RankedCandidate:
@@ -1326,8 +1670,19 @@ def _state_after_gate(state: ResearchState, gate: EvidenceGateResult) -> Researc
         )
         for claim in state.claims
     )
+    claims_by_id = {claim.id: claim for claim in state.claims}
     gaps = tuple(
-        replace(gap, state="open" if gap.claim_id in open_claims else "resolved")
+        replace(
+            gap,
+            state=(
+                "open"
+                if gap.claim_id in open_claims
+                else "resolved"
+                if claims_by_id.get(gap.claim_id) is not None
+                and claims_by_id[gap.claim_id].priority == "critical"
+                else gap.state
+            ),
+        )
         for gap in state.gaps
     )
     brief = ResearchBrief(
@@ -1508,6 +1863,51 @@ def _attempt_number(cursor: ResearchRuntimeCursor, item_id: str) -> int:
         for failure in cursor.failures
     )
     return min(2, 1 + interrupted)
+
+
+def _model_attempt_start(
+    cursor: ResearchRuntimeCursor,
+    logical_call_id: str,
+) -> int:
+    """P1-C batch 2: next attempt for a logical model operation.
+
+    Derived from the durable call history of the SAME logical call id (never
+    from failure text): a completed/inflight attempt 1 means resume must run
+    attempt 2 so physical call ids stay unique and the interrupted_unknown ->
+    bounded retry truth is preserved.
+    """
+    previous = [
+        call.attempt
+        for call in cursor.model_calls
+        if call.logical_call_id == logical_call_id
+    ]
+    return min(MAX_RESEARCH_MODEL_ATTEMPTS, max(previous, default=0) + 1)
+
+
+def _assessment_call_suffix(
+    cursor: ResearchRuntimeCursor,
+    claim_id: str,
+    candidate_ids: tuple[str, ...],
+) -> str:
+    """P1-C batch 2: pure semantic identity for one assessment operation.
+
+    Wave + claim + sorted candidate fingerprint — never the audit log length —
+    so a crash/resume re-runs the SAME logical operation (attempt layer then
+    advances) instead of minting a new logical identity.
+    """
+    fingerprint = hashlib.sha256(
+        "|".join(sorted(candidate_ids)).encode("utf-8")
+    ).hexdigest()[:12]
+    return f":{cursor.wave_id}:{claim_id}:{fingerprint}"
+
+
+def _extraction_call_suffix(
+    cursor: ResearchRuntimeCursor,
+    candidate_id: str,
+    claim_id: str,
+) -> str:
+    """P1-C batch 2: pure semantic identity for one extraction operation."""
+    return f":{cursor.wave_id}:{candidate_id}:{claim_id}"
 
 
 def _dedupe(values: list[str]) -> list[str]:

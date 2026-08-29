@@ -1,8 +1,8 @@
 {
   "schema_version": "research-quality-b5-active-smoke-v2",
-  "started_at": "2026-08-28T12:41:34.486452Z",
+  "started_at": "2026-08-29T18:05:41.246564Z",
   "question": "What open-source license does the FastAPI project use?",
-  "reference_date": "2026-08-28",
+  "reference_date": "2026-08-29",
   "searxng_endpoint": "http://127.0.0.1:8080",
   "run": {
     "status": "partial",
@@ -22,7 +22,7 @@
     "searxng_success": true,
     "provider_audits": [
       {
-        "query": "FastAPI project s license MIT License.",
+        "query": "FastAPI project uses MIT License.",
         "providers_attempted": [
           "searxng",
           "bing_rss",
@@ -31,7 +31,7 @@
         "provider_audit": true
       },
       {
-        "query": "FastAPI project s license MIT License. official documentation primary source",
+        "query": "FastAPI project uses MIT License. official documentation primary source",
         "providers_attempted": [
           "searxng",
           "bing_rss",
@@ -54,12 +54,12 @@
     "status": "partial",
     "eligible_evidence_count": 0,
     "open_critical_claim_ids": [
-      "claim_e427e39006b952c20f33d1b0"
+      "claim_63dbd3ca4630fe066d44d6ec"
     ],
     "stop_reason": "evidence_budget_exhausted",
     "budget": {
       "candidates_used": 7,
-      "elapsed_seconds": 75.29700000002049,
+      "elapsed_seconds": 64.7039999999106,
       "hard_timeout_seconds": 60.0,
       "max_candidates": 20,
       "max_reads": 8,
@@ -90,7 +90,7 @@
     "open_critical_gap_count": 1,
     "active_phase": "assessing",
     "gate_status": "partial",
-    "version": 19,
+    "version": 20,
     "round": null,
     "notes_count": 0,
     "last_step_kind": null,

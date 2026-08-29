@@ -296,6 +296,7 @@ class ResearchModelGateway:
         timeout_seconds: float | None = None,
         on_attempt_started: AttemptStartedHook | None = None,
         on_attempt_finished: AttemptFinishedHook | None = None,
+        attempt_start: int = 1,
     ) -> ResearchModelResult[T]:
         call_root = _required_text(logical_call_id, 300, "logical_call_id")
         normalized_purpose = _required_text(purpose, 100, "purpose")
@@ -304,6 +305,7 @@ class ResearchModelGateway:
             raise ValueError("research model call requires messages")
         if not callable(parse):
             raise TypeError("research model call requires a parser")
+        attempt_start = _bounded_int(attempt_start, 1, self.max_attempts, "attempt_start")
 
         model_name = self._resolved_model_name()
         timeout = self._resolved_timeout()
@@ -329,7 +331,7 @@ class ResearchModelGateway:
         )
         audits: list[ResearchModelCallAudit] = []
 
-        for attempt in range(1, self.max_attempts + 1):
+        for attempt in range(attempt_start, self.max_attempts + 1):
             call_id = f"{call_root}:attempt:{attempt}"
             started_at = self._now()
             marker = ResearchModelAttemptStart(

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Callable
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
-from collections.abc import Callable
 from threading import Event, Thread
 from time import perf_counter
 from typing import Any
@@ -14,7 +15,9 @@ from src.application.active_research_runtime import (
     ACTIVE_RESEARCH_BRIEF_KEY,
     ACTIVE_RESEARCH_METRICS_KEY,
     ACTIVE_RESEARCH_READ_PLAN_KEY,
+    ACTIVE_RESEARCH_WAVE_BASELINE_KEY,
     ActiveResearchRuntimeExecutor,
+    _append_gap_queries,
 )
 from src.application.research_web_lookup_dispatch import (
     _dispatch_state,
@@ -26,7 +29,14 @@ from src.infrastructure.sqlite.database import RuntimeDatabase
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.claim_planner import ClaimBootstrapResult, RuntimeClaimPlanner
-from src.web.research.contracts import ResearchBudget, build_research_state
+from src.web.research.contracts import (
+    EvidenceGap,
+    EvidenceRequirement,
+    ResearchBudget,
+    ResearchClaim,
+    ResearchQuestion,
+    build_research_state,
+)
 from src.web.research.model_gateway import ResearchModelGateway
 from src.web.research.runtime import CLAIM_ENGINE_RUNTIME_CONTEXT_KEY, ResearchRuntimeCursor
 from src.web.research.state import attach_claim_engine_state
@@ -176,6 +186,9 @@ class _StructuredClient:
 
 
 class _SearchBackend:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def search_exact(
         self,
         query: str,
@@ -183,6 +196,7 @@ class _SearchBackend:
         max_results: int = 5,
     ) -> dict[str, Any]:
         del query, max_results
+        self.calls += 1
         results = [
             {
                 "title": "Primary release",
@@ -208,6 +222,30 @@ class _SearchBackend:
             "provider_audits": [],
             "provider_outcomes": [],
             "searched_at": "2026-08-27T00:00:00+00:00",
+        }
+
+
+class _EmptySearchBackend:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def search_exact(
+        self,
+        query: str,
+        *,
+        max_results: int = 5,
+    ) -> dict[str, Any]:
+        del query, max_results
+        self.calls += 1
+        return {
+            "status": "empty",
+            "reason": "no_results",
+            "results": [],
+            "providers_attempted": ["searxng"],
+            "provider_errors": [],
+            "provider_audits": [],
+            "provider_outcomes": [],
+            "searched_at": "2026-08-29T00:00:00+00:00",
         }
 
 
@@ -431,6 +469,132 @@ def test_active_model_policy_denial_fails_closed_before_external_call(tmp_path: 
     assert audits[-1]["status"] == "blocked_by_policy"
 
 
+def _two_gap_state(*, same_claim_text: bool = False) -> Any:
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    claims = (
+        ResearchClaim(
+            id="claim_1",
+            question_id=question.id,
+            text="Alpha framework current release",
+            kind="factual",
+            priority="critical",
+            state="searching",
+            evidence_requirement=requirement,
+        ),
+        ResearchClaim(
+            id="claim_2",
+            question_id=question.id,
+            text=(
+                "Alpha framework current release"
+                if same_claim_text
+                else "Beta framework current release"
+            ),
+            kind="factual",
+            priority="critical",
+            state="searching",
+            evidence_requirement=requirement,
+        ),
+    )
+    gaps = (
+        EvidenceGap(
+            id="gap_1",
+            claim_id="claim_1",
+            gap_type="missing_primary",
+            desired_source_role="primary",
+            priority="critical",
+        ),
+        EvidenceGap(
+            id="gap_2",
+            claim_id="claim_2",
+            gap_type="missing_primary",
+            desired_source_role="primary",
+            priority="critical",
+        ),
+    )
+    return build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=claims,
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=gaps,
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-29",
+        known_evidence_ids=(),
+    )
+
+
+def test_two_gap_wave_appends_four_unique_queries_per_gap_once() -> None:
+    state = _two_gap_state()
+
+    first_wave = _append_gap_queries(ResearchRuntimeCursor(), state)
+    second_wave = _append_gap_queries(first_wave, state)
+
+    assert Counter(query.gap_id for query in first_wave.planned_queries) == {
+        "gap_1": 4,
+        "gap_2": 4,
+    }
+    assert len(first_wave.planned_queries) == 8
+    assert len({query.id for query in first_wave.planned_queries}) == 8
+    assert second_wave.planned_queries == first_wave.planned_queries
+
+
+def test_semantic_query_dedupe_still_saturates_each_active_gap(tmp_path: Any) -> None:
+    state = _two_gap_state(same_claim_text=True)
+    context = attach_claim_engine_state(
+        _active_context(),
+        state,
+        known_evidence_ids=(),
+    )
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-gaps.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_gap_saturation",
+            query="Compare identical research surfaces",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    search = _EmptySearchBackend()
+    client = _StructuredClient()
+
+    completed = _service(repository, client, search_backend=search).execute(
+        run.id,
+        raise_on_error=True,
+    )
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_saturated"
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index == 3
+    assert cursor.active_gap_ids == ("gap_1", "gap_2")
+    assert cursor.no_gain_batches_by_gap == {"gap_1": 3, "gap_2": 3}
+    assert cursor.no_gain_batches_by_claim == {"claim_1": 3, "claim_2": 3}
+    assert len(cursor.gain_history) == 3
+    assert all(item["substantive_gain"] is False for item in cursor.gain_history)
+    assert len(cursor.planned_queries) == 4
+    assert len({item.query.casefold() for item in cursor.planned_queries}) == 4
+    assert search.calls == 4
+    assert client.calls == []
+
+
 def test_malformed_extraction_never_becomes_evidence_and_resume_skips_calls(
     tmp_path: Any,
 ) -> None:
@@ -450,7 +614,7 @@ def test_malformed_extraction_never_becomes_evidence_and_resume_skips_calls(
 
     assert partial.status == "partial"
     assert partial.provider_status == "insufficient"
-    assert partial.stop_reason == "evidence_gap_open"
+    assert partial.stop_reason == "evidence_saturated"
     assert partial.items == []
     assert all(item["read_status"] == "read" for item in partial.selected_sources)
     assert all(
@@ -474,7 +638,7 @@ def test_malformed_extraction_never_becomes_evidence_and_resume_skips_calls(
     ).execute(run.id, raise_on_error=True)
 
     assert resumed.status == "partial"
-    assert resumed.stop_reason == "evidence_gap_open"
+    assert resumed.stop_reason == "evidence_saturated"
     assert resumed_client.calls == []
     assert resumed_read.calls == 0
 
@@ -597,6 +761,96 @@ def test_model_crash_after_success_before_semantic_persist_recovers_via_new_atte
     assert len({item.call_id for item in cursor.model_calls}) == len(cursor.model_calls)
 
 
+def test_crash_after_extraction_preserves_wave_baseline_and_gain(tmp_path: Any) -> None:
+    class _CrashAfterExtractionRepository(_TrackingRepository):
+        def __init__(self, database: RuntimeDatabase) -> None:
+            super().__init__(database)
+            self.crashed = False
+
+        def checkpoint(self, run_id: str, **kwargs: Any) -> WebLookupRun:
+            persisted = super().checkpoint(run_id, **kwargs)
+            if self.crashed:
+                return persisted
+            has_eligible_extraction = any(
+                isinstance(record.get("extractions"), dict)
+                and any(
+                    isinstance(detail, dict) and detail.get("status") == "eligible"
+                    for detail in record["extractions"].values()
+                )
+                for record in kwargs["selected_sources"]
+            )
+            cursor = ResearchRuntimeCursor.from_dict(
+                persisted.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+            )
+            if has_eligible_extraction and not cursor.gain_history:
+                self.crashed = True
+                assert persisted.active_operation_id
+                self.fail(
+                    run_id,
+                    "simulated crash after extraction",
+                    operation_id=persisted.active_operation_id,
+                )
+                raise RuntimeError("simulated crash after extraction")
+            return persisted
+
+    repository = _CrashAfterExtractionRepository(
+        RuntimeDatabase(tmp_path / "active-extraction-crash.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_extraction_crash",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    client = _StructuredClient()
+    search = _SearchBackend()
+    reader = _ReadGateway()
+    service = _service(
+        repository,
+        client,
+        search_backend=search,
+        read_gateway=reader,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated crash after extraction"):
+        service.execute(run.id, raise_on_error=True)
+
+    crashed = repository.get(run.id)
+    assert crashed is not None
+    baseline = crashed.research_context[ACTIVE_RESEARCH_WAVE_BASELINE_KEY]
+    assert baseline["evidence"] == []
+    crashed_state = _dispatch_state(crashed)
+    assert crashed_state is not None
+    assert len(crashed_state.evidence) == 1
+    crashed_cursor = ResearchRuntimeCursor.from_dict(
+        crashed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert crashed_cursor.wave_index == 1
+    assert crashed_cursor.wave_id == f"research_wave:{run.id}:1"
+    assert crashed_cursor.gain_history == ()
+    search_calls = search.calls
+    read_calls = reader.calls
+
+    recovered = service.execute(run.id, raise_on_error=True)
+
+    assert recovered.status == "completed"
+    cursor = ResearchRuntimeCursor.from_dict(
+        recovered.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert len(cursor.gain_history) == 1
+    assert cursor.gain_history[0]["substantive_gain"] is True
+    assert "new_eligible_evidence" in cursor.gain_history[0]["gain_reasons"]
+    assert search.calls == search_calls
+    assert reader.calls == read_calls
+    assert len({item.id for item in cursor.planned_queries}) == len(
+        cursor.planned_queries
+    )
+
+
 def test_full_candidate_pool_stops_pending_external_searches(tmp_path: Any) -> None:
     """B5-H2: a full candidate pool must stop pending external searches.
 
@@ -627,7 +881,7 @@ def test_full_candidate_pool_stops_pending_external_searches(tmp_path: Any) -> N
     # legitimately settles partial; the H2 assertions are the search stop and
     # the pool cap, not the gate outcome.
     assert completed.status == "partial"
-    assert completed.stop_reason == "evidence_budget_exhausted"
+    assert completed.stop_reason == "evidence_saturated"
     assert search.calls == 1
     cursor = ResearchRuntimeCursor.from_dict(
         completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
@@ -1183,3 +1437,363 @@ def test_reusable_candidates_obey_scheduler_eligibility() -> None:
     assert ("Y", "cluster_Y") in b_pairs
     assert ("Z", "cluster_Z") in b_pairs
     assert "X" not in {item["candidate_id"] for item in physical if item["claim_id"] == "claim_B"}
+
+def test_major_claim_saturates_after_two_no_gain_waves(tmp_path: Any) -> None:
+    """Frozen rule: non-critical claims saturate after exactly two no-gain
+    waves - the optional third batch is a critical/conflict privilege only."""
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    claim = ResearchClaim(
+        id="claim_major",
+        question_id=question.id,
+        text="Alpha framework current release",
+        kind="factual",
+        priority="major",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    gap = EvidenceGap(
+        id="gap_major",
+        claim_id=claim.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="major",
+        state="open",
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim,),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(gap,),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-major.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_major_saturation",
+            query="Alpha framework current release",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    search = _EmptySearchBackend()
+    client = _StructuredClient()
+
+    completed = _service(repository, client, search_backend=search).execute(
+        run.id,
+        raise_on_error=True,
+    )
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_saturated"
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index == 2
+    assert cursor.no_gain_batches_by_claim == {"claim_major": 2}
+    assert cursor.no_gain_batches_by_gap == {"gap_major": 2}
+    assert len(cursor.gain_history) == 2
+
+
+def test_wave_limit_exhausted_is_not_fake_saturation(tmp_path: Any) -> None:
+    """P1: hitting the MAX_RESEARCH_WAVES ceiling must persist the honest
+    wave_limit_exhausted reason, never evidence_saturated or
+    evidence_budget_exhausted (regression for the truth bug).
+
+    The claim is critical (saturation threshold 3), so one no-gain wave leaves
+    it unsaturated; monkeypatching MAX_RESEARCH_WAVES=1 forces the ceiling to
+    terminate while the claim genuinely has no_gain_batches == 1.
+    """
+    import src.application.active_research_runtime as art_mod
+
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    claim = ResearchClaim(
+        id="claim_wave_limit",
+        question_id=question.id,
+        text="Alpha framework current release",
+        kind="factual",
+        priority="critical",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    gap = EvidenceGap(
+        id="gap_wave_limit",
+        claim_id=claim.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="critical",
+        state="open",
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim,),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(gap,),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-wavelimit.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_wave_limit",
+            query="Alpha framework current release",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    search = _EmptySearchBackend()
+    client = _StructuredClient()
+
+    original_limit = art_mod.MAX_RESEARCH_WAVES
+    art_mod.MAX_RESEARCH_WAVES = 1
+    try:
+        completed = _service(repository, client, search_backend=search).execute(
+            run.id,
+            raise_on_error=True,
+        )
+    finally:
+        art_mod.MAX_RESEARCH_WAVES = original_limit
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "wave_limit_exhausted"
+    assert completed.stop_reason != "evidence_saturated"
+    assert completed.stop_reason != "evidence_budget_exhausted"
+    assert completed.answer_confidence == "none"  # empty evidence
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index == 1
+    assert cursor.no_gain_batches_by_claim == {"claim_wave_limit": 1}
+    from src.web.research.evidence_gain import SaturationState, saturated_claim_ids
+
+    assert "claim_wave_limit" not in saturated_claim_ids(
+        SaturationState(no_gain_batches_by_claim=dict(cursor.no_gain_batches_by_claim))
+    )
+
+def test_resume_restores_missing_claim_binding_after_extraction_crash(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 2: a shared source read once for two claims, with claim A's
+    extraction completed and claim B's crashed, must restore the (candidate,
+    claim B) binding on resume - never drop it because the candidate's
+    physical read already completed."""
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-multiclaim-crash.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_multiclaim_crash",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+
+    class _CrashOnSecondExtraction:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+            self.calls = 0
+
+        def extract(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            result = self._inner.extract(**kwargs)
+            if self.calls == 2:
+                raise RuntimeError("simulated extraction crash")
+            return result
+
+    from src.web.research.model_gateway import ResearchModelGateway as _RMG
+    from src.web.research.active_semantics import RuntimeEvidenceExtractor as _REE
+
+    crashing_model = _RMG(client=_StructuredClient(claims_count=2), model_name="test-model", timeout_seconds=20)
+    crashing_extractor = _CrashOnSecondExtraction(_REE(crashing_model))
+
+    def crashing_runtime_factory(
+        repo: WebLookupRepository,
+        gateway: ActiveResearchGateway,
+    ) -> ActiveResearchRuntimeExecutor:
+        return ActiveResearchRuntimeExecutor(
+            repo,
+            gateway,
+            model_gateway=crashing_model,
+            evidence_extractor=crashing_extractor,
+        )
+
+    service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(
+            search_backend=_ProvenanceSearchBackend(),
+            read_gateway=_ReadGateway(),
+        ),
+        active_runtime_factory=crashing_runtime_factory,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated extraction crash"):
+        service.execute(run.id, raise_on_error=True)
+
+    resumed_client = _StructuredClient(claims_count=2)
+    resumed = _service(repository, resumed_client, search_backend=_ProvenanceSearchBackend()).execute(
+        run.id, raise_on_error=True
+    )
+
+    assert resumed.status in {"completed", "partial"}
+    state = _dispatch_state(repository.get(run.id))
+    assert state is not None
+    linked_claims = {link.claim_id for link in state.evidence_links}
+    assert len(linked_claims) == 2
+    shared_record = next(
+        item
+        for item in resumed.selected_sources
+        if len((item.get("extractions") or {})) >= 2
+    )
+    assert set((shared_record.get("extractions") or {})) == linked_claims
+
+    # Logical call identity must not drift across the crash/resume boundary:
+    # the crashed extraction re-runs under the SAME logical_call_id with
+    # attempt 2 (the wrapper crash lands in the executor exception fallback,
+    # so the durable failure is the exception type rather than
+    # interrupted_unknown; a process-level crash produces the inflight ->
+    # interrupted_unknown path instead). Physical call ids stay unique.
+    cursor = ResearchRuntimeCursor.from_dict(
+        resumed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    extraction_calls = [
+        call
+        for call in cursor.model_calls
+        if "research_evidence_extract" in call.logical_call_id
+    ]
+    attempts_by_logical: dict[str, list[int]] = {}
+    for call in extraction_calls:
+        attempts_by_logical.setdefault(call.logical_call_id, []).append(call.attempt)
+    retried = [
+        (logical, attempts)
+        for logical, attempts in attempts_by_logical.items()
+        if attempts == [1, 2]
+    ]
+    assert retried, f"expected an extraction retried as attempt 2: {attempts_by_logical}"
+    assert len({call.call_id for call in cursor.model_calls}) == len(
+        cursor.model_calls
+    )
+
+def test_assessment_identity_stable_across_crash_resume(tmp_path: Any) -> None:
+    """P1-C batch 2: an assessment that crashes after the provider call but
+    before the semantic result is durable must resume under the SAME logical
+    call identity with attempt 2 (candidate fingerprint canonical)."""
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-assess-crash.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_assess_crash",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+
+    class _CrashOnFirstAssessment:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+            self.calls = 0
+
+        def assess(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            result = self._inner.assess(**kwargs)
+            if self.calls == 1:
+                raise RuntimeError("simulated assessment crash")
+            return result
+
+    from src.web.research.model_gateway import ResearchModelGateway as _RMG2
+    from src.web.research.active_semantics import RuntimeCandidateAssessor as _RCA
+
+    crashing_model = _RMG2(
+        client=_StructuredClient(), model_name="test-model", timeout_seconds=20
+    )
+    crashing_assessor = _CrashOnFirstAssessment(_RCA(crashing_model))
+
+    def crashing_runtime_factory(
+        repo: WebLookupRepository,
+        gateway: ActiveResearchGateway,
+    ) -> ActiveResearchRuntimeExecutor:
+        return ActiveResearchRuntimeExecutor(
+            repo,
+            gateway,
+            model_gateway=crashing_model,
+            candidate_assessor=crashing_assessor,
+        )
+
+    service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(
+            search_backend=_SearchBackend(),
+            read_gateway=_ReadGateway(),
+        ),
+        active_runtime_factory=crashing_runtime_factory,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated assessment crash"):
+        service.execute(run.id, raise_on_error=True)
+
+    resumed = _service(repository, _StructuredClient()).execute(
+        run.id,
+        raise_on_error=True,
+    )
+    assert resumed.status in {"completed", "partial"}
+
+    cursor = ResearchRuntimeCursor.from_dict(
+        resumed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assessment_calls = [
+        call
+        for call in cursor.model_calls
+        if "research_candidate_assessment" in call.logical_call_id
+    ]
+    attempts_by_logical: dict[str, list[int]] = {}
+    for call in assessment_calls:
+        attempts_by_logical.setdefault(call.logical_call_id, []).append(call.attempt)
+    retried = [
+        attempts
+        for attempts in attempts_by_logical.values()
+        if attempts == [1, 2]
+    ]
+    assert retried, f"expected assessment retried as attempt 2: {attempts_by_logical}"
+    assert len({call.call_id for call in cursor.model_calls}) == len(
+        cursor.model_calls
+    )
