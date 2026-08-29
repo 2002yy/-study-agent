@@ -686,3 +686,101 @@ def test_serialization_fails_closed_on_malformed_payloads() -> None:
         EvidenceGainResult.from_dict("not an object")
     with pytest.raises(ValueError):
         SaturationState.from_dict("not an object")
+
+def test_cross_claim_reason_leakage_is_blocked() -> None:
+    """R4: Claim B's role gap must not be reset by Claim A's role upgrade."""
+    requirement = EvidenceRequirement(source_roles=_ALL_ROLES)
+    before = _state(
+        claims=(
+            _claim("A", requirement=requirement, state="partially_satisfied"),
+            _claim("B", requirement=requirement, state="partially_satisfied"),
+        ),
+        evidence=(_evidence("EA1"),),
+        links=(
+            _link("A", "EA1", source_role="independent_secondary", cluster_id="CX"),
+        ),
+        gaps=(_gap("GB", "B", gap_type="primary_missing", desired_source_role="primary"),),
+    )
+    after = _state(
+        claims=(
+            _claim("A", requirement=requirement, state="partially_satisfied"),
+            _claim("B", requirement=requirement, state="satisfied"),
+        ),
+        evidence=(_evidence("EA1"), _evidence("EA2")),
+        links=(
+            _link("A", "EA1", source_role="independent_secondary", cluster_id="CX"),
+            _link("A", "EA2", source_role="primary", cluster_id="CY"),
+        ),
+        gaps=(_gap("GB", "B", gap_type="primary_missing", desired_source_role="primary"),),
+    )
+
+    result = evaluate_evidence_gain(before, after, target_gap_ids=("GB",))
+
+    # Claim B genuinely improved (partially_satisfied -> satisfied), but the
+    # better_source_role / new_independent_cluster reasons belong to Claim A
+    # only: GB (desired primary) is not credited from A's or B's reasons.
+    assert "B" in result.affected_claim_ids
+    assert result.gain_reasons_by_claim["A"] == (
+        "better_source_role",
+        "new_independent_cluster",
+    )
+    assert result.gain_reasons_by_claim["B"] == ("claim_status_improvement",)
+    assert "GB" not in result.affected_gap_ids
+
+
+def test_wrong_role_gain_does_not_credit_desired_role_gap() -> None:
+    """R5: a primary-role gap is only credited when primary actually appears.
+
+    The claim legitimately gains (community evidence, first eligible), but the
+    primary gap made no progress, so its saturation counter must increment.
+    """
+    requirement = EvidenceRequirement(source_roles=("community", "primary"))
+    gap = _gap("G", "C1", gap_type="primary_missing", desired_source_role="primary")
+    before = _state(claims=(_claim("C1", requirement=requirement),), gaps=(gap,))
+    after = _state(
+        claims=(_claim("C1", requirement=requirement),),
+        evidence=(_evidence("E1"),),
+        links=(_link("C1", "E1", source_role="community", cluster_id="CX"),),
+        gaps=(gap,),
+    )
+
+    result = evaluate_evidence_gain(before, after, target_gap_ids=("G",))
+
+    assert result.substantive_gain is True
+    assert "C1" in result.affected_claim_ids
+    assert "G" not in result.affected_gap_ids
+
+    state = update_saturation(
+        SaturationState(no_gain_batches_by_gap={"G": 1}),
+        result,
+        handled_gap_ids=("G",),
+    )
+    assert state.no_gain_batches_by_gap["G"] == 2
+
+
+def test_desired_role_gap_credited_only_when_role_appears() -> None:
+    """R5 positive: primary absent -> primary present credits the gap."""
+    requirement = EvidenceRequirement(source_roles=_ALL_ROLES)
+    gap = _gap("G", "C1", gap_type="primary_missing", desired_source_role="primary")
+    before = _state(
+        claims=(_claim("C1", requirement=requirement),),
+        evidence=(_evidence("E1"),),
+        links=(
+            _link("C1", "E1", source_role="community", cluster_id="CX"),
+        ),
+        gaps=(gap,),
+    )
+    after = _state(
+        claims=(_claim("C1", requirement=requirement),),
+        evidence=(_evidence("E1"), _evidence("E2")),
+        links=(
+            _link("C1", "E1", source_role="community", cluster_id="CX"),
+            _link("C1", "E2", source_role="primary", cluster_id="CY"),
+        ),
+        gaps=(gap,),
+    )
+
+    result = evaluate_evidence_gain(before, after, target_gap_ids=("G",))
+
+    assert result.substantive_gain is True
+    assert result.affected_gap_ids == ("G",)

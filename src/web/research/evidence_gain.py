@@ -92,11 +92,21 @@ class EvidenceGainResult:
     affected_claim_ids: tuple[str, ...]
     affected_gap_ids: tuple[str, ...]
     metrics: Mapping[str, int] = field(default_factory=dict)
+    # R4: per-claim reason attribution. The batch-level gain_reasons list is
+    # the union; this mapping is the audit fact the multi-wave runtime will
+    # need for trace and durable resume (which claim was moved by what).
+    gain_reasons_by_claim: Mapping[str, tuple[EvidenceGainReason, ...]] = field(
+        default_factory=dict
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "substantive_gain": self.substantive_gain,
             "gain_reasons": list(self.gain_reasons),
+            "gain_reasons_by_claim": {
+                claim_id: list(reasons)
+                for claim_id, reasons in self.gain_reasons_by_claim.items()
+            },
             "affected_claim_ids": list(self.affected_claim_ids),
             "affected_gap_ids": list(self.affected_gap_ids),
             "metrics": dict(self.metrics),
@@ -137,9 +147,21 @@ class EvidenceGainResult:
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError("metrics must be non-negative integers")
             metrics[str(key)] = value
+        raw_by_claim = raw.get("gain_reasons_by_claim") or {}
+        if not isinstance(raw_by_claim, Mapping):
+            raise ValueError("gain_reasons_by_claim must be an object")
+        reasons_by_claim: dict[str, tuple[EvidenceGainReason, ...]] = {}
+        for claim_id, claim_reasons in raw_by_claim.items():
+            if not isinstance(claim_reasons, list) or any(
+                not isinstance(reason, str) or reason not in _GAIN_REASONS
+                for reason in claim_reasons
+            ):
+                raise ValueError("invalid gain_reasons_by_claim entry")
+            reasons_by_claim[str(claim_id)] = tuple(claim_reasons)  # type: ignore[arg-type]
         return cls(
             substantive_gain=substantive,
             gain_reasons=tuple(raw_reasons),  # type: ignore[arg-type]
+            gain_reasons_by_claim=reasons_by_claim,
             affected_claim_ids=tuple(raw["affected_claim_ids"]),
             affected_gap_ids=tuple(raw["affected_gap_ids"]),
             metrics=metrics,
@@ -227,27 +249,29 @@ def _best_role_rank(links: Mapping[str, set[tuple[str, str, str]]], claim_id: st
     return max((_ROLE_RANK.get(role, 0) for role in roles), default=-1)
 
 
-def _gap_benefits_from_reasons(
+def _gap_credited(
     gap: Any,
-    reasons: tuple[EvidenceGainReason, ...],
+    claim_reasons: set[EvidenceGainReason],
+    before_links: Mapping[str, set[tuple[str, str, str]]],
+    after_links: Mapping[str, set[tuple[str, str, str]]],
 ) -> bool:
-    """R3: decide whether a targeted gap is actually credited by this batch.
+    """R3/R5: decide whether a targeted gap is actually credited by this batch.
 
-    Conflict-flavoured gaps are only credited by contradiction gains; gaps
-    with a desired source role are credited by role upgrades or first
-    evidence; other targeted gaps of an affected claim are credited by any
-    claim-level gain. A gain on the claim therefore never resets saturation
-    for a gap this batch did not actually serve.
+    Attribution uses only the reasons of the gap's OWN claim (R4: no
+    cross-claim reason leakage), and a desired_source_role gap is credited by
+    comparing the actual Gate-eligible roles before vs after (R5) — gaining a
+    different role than the one the gap wants is real claim progress but not
+    progress for this gap.
     """
     gap_type = str(getattr(gap, "gap_type", "")).casefold()
     if any(marker in gap_type for marker in _CONFLICT_GAP_MARKERS):
-        return "new_contradiction" in reasons
-    if str(getattr(gap, "desired_source_role", "") or "").strip():
-        return (
-            "better_source_role" in reasons
-            or "new_eligible_evidence" in reasons
-        )
-    return bool(reasons)
+        return "new_contradiction" in claim_reasons
+    desired_role = str(getattr(gap, "desired_source_role", "") or "").strip()
+    if desired_role:
+        before_roles = {role for (_, role, _) in before_links.get(gap.claim_id, set())}
+        after_roles = {role for (_, role, _) in after_links.get(gap.claim_id, set())}
+        return desired_role not in before_roles and desired_role in after_roles
+    return bool(claim_reasons)
 
 
 def evaluate_evidence_gain(
@@ -260,12 +284,20 @@ def evaluate_evidence_gain(
 
     ``target_gap_ids`` are the gaps this batch actually served. Gap
     attribution is never broadcast from claim-level gains: only a targeted
-    gap whose type/role was genuinely served by the batch's gain reasons is
-    credited (R3). The evaluation is pure and deterministic.
+    gap whose own claim's gain reasons (R4) and actual role coverage (R5)
+    were genuinely served by the batch is credited. The evaluation is pure
+    and deterministic.
     """
     reasons: list[EvidenceGainReason] = []
+    reasons_by_claim: dict[str, set[EvidenceGainReason]] = {}
     affected_claims: set[str] = set()
     metrics: dict[str, int] = {}
+
+    def _record(reason: EvidenceGainReason, claim_ids: Iterable[str]) -> None:
+        reasons.append(reason)
+        for claim_id in claim_ids:
+            affected_claims.add(claim_id)
+            reasons_by_claim.setdefault(claim_id, set()).add(reason)
 
     before_links = _eligible_support_links(before)
     after_links = _eligible_support_links(after)
@@ -281,8 +313,7 @@ def evaluate_evidence_gain(
         if links and claim_id not in before_links
     )
     if first_evidence_claims:
-        reasons.append("new_eligible_evidence")
-        affected_claims.update(first_evidence_claims)
+        _record("new_eligible_evidence", first_evidence_claims)
     metrics["first_eligible_claims"] = len(first_evidence_claims)
 
     # 2) new_independent_cluster: a claim gains a support cluster (through an
@@ -295,8 +326,7 @@ def evaluate_evidence_gain(
         - {cluster for (_, _, cluster) in before_links.get(claim_id, set())}
     )
     if new_cluster_claims:
-        reasons.append("new_independent_cluster")
-        affected_claims.update(new_cluster_claims)
+        _record("new_independent_cluster", new_cluster_claims)
     metrics["new_cluster_claims"] = len(new_cluster_claims)
 
     # 3) better_source_role: a claim's best eligible evidence-bearing role
@@ -308,8 +338,7 @@ def evaluate_evidence_gain(
         if _best_role_rank(after_links, claim_id) > _best_role_rank(before_links, claim_id)
     )
     if role_upgraded_claims:
-        reasons.append("better_source_role")
-        affected_claims.update(role_upgraded_claims)
+        _record("better_source_role", role_upgraded_claims)
     metrics["role_upgraded_claims"] = len(role_upgraded_claims)
 
     # 4) new_contradiction: a new contradicts link or a new conflict gap.
@@ -323,22 +352,23 @@ def evaluate_evidence_gain(
         gap for gap in after.conflict_gaps if gap.id not in before_conflict_ids
     ]
     if new_contradiction_links or new_conflict_gaps:
-        reasons.append("new_contradiction")
-        affected_claims.update(claim_id for claim_id, _ in new_contradiction_links)
-        affected_claims.update(gap.claim_id for gap in new_conflict_gaps)
+        _record(
+            "new_contradiction",
+            [claim_id for claim_id, _ in new_contradiction_links]
+            + [gap.claim_id for gap in new_conflict_gaps],
+        )
     metrics["new_contradicting_links"] = len(new_contradiction_links)
     metrics["new_conflict_gaps"] = len(new_conflict_gaps)
 
     # 5) new_provenance_lead: a new relation="lead" link on eligible evidence.
     new_leads = sorted(_provenance_lead_pairs(after) - _provenance_lead_pairs(before))
     if new_leads:
-        reasons.append("new_provenance_lead")
-        affected_claims.update(claim_id for claim_id, _ in new_leads)
+        _record("new_provenance_lead", [claim_id for claim_id, _ in new_leads])
     metrics["new_provenance_leads"] = len(new_leads)
 
     # 6) claim_status_improvement: only the explicitly frozen improvement
-    # edges count (e.g. pending -> searching, contested -> satisfied). Moving
-    # into "unresolved" is a legitimate terminal state, never progress.
+    # edges count. Moving into "unresolved" is a legitimate terminal state,
+    # never progress.
     before_claim_states = {claim.id: claim.state for claim in before.claims}
     improved_claims = sorted(
         claim.id
@@ -347,25 +377,32 @@ def evaluate_evidence_gain(
         in _CLAIM_IMPROVEMENT_EDGES
     )
     if improved_claims:
-        reasons.append("claim_status_improvement")
-        affected_claims.update(improved_claims)
+        _record("claim_status_improvement", improved_claims)
     metrics["claims_improved"] = len(improved_claims)
 
-    # R3: explicit gap attribution. Only targeted gaps whose type/role was
-    # genuinely served by this batch's gain reasons are credited; a claim
-    # gaining evidence never silently resets every gap under it.
+    # R3/R4/R5: explicit gap attribution. Only targeted gaps whose OWN claim
+    # gained (R4: no cross-claim reason leakage) and whose type/role was
+    # genuinely served (R5: desired role must actually appear) are credited.
     targeted_ids = set(target_gap_ids)
     affected_gaps = sorted(
         gap.id
         for gap in after.gaps
         if gap.id in targeted_ids
-        and gap.claim_id in affected_claims
-        and _gap_benefits_from_reasons(gap, tuple(reasons))
+        and _gap_credited(
+            gap,
+            reasons_by_claim.get(gap.claim_id, set()),
+            before_links,
+            after_links,
+        )
     )
 
     return EvidenceGainResult(
         substantive_gain=bool(reasons),
         gain_reasons=tuple(reasons),
+        gain_reasons_by_claim={
+            claim_id: tuple(sorted(claim_reasons))
+            for claim_id, claim_reasons in sorted(reasons_by_claim.items())
+        },
         affected_claim_ids=tuple(sorted(affected_claims)),
         affected_gap_ids=tuple(affected_gaps),
         metrics=metrics,
