@@ -10,12 +10,12 @@
 
 > 新窗口 / 新 Agent 冷启动时先读本节，再按链接读取本轮所需合同；历史章节保留证据与决策时间语义，不拥有比本节更新的“当前下一步”。
 
-- **Delivery lineage：**B5（PR #132）→ `main@5d620fe0`；B5-Hardening（PR #133，head `c4745dc`）→ merge commit `fe308718`；P1-C 子批 1（PR #134，head `a246219`）→ merge commit `c2cc60e`。
+- **Delivery lineage：**B5（PR #132）→ `main@5d620fe0`；B5-Hardening（PR #133，head `c4745dc`）→ merge commit `fe308718`；P1-C 子批 1（PR #134，head `a246219`）→ merge commit `c2cc60e`；P1-C 子批 2（PR #135）head 演变 `cbb6ba0 → fc568cb → d7f5150 → f1b4d12`（多轮 review-fix，详见 0.5 节），未合并。
 - **Remote CI：**PR #134 exact head `a246219` 全门禁 success；merge 后 `main@c2cc60e` 的 CI [#33245466010](https://github.com/2002yy/study-agent/actions/runs/33245466010) `completed / success`。**B5 + B5-Hardening + P1-C 子批 1 = REMOTE GO / DELIVERED。**
-- **Current initiative：**RQCE-P1-C 子批 2：multi-wave durable runtime loop。在已冻结的 Evidence Gain + Saturation contracts（`evidence_gain.py`）之上，把 B5 单轮 executor 扩成 bounded 多轮循环；每轮 durable（wave cursor/ID、gain history、saturation state、checkpoint/crash-window 设计），`ResearchStopGate` 留给子批 3。
-- **Runtime status：**active single-wave production executor 已交付并经 B5-Hardening（H1–H9 全部修复）；Evidence Gain + Saturation contracts 已交付并经 R1–R11 六轮人工 review（见 0.4）。当前尚未实现 multi-wave saturation / ResearchStopGate production loop。
-- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + B5-Hardening + P1-C 子批 1 = **REMOTE GO / DELIVERED**；P1 multi-wave runtime = **NOT IMPLEMENTED**；RQ1 bounded default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
-- **唯一下一步：**只施工 P1-C 子批 2 = multi-wave durable runtime loop：`evidence_gain.py` 合同接入 bounded while 循环、durable wave/resume cursor（wave_index/wave_id/gain_history/saturation_state）、crash-window 设计（wave N search 完成 crash → 恢复到 assessment/read 而非重搜）；StopGate 不在本批。完成后子批 3（ResearchStopGate + budget + resume + steering）→ bounded 12-case qualification → P2。
+- **Current initiative：**RQCE-P1-C 子批 2 收口：multi-wave durable runtime loop 代码已交付并通过本地全门禁（focused 92/92、full pytest 1429/1429），PR #135 处于多轮 review 收敛中（8 findings：3+2+3，前两批已合并、第三批 head `f1b4d12` 待 exact-head CI 与独立复审）。收口后进入 Deployment-D0（## 16，文档已落盘待提交）→ 子批 3（ResearchStopGate）。
+- **Runtime status：**multi-wave production executor 已实现（wave cursor/ID、active_gap_ids handled-truth、gain_history、per-gap/per-claim saturation、crash-resume baseline、assessment/extraction logical identity + durable attempt 恢复、wave_limit_exhausted 真值、context-gap 可处理范围对齐）。本地全门禁绿；真实 SearXNG smoke PASS（searxng_success=true，60s hard budget 内 wave 1 耗尽——真实第二波未达，multi-wave 由 synthetic 回归覆盖，记录为 Batch 3 预算分配观测项）。ResearchStopGate production loop 尚未实现（子批 3）。
+- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + B5-Hardening + P1-C 子批 1 = **REMOTE GO / DELIVERED**；P1-C 子批 2 代码 = **LOCAL GO**（reviewer CODE REVIEW GO + 本地全门禁绿 + 真实 smoke PASS）；PR #135 = **MERGE BLOCKED**（独立复审未 clean）；P1 multi-wave runtime = **IMPLEMENTED / REMOTE GO NOT YET**；RQ1 bounded default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
+- **唯一下一步：**PR #135 收口（head `f1b4d12`）：等 exact-head CI（push + pull_request 双 run 绑定同 SHA）→ 独立复审 clean（Codex 额度已满，复审改由人工/后续通道）→ merge → exact-main CI success → **P1-C 子批 2 = REMOTE GO / DELIVERED**。随后：提交 Deployment-D0 文档（## 16，本地未提交）→ 子批 3（ResearchStopGate + budget + resume + steering）→ bounded 12-case qualification → P2。
 - **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0 A0–C5-C（contracts/state/trace/policy/gates/20-case harness/live semantic audit）；P1-A0 Truth Fix（四层 retrieval truth、50 候选独立人工审计、taxonomy 修正、V2 report aggregate 修正）。
 - **P0-C5 当前事实：**已切断 Gold→Shadow 决策输入，Gold 只用于事后评分；freshness 已进入 EvidenceRequirement/Evidence/Gate；primary denominator、Useful Read 与 evidence-linked critical coverage 口径已修正。frozen 10 的新诊断为 false closure 7、gold-blind shadow caught 6、missed 1、overblocked 0；该结果仍是预记录 projection 的组件证据，不是 runtime observer 证据。
 - **Live 10 / 50-candidate Truth Fix：**Provider returned=50；production `worth_reading=true`=50；benchmark surface match=10；manual `ANSWER_RELEVANT`=5、`TOPIC_ONLY`=10、`OFF_TARGET`=35。新 taxonomy：`NO_ANSWER_RELEVANT_CANDIDATE=7`、`BENCHMARK_MATCH_FALSE_NEGATIVE=0`、`CLAIM_PROJECTION_UNAVAILABLE=2`、`COMPLETED_WITH_EVIDENCE=1`；旧 `RELEVANCE_FALSE_NEGATIVE=7` 结论已撤销。
@@ -1261,3 +1261,73 @@ Grill coverage 于 2026-08-21 经多轮代码路径反证后闭合。以下决�
 - **A3 Read Scheduler。** Critical 首波最多 3 个独立 cluster、Major 最多 2、Context 默认不主动读；默认保留约 1/3 conflict reserve，open conflict 可释放；仅显式 high-value provenance/primary/contradiction lead 可作为 lead-only 候选进入波次。`budget_exhausted`、`conflict_reserve_held`、soft/hard deadline 分开，所有未读候选保留 deferred truth；规划前后 cooperative cancel，并在成功计划后 checkpoint。预算只读不自增，实际 read 完成后的 durable budget 更新仍由后续 adapter 所有。
 - **最终本地证据。** A1–A3 全链覆盖包括“首个非空是 Current dictionary、第二 query 才出现 GitHub 官方文档”：四条 query 必须全部执行，dictionary 经 semantic boundary rejected，官方 primary 成为唯一首波 read。research 回归 224 passed；全量 1317 passed；最终非有限值/边界补丁后 A1–A3 定向 37 passed；Ruff 全库通过；expanded mypy baseline current=122 <= 128；RAG K1 通过；detect-secrets 0 findings；`git diff --check` 通过。package/frontend/browser/real-stack 未在本地重复消耗时间，交由本次唯一远程 CI 从干净 checkout 执行。
 - **Non-goals / Decision。** 不改 `source_assessment.py`，不复制 benchmark matcher，不调用 external embedding，不接模型 provider/逐调用外部审计，不实现 active adapter、Extractor、read execution、Gate-after-wave、resume/steering 或 production flag。**Decision：A1–A3 components LOCAL GO / COMPLETE；允许统一提交远程，但远程 CI 未绿前仍 NO-GO for delivery/activation。**
+
+
+### 0.5 RQCE-P1-C 子批 2 / PR #135 施工轨迹（2026-08-30，多窗口协作）
+
+**PR #135**（`codex/rqce-p1-c2-multi-wave`）：multi-wave durable runtime loop。多窗口施工记录，任何窗口开工前先读本节核对当前 head / findings / 门禁状态。
+
+**Head 演变与 review 轨迹（旧 head 证据不作废规则：每次新 head 的 CI 与复审为唯一有效证据）：**
+
+| 阶段 | Head | 内容 | 状态 |
+| --- | --- | --- | --- |
+| 批 2 主体 | `cbb6ba0` | multi-wave executor、wave cursor、saturation、logical identity、crash-resume 全量实现 | LOCAL GO（reviewer），PR 开 |
+| review round 1 | `fc568cb` | 3 findings：① extraction binding eligibility（恢复 binding 走该 claim 自己的 `is_schedulable_candidate`，rejected/不合格 lead_only 不恢复）；② recovered attempt number（`_model_attempt_start` 纳入 recovered inflight/failure truth，attempt 不回 1、call_id 不重复、连续 crash 不破 ceiling，claim planning/assessment/extraction 三路统一）；③ deferred context gap（settlement 对齐 `_ordered_gaps` 可处理范围） | 合并；exact-head CI 绿；复审出 2 新 |
+| review round 2 | `d7f5150` | 2 P2：① 跨 wave cluster seed（上一轮持久化 claim bindings ∩ 成功 read 注入已覆盖 cluster，下一轮跳同 cluster 选独立）；② settlement 非 pass 时 hard budget 先于 saturation/wave-limit 判定 | 合并；exact-head CI 绿；复审出 3 新 |
+| review round 3 | `f1b4d12` | 3 findings：① P1 持久化 open/searching conflict 直接释放 reserve（不再只靠候选预测信号）；② P2 major 单槽被已覆盖 cluster 占用时过滤后回填下一独立来源；③ P2 assessment attempt 1+2 持久失败后崩溃恢复记 claim-level unavailable/no-gain（不整次 runtime unavailable、不产生 attempt 3） | 已收口（round 4 并入）；exact-head CI 双 run success；人工复审出 2 新 |
+| review round 4 | `199b835` | 人工复审（HOLD / REQUEST CHANGES）2 findings：① **P1 合并阻塞项** extraction attempt 耗尽仍会炸整个 runtime——crash window（attempt 2 inflight durable → 进程死 → resume 识别已消费 → 未捕获 → 整 run 变 active_runtime_unavailable）；修复：extraction 照 assessment 模式局部捕获 `_ModelAttemptBudgetExhausted` → binding 记 extractor_failed/model_call_attempts_exhausted + checkpoint + continue（绝不 attempt 3）。回归： `_SimulatedProcessDeath(BaseException)` 包装 on_attempt_finished(attempt 2)（先 finish 内存再 raise，穿透 except Exception 无最终 checkpoint）→ 验证 durable=attempt1 audit+attempt2 inflight → stale 后 resume → 6 条断言（inflight=2、interrupted_unknown(2)、无 attempt 3、binding extractor_failed、其他 claim/binding 成功、stop_reason ≠ active_runtime_unavailable）。② **P2** covered-cluster 只记得上一轮（`_load_read_plan` 单一 key 每波被覆盖，f1b4d12 下 restore 副作用掩盖）——修复：**run-level cumulative durable truth** 新 key `claim_engine_covered_clusters`，每波从全部成功 selected_sources 重建并写回。回归：W1=wave-1.example/a(X) → W2=wave-2.example/a(Y) → W3=rank1 wave-1.example/b(X2)+rank2 wave-3.example/a(Z) → 必须选 Z、X 永不重读（成功读 {A,B,D}、C 不在、cluster X 只一次 read、白盒 covered=={X,Y,Z}）；修复前实现无此 key → 白盒断言 fail（区分度实测确认） | exact-head CI 双 run success；人工复审出 1 新 P2（multi-claim covered） |
+| review round 5 | `acbd330` | 人工复审：**P1 PASS**（exhaustion 修复认可，无新 blocker）；P2 单 claim cumulative 通过但 **multi-claim 不完整** → 新 P2 合并阻塞项：多 claim 共享同一 physical read 时 covered-cluster truth 漏 secondary claim（`_source_record` 的 assessment 只记 owner claim_id；W1 中 A+B 都绑候选 P（cluster X）只读一次，但 covered[B] 为空 → B 下一轮忘 X → 会重读同 cluster 候选 Q(X) → 破坏 H8）。修复：covered 重建改为**累计 durable map**——先读回旧 key 值，再对每个成功 read 的 source 合并 **owner claim（assessment.claim_id）∪ extractions 映射的全部 keys**（H3 持久化里 extractions 的 keys 即绑定该候选的全部 claim），写回而非覆盖。回归 `test_covered_clusters_preserved_for_shared_read_claims`：claim_a+claim_b；W1 共享候选 shared.example/p（cluster X，physical read 恰 1 次，targets (P,A)+(P,B)）；W2 给 claim_b 的 rankings Q(X,rank1)+R(Y,rank2) → 断言 Q 永不物理读、R 被读、cluster X 只 1 次 read、白盒 covered[claim_a] 与 covered[claim_b] 均含 X；owner-only 旧逻辑实测 fail（区分度确认）。`_PrimaryRoleClient` 提升模块级复用 | **最终 head**；本地全门禁绿（focused 95/95、full pytest 1432/1432、Ruff、mypy 122≤128/NEW=0、diff-check）；exact-head CI 双 run success；人工复审 CLEAN → **MERGE GO** |
+
+**当前判定（2026-08-31 更新）：** PR #135 **已 MERGED**。轨迹：round 4 head `199b835` 人工复审 HOLD → 1 新 P2（multi-claim shared read covered）；round 5 head `acbd330` 修复 + 回归，人工复审 **CLEAN（CODE REVIEW GO / CI PENDING）** → exact-head CI 双 run success → **MERGE GO** → `gh pr merge 135 --merge` → **mergeCommit `533b60c7`**（mergedAt 2026-08-30T18:07:43Z，base main 当时 `acf5713`）→ exact-main CI（push run `33327174616`）`completed / success`。**子批 2 = REMOTE GO / DELIVERED**（9 files +3199/-430；resolved findings 全量：R1–R11 + P1/P2 人工 finding ×3；review threads 8/8 resolved）。已知 limitation：真实 SearXNG smoke 在冻结预算下 wave 1 即耗尽（0 reads），multi-wave 正确性由 synthetic 证明（recorded read_budget、durable crash-recovery、deadline 真值）。下一步：**P1-C Batch 3 = ResearchStopGate**（先收口现有 ReadWindow → StopGate 组件 → 迁移 stop 判定 → 逐测试替换超时哨兵，每步保持全绿）。
+**本地未提交：** `docs/PROJECT_STATUS.md`（Deployment-D0 合同 ## 16 + 本节）——明确**不进 PR #135**，待子批 2 REMOTE GO 后单独提交。工作树只允许这两个文档改动；代码/测试改动必须先经 full 门禁再提交。
+
+**验收纪律（沿用多轮）：** focused → full pytest → Ruff → mypy（122≤128 / NEW=0）→ diff-check → 提交（不带 D0 文档）→ push → 双 run exact-head CI（push + pull_request 绑定同 SHA）→ 独立复审。CI 绿 ≠ 收口；复审出新 finding 回到代码施工。
+## 16. Deployment-D0：Zero-Docker Default 产品部署合同（2026-08-30 冻结，只锁边界不施工）
+
+> 背景：真实 SearXNG smoke 依赖本地 Docker Desktop，暴露"研发基础设施渗透成最终用户安装要求"的风险。Codex/OpenCode 等产品的"轻"在于后台组件生命周期由产品自管，而非没有后台组件。本合同冻结 Study Agent 的最终部署形态与边界，明确 Docker 是开发基础设施而非产品 UX。**不改变 RQCE 主线 scope；Batch 2 REMOTE GO 后先落 D0 文档（本批），随后继续 Batch 3。**
+
+### 16.1 产品硬约束（长期）
+
+**Zero-Docker Default：** Study Agent 的默认桌面发行版不得要求用户安装、启动或理解 Docker。所有容器化服务必须是开发基础设施或显式的高级 self-host capability，不能成为核心启动链的一部分。
+
+**用户终态：** 双击 StudyAgent.exe → UI 出现 → 开始使用。用户机器上不存在 Node / npm / Python / uvicorn / Vite / Docker 的安装要求。
+
+### 16.2 三档部署模式
+
+| 模式 | 面向谁 | Docker |
+| --- | --- | --- |
+| Desktop / Default | 普通用户、日常使用 | 不需要 |
+| Developer | 开发、测试、CI-equivalent | 可选 |
+| Self-host / Full local infra | 高级用户、隐私/研究环境 | 可用 Docker Compose（`docker compose --profile self-host ...`） |
+
+### 16.3 四刀拆分（部署整改核心）
+
+1. **SearXNG 从"依赖"降级成"Provider"。** `ResearchProviderRegistry` 下 Provider A / Remote SearXNG / Local SearXNG（optional）；默认用户走已配置的远程 Search Provider，高级用户在设置填 SearXNG endpoint（http://192.168.x.x:8080 或 localhost:8080），开发者才 `docker compose up searxng`。真实 smoke 证明的是"SearXNG Provider 实现可工作"，不是"产品依赖 Docker"——两个概念严格分开。
+2. **Provider 挂了不拖死整个软件。** 启动链：核心 backend ready → UI ready → Provider 后台 health check（LLM ready/unavailable；Search A ready/degraded/unavailable；SearXNG ready/unavailable）。用户照常可用历史/学习/任务/记忆；只有点击 Research 功能且无任何 Search Provider 时显示"联网研究当前不可用：没有可用的搜索提供方"。与 RQCE truth semantics 一致：provider unavailable ≠ 应用 unavailable。
+3. **FastAPI 打包成 sidecar（study-agent-backend.exe）。** 第一版 PyInstaller + FastAPI sidecar，不重写 Rust/Go；Desktop shell 自动启动 backend → 等 /health → 开 UI → 退出时 graceful shutdown；backend 崩溃自动重启一次，失败显示明确错误，不留黑色 CMD 窗口。
+4. **React 生产环境不再启动 Vite。** `npm run dev` 仅开发；`npm run build` 产出 frontend/dist/ 打进桌面包；用户机器无 node_modules / npm / Vite server。
+
+### 16.4 数据与凭证
+
+- 数据：`%LOCALAPPDATA%\StudyAgent\{data, config, logs, cache}`（study_agent.db 等）；程序：`C:\Program Files\StudyAgent\`。程序 ≠ 用户数据，升级不覆盖数据库。
+- API Key：第一版 Settings → Provider → API Key（不进项目 .env 明文）；正式桌面版最终进 Windows Credential Manager，配置文件只记录 `provider / model / credential_ref`。
+
+### 16.5 分批施工计划（Deployment-D0 ~ D4）
+
+| 批次 | 目标 | 验收要点 |
+| --- | --- | --- |
+| **D0**（本批，只锁边界） | 冻结 Zero-Docker 合同，不改 runtime | 本文档 |
+| **D1** Zero-Docker Runtime（最关键） | 不开 Docker：backend 正常启动、UI 正常、除本地 SearXNG 外核心能力正常；SearchProviderRegistry / SearXNG optional / startup health probe / capability degradation | Docker Desktop 完全关闭时：backend ✅ UI ✅ SQLite ✅ learning ✅ history ✅；SearXNG unavailable；research 有其他 provider → 正常 / 无 provider → 明确 unavailable |
+| **D2** 一键 Backend | python+uvicorn → study-agent-backend.exe | 干净 Windows（无 Python）：双击 → health ready → SQLite 创建 → API 正常；重复启动/端口冲突/异常退出/数据库路径/日志路径全测 |
+| **D3** Desktop App | Tauri + React + sidecar：single instance → 启动 sidecar → health check → 打开 React；关闭时保存状态 → graceful shutdown | 真正干净 Windows（无 Git/Python/Node/Docker）：下载 StudyAgentSetup.exe → 双击即用 |
+| **D4** 安装/升级/恢复 | installer / automatic update / migration / backup / uninstall / crash recovery | 产品级验收 |
+
+### 16.6 时间线与 P2 前置规则
+
+- 时间线：P1-C Batch 2 → commit/PR/CI/merge → exact-main GREEN → REMOTE GO → **D0（本文档）** → P1-C Batch 3（ResearchStopGate）→ bounded 12-case qualification → RQCE-P1 完整收口 → P2 大规模 Reader/Synthesis 前做 D1/D2。
+- **P2 前置硬规则：** 任何新增 runtime dependency 都必须回答"普通桌面版怎么随应用交付？"。P2 的 PDF → Python library / packaged binary；rendered browser → optional packaged Playwright/Chromium runtime；Search → remote provider；SearXNG → external optional。重功能一律 optional capability，不得变成 Docker Compose 又多一个 service。
+
+### 16.7 与当前代码的关系（不变更项）
+
+- 不推翻现有 frontend/ infra/ config/ 分层；开发环境保留 Python/Node/Docker/SearXNG/Playwright。
+- RQCE 的"失败真值"语义（provider unavailable ≠ 应用 unavailable）与本合同一致，后续 D1 直接复用。
