@@ -606,6 +606,28 @@ class ActiveResearchRuntimeExecutor:
                     if not model_allowed("research_candidate_assessment", categories):
                         _append_failure("candidate_assessment_blocked_by_policy", "assessing", claim.id)
                         continue
+                    assessment_logical_call_id = (
+                        f"research_candidate_assessment:{run_id}:{claim.id}:1"
+                        f"{_assessment_call_suffix(cursor, claim.id, candidate_ids)}"
+                    )
+                    try:
+                        assessment_attempt_start = _model_attempt_start(
+                            cursor,
+                            assessment_logical_call_id,
+                        )
+                    except _ModelAttemptBudgetExhausted:
+                        # Both attempts for this exact durable assessment may
+                        # already have failed before the process exited. Resume
+                        # that claim through the normal unavailable/no-gain path;
+                        # attempt exhaustion is not a whole-runtime failure and
+                        # must never create a third physical model call.
+                        _append_failure(
+                            "candidate_assessment_unavailable",
+                            "assessing",
+                            claim.id,
+                        )
+                        checkpoint()
+                        continue
                     assessed = self.candidate_assessor.assess(
                         run_id=run_id,
                         claim=claim,
@@ -618,11 +640,7 @@ class ActiveResearchRuntimeExecutor:
                         call_id_suffix=_assessment_call_suffix(
                             cursor, claim.id, candidate_ids
                         ),
-                        attempt_start=_model_attempt_start(
-                            cursor,
-                            f"research_candidate_assessment:{run_id}:{claim.id}:1"
-                            f"{_assessment_call_suffix(cursor, claim.id, candidate_ids)}",
-                        ),
+                        attempt_start=assessment_attempt_start,
                     )
                     ensure_active()
                     if assessed.status != "completed" or not assessed.assessments:
@@ -1356,6 +1374,11 @@ def _fair_read_plan(
         claim_id: set(cluster_ids)
         for claim_id, cluster_ids in (covered_cluster_ids_by_claim or {}).items()
     }
+    open_conflict_claim_ids = {
+        conflict.claim_id
+        for conflict in state.conflict_gaps
+        if conflict.state in {"open", "searching"}
+    }
     reserve = ceil(state.budget.max_reads / 3)
     normal_limit = max(0, state.budget.max_reads - state.budget.reads_used - reserve)
 
@@ -1392,11 +1415,24 @@ def _fair_read_plan(
                 for item in ranked
                 if item.candidate.id in physical_ids and is_schedulable_candidate(item)
             )
-            fresh = tuple(item for item in ranked if item.candidate.id not in physical_ids)
+            # Remove clusters covered by a prior successful wave before the
+            # bounded scheduler truncates the claim's wave. Otherwise a major
+            # claim (wave size 1) can select covered Q(X), discard it later,
+            # and lose the independent backfill R(Y) entirely.
+            covered_clusters = claim_clusters.get(claim_id, set())
+            fresh = tuple(
+                item
+                for item in ranked
+                if item.candidate.id not in physical_ids
+                and item.assessment.cluster_id not in covered_clusters
+            )
             remaining = state.budget.max_reads - state.budget.reads_used - len(physical)
             budget_open = remaining > 0 and (allow_reserve or len(physical) < normal_limit)
 
-            conflict_open = any("new_contradiction" in item.assessment.expected_gain_signals for item in ranked)
+            conflict_open = claim_id in open_conflict_claim_ids or any(
+                "new_contradiction" in item.assessment.expected_gain_signals
+                for item in ranked
+            )
             policy = ReadSchedulerPolicy(
                 critical_wave_size=wave_size,
                 major_wave_size=wave_size,
@@ -1458,11 +1494,15 @@ def _fair_read_plan(
     schedule(critical, 2)
     schedule(major, 1)
     conflict_claims = [
-        claim_id
-        for claim_id in critical
-        if any(
-            "new_contradiction" in item.assessment.expected_gain_signals
-            for item in rankings.get(claim_id, ())
+        claim.id
+        for claim in _ordered_claims(state)
+        if claim.priority != "context"
+        and (
+            claim.id in open_conflict_claim_ids
+            or any(
+                "new_contradiction" in item.assessment.expected_gain_signals
+                for item in rankings.get(claim.id, ())
+            )
         )
     ]
     schedule(conflict_claims, reserve, allow_reserve=True)

@@ -1306,6 +1306,188 @@ def test_read_plan_cluster_diversity_spans_reusable_and_fresh() -> None:
     assert {item["candidate_id"] for item in later_physical} == {"R"}
 
 
+def test_read_plan_uses_persisted_conflicts_and_backfills_major_slots() -> None:
+    """Persisted conflict truth releases reserve, and covered clusters do not
+    consume a major claim's one-item wave before an independent backfill."""
+    from src.application.active_research_runtime import _fair_read_plan
+    from src.web.research.candidate_assessment import CandidateSemanticAssessment
+    from src.web.research.candidate_pool import CandidatePoolItem
+    from src.web.research.candidate_ranking import RankedCandidate
+    from src.domain.evidence import ClaimEvidenceLinkV1
+    from src.web.research.contracts import (
+        ConflictGap,
+        EvidenceCluster,
+        ResearchClaimEvidenceLink,
+        ResearchEvidence,
+    )
+
+    question = ResearchQuestion(id="q1", question_surface="question")
+
+    def claim(claim_id: str, priority: Any) -> ResearchClaim:
+        return ResearchClaim(
+            id=claim_id,
+            question_id="q1",
+            text="claim",
+            kind="factual",
+            priority=priority,
+            state="pending",
+            evidence_requirement=EvidenceRequirement(),
+        )
+
+    def ranked(candidate_id: str, cluster_id: str, rank: int) -> Any:
+        candidate = CandidatePoolItem(
+            id=candidate_id,
+            canonical_url=f"https://x.example/{candidate_id}",
+            url=f"https://x.example/{candidate_id}",
+            title=candidate_id,
+            snippet="",
+            source="",
+            published_at="",
+            query_ids=("q1",),
+            intents=(),
+            providers=("searxng",),
+            first_seen_rank=rank,
+        )
+        return RankedCandidate(
+            candidate=candidate,
+            assessment=CandidateSemanticAssessment(
+                candidate_id=candidate_id,
+                relevance="answer_relevant",
+                relevance_confidence=0.9,
+                source_role="primary",
+                source_role_confidence=0.9,
+                cluster_id=cluster_id,
+                # Deliberately no new_contradiction: the persisted conflict,
+                # not a prediction on this candidate, must release reserve.
+                expected_gain_signals=("new_primary",),
+                freshness_score=0.5,
+                estimated_read_cost=1.0,
+            ),
+            rank=rank,
+            eligibility="eligible",
+            reason_codes=(),
+            new_cluster=False,
+            expected_information_gain=1,
+        )
+
+    conflict_claim = claim("claim_conflict", "critical")
+    conflict_evidence = (
+        ResearchEvidence(
+            evidence_id="ev_support",
+            locator="support",
+            anchored_spans=("support",),
+            lifecycle_status="read",
+            extraction_status="eligible",
+        ),
+        ResearchEvidence(
+            evidence_id="ev_contradict",
+            locator="contradict",
+            anchored_spans=("contradict",),
+            lifecycle_status="read",
+            extraction_status="eligible",
+        ),
+    )
+    conflict_links = (
+        ResearchClaimEvidenceLink(
+            link=ClaimEvidenceLinkV1(
+                claim_id=conflict_claim.id,
+                evidence_id="ev_support",
+                support_type="supports",
+                confidence=0.9,
+            ),
+            source_role="primary",
+            source_cluster_id="evidence_cluster_support",
+        ),
+        ResearchClaimEvidenceLink(
+            link=ClaimEvidenceLinkV1(
+                claim_id=conflict_claim.id,
+                evidence_id="ev_contradict",
+                support_type="contradicts",
+                confidence=0.9,
+            ),
+            source_role="independent_secondary",
+            source_cluster_id="evidence_cluster_contradict",
+        ),
+    )
+    conflict_state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(conflict_claim,),
+        evidence=conflict_evidence,
+        evidence_links=conflict_links,
+        source_clusters=(
+            EvidenceCluster(
+                id="evidence_cluster_support",
+                evidence_ids=("ev_support",),
+            ),
+            EvidenceCluster(
+                id="evidence_cluster_contradict",
+                evidence_ids=("ev_contradict",),
+            ),
+        ),
+        gaps=(),
+        conflict_gaps=(
+            ConflictGap(
+                id="conflict_1",
+                claim_id=conflict_claim.id,
+                supporting_evidence_ids=("ev_support",),
+                contradicting_evidence_ids=("ev_contradict",),
+                state="open",
+            ),
+        ),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=6,
+            reads_used=4,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-30",
+        known_evidence_ids=("ev_support", "ev_contradict"),
+    )
+    conflict_physical, _ = _fair_read_plan(
+        conflict_state,
+        {conflict_claim.id: (ranked("conflict-source", "cluster_C", 1),)},
+    )
+    assert {item["candidate_id"] for item in conflict_physical} == {
+        "conflict-source"
+    }
+
+    major_claim = claim("claim_major", "major")
+    major_state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(major_claim,),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-30",
+        known_evidence_ids=(),
+    )
+    major_physical, major_targets = _fair_read_plan(
+        major_state,
+        {
+            major_claim.id: (
+                ranked("Q", "cluster_X", 1),
+                ranked("R", "cluster_Y", 2),
+            )
+        },
+        covered_cluster_ids_by_claim={major_claim.id: {"cluster_X"}},
+    )
+    assert {item["candidate_id"] for item in major_physical} == {"R"}
+    assert {item["candidate_id"] for item in major_targets} == {"R"}
+
+
 def _load_smoke_module() -> Any:
     import importlib.util
 
@@ -2074,4 +2256,111 @@ def test_assessment_identity_stable_across_crash_resume(tmp_path: Any) -> None:
     assert retried, f"expected assessment retried as attempt 2: {attempts_by_logical}"
     assert len({call.call_id for call in cursor.model_calls}) == len(
         cursor.model_calls
+    )
+
+
+def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> None:
+    """Two durable failed attempts must resume as claim-unavailable/no-gain.
+
+    The same logical assessment is never called a third time and its exhausted
+    ceiling must not escape into the whole-run active_runtime_unavailable path.
+    """
+
+    class _AssessmentFailingClient(_StructuredClient):
+        def create(self, **kwargs: Any) -> Any:
+            system = str(kwargs["messages"][0]["content"])
+            if "search candidates" in system:
+                self.calls.append(kwargs)
+                raise RuntimeError("simulated assessment provider failure")
+            return super().create(**kwargs)
+
+    class _CrashAfterAssessmentUnavailableRepository(_TrackingRepository):
+        def __init__(self, database: RuntimeDatabase) -> None:
+            super().__init__(database)
+            self.crashed = False
+
+        def checkpoint(self, run_id: str, **kwargs: Any) -> WebLookupRun:
+            persisted = super().checkpoint(run_id, **kwargs)
+            if self.crashed:
+                return persisted
+            cursor = ResearchRuntimeCursor.from_dict(
+                persisted.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+            )
+            exhausted = [
+                call
+                for call in cursor.model_calls
+                if "research_candidate_assessment" in call.logical_call_id
+                and call.status == "attempt_failed"
+            ]
+            if len(exhausted) == 2 and any(
+                failure.phase == "assessing"
+                and failure.code == "model_call_attempts_exhausted"
+                for failure in cursor.failures
+            ):
+                self.crashed = True
+                assert persisted.active_operation_id
+                self.fail(
+                    run_id,
+                    "simulated process exit after assessment exhaustion",
+                    operation_id=persisted.active_operation_id,
+                )
+                raise RuntimeError("simulated assessment exhaustion crash")
+            return persisted
+
+    repository = _CrashAfterAssessmentUnavailableRepository(
+        RuntimeDatabase(tmp_path / "active-assessment-exhausted.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_assessment_exhausted",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    failing_client = _AssessmentFailingClient()
+    with pytest.raises(RuntimeError, match="assessment exhaustion crash"):
+        _service(repository, failing_client).execute(run.id, raise_on_error=True)
+
+    crashed = repository.get(run.id)
+    assert crashed is not None
+    crashed_cursor = ResearchRuntimeCursor.from_dict(
+        crashed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    exhausted_calls = [
+        call
+        for call in crashed_cursor.model_calls
+        if "research_candidate_assessment" in call.logical_call_id
+    ]
+    assert [call.attempt for call in exhausted_calls] == [1, 2]
+    exhausted_logical_call_id = exhausted_calls[0].logical_call_id
+    assert all(
+        call.logical_call_id == exhausted_logical_call_id
+        for call in exhausted_calls
+    )
+
+    resumed = _service(repository, _StructuredClient()).execute(
+        run.id,
+        raise_on_error=True,
+    )
+
+    assert resumed.stop_reason != "active_runtime_unavailable"
+    resumed_cursor = ResearchRuntimeCursor.from_dict(
+        resumed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    same_logical_calls = [
+        call
+        for call in resumed_cursor.model_calls
+        if call.logical_call_id == exhausted_logical_call_id
+    ]
+    assert [call.attempt for call in same_logical_calls] == [1, 2]
+    assert any(
+        failure.code == "candidate_assessment_unavailable"
+        and failure.item_id == crashed_cursor.failures[-1].item_id
+        for failure in resumed_cursor.failures
+    )
+    assert len({call.call_id for call in resumed_cursor.model_calls}) == len(
+        resumed_cursor.model_calls
     )
