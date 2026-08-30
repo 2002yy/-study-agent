@@ -6,11 +6,13 @@ from typing import Any
 
 import pytest
 
+from src.application.active_research_runtime import _model_attempt_start
 from src.web.research.claim_planner import (
     RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
     RuntimeClaimPlanner,
 )
 from src.web.research.contracts import ResearchBudget
+from src.web.research.evidence_gain import EvidenceGainResult
 from src.web.research.model_gateway import (
     ResearchModelAttemptStart,
     ResearchModelCallAudit,
@@ -126,7 +128,11 @@ def _valid_claim_payload() -> str:
     )
 
 
-def _attempt_marker(call_id: str = "logical:attempt:1") -> ResearchModelAttemptStart:
+def _attempt_marker(
+    call_id: str = "logical:attempt:1",
+    *,
+    attempt: int = 1,
+) -> ResearchModelAttemptStart:
     return ResearchModelAttemptStart(
         call_id=call_id,
         logical_call_id="logical",
@@ -134,7 +140,7 @@ def _attempt_marker(call_id: str = "logical:attempt:1") -> ResearchModelAttemptS
         provider_profile="openai",
         model_profile="flash",
         model_name="test-model",
-        attempt=1,
+        attempt=attempt,
         started_at="2026-08-27T12:00:00+00:00",
         response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
         input_sha256="a" * 64,
@@ -413,6 +419,41 @@ def test_runtime_cursor_rejects_unknown_query_and_candidate_references() -> None
         )
 
 
+def test_runtime_cursor_rejects_inconsistent_or_malformed_wave_truth() -> None:
+    no_gain = EvidenceGainResult(
+        substantive_gain=False,
+        gain_reasons=(),
+        affected_claim_ids=(),
+        affected_gap_ids=(),
+    ).to_dict()
+
+    with pytest.raises(ValueError, match="gain history cannot exceed wave index"):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "gain_history": [no_gain],
+            }
+        )
+
+    with pytest.raises(ValueError, match="pre-wave cursor cannot carry wave state"):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "wave_id": "research_wave:run:0",
+            }
+        )
+
+    malformed = {**no_gain, "substantive_gain": True}
+    with pytest.raises(ValueError, match="substantive_gain contradicts"):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "wave_index": 1,
+                "gain_history": [malformed],
+            }
+        )
+
+
 def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
     started = begin_model_attempt(ResearchRuntimeCursor(phase="planning"), _attempt_marker())
     assert started.inflight_model_call is not None
@@ -421,6 +462,28 @@ def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
     assert recovered.inflight_model_call is None
     assert recovered.failures[-1].code == "interrupted_unknown"
     assert recovered.failures[-1].item_id == "logical:attempt:1"
+
+
+def test_recovered_model_attempt_advances_once_then_exhausts_ceiling() -> None:
+    first = recover_interrupted_model_attempt(
+        begin_model_attempt(ResearchRuntimeCursor(phase="planning"), _attempt_marker())
+    )
+
+    assert _model_attempt_start(first, "logical") == 2
+
+    second = recover_interrupted_model_attempt(
+        begin_model_attempt(
+            first,
+            _attempt_marker("logical:attempt:2", attempt=2),
+        )
+    )
+
+    assert [item.item_id for item in second.failures] == [
+        "logical:attempt:1",
+        "logical:attempt:2",
+    ]
+    with pytest.raises(RuntimeError, match="model attempts exhausted"):
+        _model_attempt_start(second, "logical")
 
 
 def test_inflight_external_call_recovers_as_interrupted_unknown() -> None:
@@ -452,6 +515,28 @@ def test_pre_b5_v1_cursor_loads_with_no_external_call_inflight() -> None:
     assert restored.inflight_external_call is None
 
 
+def test_pre_p1c_v1_cursor_loads_with_empty_wave_truth() -> None:
+    legacy = ResearchRuntimeCursor(phase="searching").to_dict()
+    for key in (
+        "wave_index",
+        "wave_id",
+        "active_gap_ids",
+        "gain_history",
+        "no_gain_batches_by_claim",
+        "no_gain_batches_by_gap",
+    ):
+        del legacy[key]
+
+    restored = ResearchRuntimeCursor.from_dict(legacy)
+
+    assert restored.wave_index == 0
+    assert restored.wave_id == ""
+    assert restored.active_gap_ids == ()
+    assert restored.gain_history == ()
+    assert restored.no_gain_batches_by_claim == {}
+    assert restored.no_gain_batches_by_gap == {}
+
+
 def test_model_attempt_completion_requires_matching_inflight_call() -> None:
     cursor = begin_model_attempt(ResearchRuntimeCursor(), _attempt_marker())
     completed = finish_model_attempt(cursor, _audit())
@@ -470,3 +555,84 @@ def test_a4a_production_modules_do_not_import_eval_code() -> None:
     for name in ("model_gateway.py", "claim_planner.py", "runtime.py"):
         text = (research_dir / name).read_text(encoding="utf-8")
         assert "src.evals" not in text
+
+def test_runtime_cursor_rejects_malformed_wave_fields() -> None:
+    """P1-C batch 2: wave-related cursor fields fail closed on malformed input."""
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "wave_index": -1,
+            }
+        )
+
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "active_gap_ids": ["gap_1", "gap_1"],
+            }
+        )
+
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "active_gap_ids": [""],
+            }
+        )
+
+    with pytest.raises((ValueError, TypeError)):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "gain_history": ["not a mapping"],
+            }
+        )
+
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "no_gain_batches_by_claim": {"gap_1": -1},
+            }
+        )
+
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "no_gain_batches_by_claim": {"gap_1": 1.5},
+            }
+        )
+
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(
+            {
+                **ResearchRuntimeCursor().to_dict(),
+                "no_gain_batches_by_claim": {"gap_1": True},
+            }
+        )
+
+def test_assessment_call_suffix_is_canonical_over_candidate_order() -> None:
+    """P1-C batch 2: the assessment logical identity must not depend on the
+    candidate list order, only on the sorted candidate set."""
+    from src.application.active_research_runtime import _assessment_call_suffix
+
+    cursor = ResearchRuntimeCursor(
+        wave_id="research_wave:run_dbg:2",
+    )
+    ids_a = ("candidate_a", "candidate_b", "candidate_c")
+    ids_b = ("candidate_c", "candidate_a", "candidate_b")
+
+    suffix_a = _assessment_call_suffix(cursor, "claim_1", ids_a)
+    suffix_b = _assessment_call_suffix(cursor, "claim_1", ids_b)
+
+    assert suffix_a == suffix_b
+    assert "research_wave:run_dbg:2" in suffix_a
+    assert "claim_1" in suffix_a
+
+    # A different candidate set must change the fingerprint.
+    ids_c = ("candidate_a", "candidate_b", "candidate_d")
+    suffix_c = _assessment_call_suffix(cursor, "claim_1", ids_c)
+    assert suffix_c != suffix_a

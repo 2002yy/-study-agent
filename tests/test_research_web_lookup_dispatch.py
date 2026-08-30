@@ -453,7 +453,7 @@ def test_active_dispatch_persists_provider_audit_in_real_repository(
 
     assert completed.status == "partial"
     assert completed.provider_status == "insufficient"
-    assert completed.stop_reason == "evidence_gap_open"
+    assert completed.stop_reason == "evidence_saturated"
     assert completed.query_attempts
     audit = completed.query_attempts[0]["provider_audit"]
     assert audit["schema_version"] == "research-provider-audit-v1"

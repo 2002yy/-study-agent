@@ -8,13 +8,14 @@ responses.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Mapping
 
 from src.web.research.model_gateway import (
     ResearchModelAttemptStart,
     ResearchModelCallAudit,
 )
+from src.web.research.evidence_gain import EvidenceGainResult, SaturationState
 
 CLAIM_ENGINE_RUNTIME_CONTEXT_KEY = "claim_engine_runtime"
 RESEARCH_RUNTIME_SCHEMA_VERSION = "research-runtime-v1"
@@ -51,6 +52,13 @@ _PHASES = {
 _QUERY_STATUSES = {"ok", "empty", "unavailable"}
 _READ_STATUSES = {"success", "failed", "skipped"}
 _MAX_CURSOR_ITEMS = 100
+# P1-C batch 2: durable gain history keeps only the most recent entries so a
+# long multi-wave run can never outgrow the cursor serialization limit.
+_MAX_GAIN_HISTORY_ENTRIES = 24
+# Frozen wave ceiling for the bounded multi-wave loop: saturation (2 batches,
+# 3 for critical/conflict) always fits, and the ceiling guards against any
+# endless loop if gain/saturation bookkeeping were ever inconsistent.
+MAX_RESEARCH_WAVES = 8
 
 
 @dataclass(frozen=True)
@@ -304,6 +312,21 @@ class ResearchRuntimeCursor:
     inflight_model_call: ResearchModelAttemptStart | None = None
     inflight_external_call: RuntimeExternalAttemptStart | None = None
     failures: tuple[RuntimeFailure, ...] = ()
+    # P1-C batch 2: durable multi-wave state. wave_index counts the wave the
+    # executor is currently running (0 = before the first wave marker);
+    # wave_id is the deterministic wave identity; active_gap_ids freezes which
+    # gaps the wave decided to attempt (handled-truth: a gap is handled and
+    # no-gain whenever its wave strategy ran, even if the planner only
+    # produced duplicate queries or search found nothing new); gain_history
+    # holds one serialized EvidenceGainResult per completed wave; the two
+    # counters mirror SaturationState's per-gap/per-claim no-gain batches so a
+    # crash between waves resumes at the right saturation point.
+    wave_index: int = 0
+    wave_id: str = ""
+    active_gap_ids: tuple[str, ...] = ()
+    gain_history: tuple[dict[str, Any], ...] = ()
+    no_gain_batches_by_claim: dict[str, int] = field(default_factory=dict)
+    no_gain_batches_by_gap: dict[str, int] = field(default_factory=dict)
     schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION
 
     @property
@@ -334,6 +357,12 @@ class ResearchRuntimeCursor:
                 else None
             ),
             "failures": [item.to_dict() for item in self.failures],
+            "wave_index": self.wave_index,
+            "wave_id": self.wave_id,
+            "active_gap_ids": list(self.active_gap_ids),
+            "gain_history": [dict(item) for item in self.gain_history],
+            "no_gain_batches_by_claim": dict(self.no_gain_batches_by_claim),
+            "no_gain_batches_by_gap": dict(self.no_gain_batches_by_gap),
         }
 
     @classmethod
@@ -343,6 +372,15 @@ class ResearchRuntimeCursor:
         # field so a durable checkpoint is not made unreadable by the upgrade.
         compatible = dict(raw)
         compatible.setdefault("inflight_external_call", None)
+        # P1-C batch 2 added durable multi-wave fields. Pre-batch-2 cursors
+        # have none of them; accept only those absent fields so a durable
+        # checkpoint survives the upgrade.
+        compatible.setdefault("wave_index", 0)
+        compatible.setdefault("wave_id", "")
+        compatible.setdefault("active_gap_ids", [])
+        compatible.setdefault("gain_history", [])
+        compatible.setdefault("no_gain_batches_by_claim", {})
+        compatible.setdefault("no_gain_batches_by_gap", {})
         data = _strict_mapping(
             compatible,
             {
@@ -358,6 +396,12 @@ class ResearchRuntimeCursor:
                 "inflight_model_call",
                 "inflight_external_call",
                 "failures",
+                "wave_index",
+                "wave_id",
+                "active_gap_ids",
+                "gain_history",
+                "no_gain_batches_by_claim",
+                "no_gain_batches_by_gap",
             },
             "research runtime cursor",
         )
@@ -414,6 +458,44 @@ class ResearchRuntimeCursor:
             inflight_model_call=inflight,
             inflight_external_call=external_inflight,
             failures=failures,
+            wave_index=_bounded_int(data.get("wave_index"), 0, 1000, "wave_index"),
+            wave_id=_optional_text(data.get("wave_id"), 300),
+            active_gap_ids=_text_tuple(
+                data.get("active_gap_ids"), _MAX_CURSOR_ITEMS, 300
+            ),
+            gain_history=tuple(
+                # P1-C batch 2: each history entry is the frozen
+                # EvidenceGainResult contract, strictly restored (R7/R10/R11
+                # fail-closed semantics apply at the durable cursor layer too).
+                EvidenceGainResult.from_dict(item).to_dict()
+                for item in _object_list(data.get("gain_history"), "gain_history")[
+                    -_MAX_GAIN_HISTORY_ENTRIES:
+                ]
+            ),
+            no_gain_batches_by_claim=dict(
+                SaturationState.from_dict(
+                    {
+                        "no_gain_batches_by_claim": data.get(
+                            "no_gain_batches_by_claim", {}
+                        ),
+                        "no_gain_batches_by_gap": data.get(
+                            "no_gain_batches_by_gap", {}
+                        ),
+                    }
+                ).no_gain_batches_by_claim
+            ),
+            no_gain_batches_by_gap=dict(
+                SaturationState.from_dict(
+                    {
+                        "no_gain_batches_by_claim": data.get(
+                            "no_gain_batches_by_claim", {}
+                        ),
+                        "no_gain_batches_by_gap": data.get(
+                            "no_gain_batches_by_gap", {}
+                        ),
+                    }
+                ).no_gain_batches_by_gap
+            ),
         )
         _validate_cursor_links(cursor)
         return cursor
@@ -575,11 +657,39 @@ def _validate_cursor_links(cursor: ResearchRuntimeCursor) -> None:
     if cursor.inflight_model_call and cursor.inflight_external_call:
         raise ValueError("model and external calls cannot both remain inflight")
 
+    if len(cursor.gain_history) > cursor.wave_index:
+        raise ValueError("runtime gain history cannot exceed wave index")
+    if cursor.wave_index == 0 and (
+        cursor.wave_id or cursor.active_gap_ids or cursor.gain_history
+    ):
+        raise ValueError("runtime pre-wave cursor cannot carry wave state")
+    for item in cursor.gain_history:
+        EvidenceGainResult.from_dict(item)
+
 
 def _object_tuple(value: Any, parser: Any, label: str) -> tuple[Any, ...]:
     if not isinstance(value, list) or len(value) > _MAX_CURSOR_ITEMS:
         raise ValueError(f"invalid {label}")
     return tuple(parser(_as_mapping(item, label)) for item in value)
+
+
+def _object_list(value: Any, label: str) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list) or len(value) > _MAX_CURSOR_ITEMS:
+        raise ValueError(f"invalid {label}")
+    return [_as_mapping(item, label) for item in value]
+
+
+def _counter_mapping(value: Any, label: str) -> dict[str, int]:
+    if not isinstance(value, Mapping) or len(value) > _MAX_CURSOR_ITEMS:
+        raise ValueError(f"invalid {label}")
+    counters: dict[str, int] = {}
+    for key, count in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError(f"invalid {label} key")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"invalid {label} counter")
+        counters[key] = count
+    return counters
 
 
 def _as_mapping(value: Any, label: str) -> Mapping[str, Any]:

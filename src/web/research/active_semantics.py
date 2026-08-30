@@ -111,6 +111,8 @@ class RuntimeCandidateAssessor:
         timeout_seconds: float | None = None,
         on_attempt_started: AttemptStartedHook | None = None,
         on_attempt_finished: AttemptFinishedHook | None = None,
+        call_id_suffix: str = "",
+        attempt_start: int = 1,
     ) -> CandidateAssessmentResult:
         request = build_candidate_assessment_request(candidates, claim=claim)
         freshness = {
@@ -123,7 +125,9 @@ class RuntimeCandidateAssessor:
         }
         payload = request.to_dict()
         result = self.model_gateway.complete_structured(
-            logical_call_id=f"research_candidate_assessment:{run_id}:{claim.id}:1",
+            logical_call_id=(
+                f"research_candidate_assessment:{run_id}:{claim.id}:1{call_id_suffix}"
+            ),
             purpose="research_candidate_assessment",
             messages=[
                 {"role": "system", "content": _ASSESSMENT_SYSTEM_PROMPT},
@@ -147,10 +151,18 @@ class RuntimeCandidateAssessor:
             timeout_seconds=timeout_seconds,
             on_attempt_started=on_attempt_started,
             on_attempt_finished=on_attempt_finished,
+            attempt_start=attempt_start,
         )
+        if not result.completed or result.value is None:
+            return CandidateAssessmentResult(
+                status=result.status,
+                assessments=result.value or {},
+                audits=result.audits,
+                reason=result.reason,
+            )
         return CandidateAssessmentResult(
             status=result.status,
-            assessments=result.value or {},
+            assessments=result.value,
             audits=result.audits,
             reason=result.reason,
         )
@@ -172,6 +184,8 @@ class RuntimeEvidenceExtractor:
         timeout_seconds: float | None = None,
         on_attempt_started: AttemptStartedHook | None = None,
         on_attempt_finished: AttemptFinishedHook | None = None,
+        call_id_suffix: str = "",
+        attempt_start: int = 1,
     ) -> EvidenceExtractionResult:
         role = _enum(source_role, _SOURCE_ROLES, "source_role")
         cluster_id = _required_text(source_cluster_id, 300, "source_cluster_id")
@@ -198,7 +212,10 @@ class RuntimeEvidenceExtractor:
             },
         }
         result = self.model_gateway.complete_structured(
-            logical_call_id=f"research_evidence_extract:{run_id}:{claim.id}:{candidate.id}:1",
+            logical_call_id=(
+                f"research_evidence_extract:{run_id}:{claim.id}:{candidate.id}:1"
+                f"{call_id_suffix}"
+            ),
             purpose="research_evidence_extraction",
             messages=[
                 {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
@@ -229,6 +246,7 @@ class RuntimeEvidenceExtractor:
             timeout_seconds=timeout_seconds,
             on_attempt_started=on_attempt_started,
             on_attempt_finished=on_attempt_finished,
+            attempt_start=attempt_start,
         )
         return EvidenceExtractionResult(
             status=result.status,
