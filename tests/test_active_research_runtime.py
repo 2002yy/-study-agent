@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
+from collections.abc import Mapping
+from json import dumps as _json_dumps
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,14 +11,19 @@ from threading import Event, Thread
 from time import perf_counter
 from typing import Any
 
+from dataclasses import replace
+
 import pytest
+
 
 from src.application.active_research_runtime import (
     ACTIVE_RESEARCH_BRIEF_KEY,
+    ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY,
     ACTIVE_RESEARCH_METRICS_KEY,
     ACTIVE_RESEARCH_READ_PLAN_KEY,
     ACTIVE_RESEARCH_WAVE_BASELINE_KEY,
     ActiveResearchRuntimeExecutor,
+    RuntimePlannedQuery,
     _append_gap_queries,
     _restore_completed_read_targets,
 )
@@ -34,6 +41,7 @@ from src.web.research.contracts import (
     EvidenceGap,
     EvidenceRequirement,
     ResearchBudget,
+    ResearchState,
     ResearchClaim,
     ResearchQuestion,
     build_research_state,
@@ -2364,3 +2372,504 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
     assert len({call.call_id for call in resumed_cursor.model_calls}) == len(
         resumed_cursor.model_calls
     )
+
+def test_extraction_attempt_exhaustion_crash_is_claim_local(tmp_path: Any) -> None:
+    """P1 round-4: process death right after extraction attempt 2 finished
+    (durable state = attempt 1 audit + attempt 2 inflight, nothing more) must
+    resume as claim-local extractor_failed - never a third physical attempt,
+    never a whole-runtime active_runtime_unavailable."""
+
+    class _SimulatedProcessDeath(BaseException):
+        pass
+
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-extract-exhaust.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_extract_exhaust",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+
+    from src.web.research.model_gateway import ResearchModelGateway as _RMG3
+    from src.web.research.active_semantics import RuntimeEvidenceExtractor as _REE3
+
+    class _PerAttemptClient:
+        """Extraction attempt 1 is malformed (strict parser rejects it), every
+        later call is valid - so the gateway retries the target extraction
+        exactly once."""
+
+        def __init__(self, malformed: _StructuredClient, healthy: _StructuredClient) -> None:
+            self.chat = SimpleNamespace(completions=self)
+            self._malformed = malformed
+            self._healthy = healthy
+            self.extraction_attempts = 0
+
+        def with_options(self, **kwargs: Any) -> "_PerAttemptClient":
+            self._malformed.with_options(**kwargs)
+            self._healthy.with_options(**kwargs)
+            return self
+
+        def create(self, **kwargs: Any) -> Any:
+            system = str(kwargs["messages"][0]["content"])
+            if system.startswith("You extract one bounded evidence link"):
+                self.extraction_attempts += 1
+                if self.extraction_attempts == 1:
+                    return self._malformed.create(**kwargs)
+            return self._healthy.create(**kwargs)
+
+    crash_model = _RMG3(
+        client=_PerAttemptClient(
+            _StructuredClient(claims_count=2, malformed_extraction=True),
+            _StructuredClient(claims_count=2),
+        ),
+        model_name="test-model",
+        timeout_seconds=20,
+    )
+
+    class _CrashAfterAttemptTwoFinished:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+            self.crashed = False
+
+        def extract(self, **kwargs: Any) -> Any:
+            original_finished = kwargs.get("on_attempt_finished")
+
+            def crash_finished(audit: Any) -> None:
+                if original_finished is not None:
+                    original_finished(audit)
+                if not self.crashed and getattr(audit, "attempt", None) == 2:
+                    self.crashed = True
+                    raise _SimulatedProcessDeath(
+                        "simulated process death after extraction attempt 2 finished"
+                    )
+
+            return self._inner.extract(
+                **{**kwargs, "on_attempt_finished": crash_finished}
+            )
+
+    crash_extractor = _CrashAfterAttemptTwoFinished(_REE3(crash_model))
+
+    def crash_runtime_factory(
+        repo: WebLookupRepository,
+        gateway: ActiveResearchGateway,
+    ) -> ActiveResearchRuntimeExecutor:
+        return ActiveResearchRuntimeExecutor(
+            repo,
+            gateway,
+            model_gateway=crash_model,
+            evidence_extractor=crash_extractor,
+        )
+
+    crash_service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(
+            search_backend=_SearchBackend(),
+            read_gateway=_ReadGateway(),
+        ),
+        active_runtime_factory=crash_runtime_factory,
+    )
+
+    # Execute 1: attempt 1 malformed -> gateway retries attempt 2 (valid) ->
+    # on_attempt_finished(attempt 2) finishes the in-memory model call and then
+    # raises a BaseException, which no except Exception checkpoint persists.
+    # The durable window is exactly: attempt 1 audit + attempt 2 inflight.
+    with pytest.raises(BaseException, match="simulated process death"):
+        crash_service.execute(run.id, raise_on_error=True)
+
+    # Assertion 1: crash 前 durable inflight == target attempt 2, attempt 1
+    # audit durable, attempt 2 audit NOT durable, binding not yet failed.
+    crashed_run = repository.get(run.id)
+    crashed_cursor = ResearchRuntimeCursor.from_dict(
+        crashed_run.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert crashed_cursor.inflight_model_call is not None
+    assert crashed_cursor.inflight_model_call.attempt == 2
+    target_logical_id = crashed_cursor.inflight_model_call.logical_call_id
+    assert target_logical_id.startswith("research_evidence_extract:")
+    crashed_extraction_calls = [
+        call
+        for call in crashed_cursor.model_calls
+        if call.logical_call_id == target_logical_id
+    ]
+    assert [call.attempt for call in crashed_extraction_calls] == [1]
+    assert not any(
+        isinstance(prior, Mapping) and prior.get("status") == "extractor_failed"
+        for record in crashed_run.selected_sources
+        for prior in (record.get("extractions") or {}).values()
+    )
+
+    # Simulate the operator restarting the worker after the process died: mark
+    # the crashed operation stale so begin_operation accepts the resume via
+    # recoverable_running (a BaseException never runs the dispatch cleanup).
+    with repository.database.connect() as connection:
+        row = connection.execute(
+            "SELECT research_context FROM web_lookup_runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()
+        assert row is not None
+        stale_context = loads(str(row[0]))
+        stale_context.setdefault("operation", {})["active_operation_started_at"] = (
+            "2000-01-01T00:00:00+00:00"
+        )
+        connection.execute(
+            "UPDATE web_lookup_runs SET research_context = ? WHERE id = ?",
+            (_json_dumps(stale_context), run.id),
+        )
+
+    # Execute 2 (resume): recover_interrupted_model_attempt -> attempt 2 ->
+    # interrupted_unknown -> the extraction loop refuses a third attempt and
+    # the round-4 local catch settles the binding claim-local.
+    resumed_client = _StructuredClient(claims_count=2)
+    resumed = _service(
+        repository,
+        resumed_client,
+        search_backend=_SearchBackend(),
+    ).execute(run.id, raise_on_error=True)
+
+    resumed_cursor = ResearchRuntimeCursor.from_dict(
+        resumed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    # Assertion 2: resume 后存在 interrupted_unknown(target attempt 2)。
+    recovered_item = f"{target_logical_id}:attempt:2"
+    assert [
+        failure.item_id
+        for failure in resumed_cursor.failures
+        if failure.code == "interrupted_unknown"
+        and failure.item_id == recovered_item
+    ] == [recovered_item]
+
+    # Assertion 3: 不存在 attempt 3（model_calls 无 target attempt 2/3 审计、
+    # failures 无 :attempt:3、物理 extraction 调用不再发生）。
+    target_audits = [
+        call
+        for call in resumed_cursor.model_calls
+        if call.logical_call_id == target_logical_id
+    ]
+    assert [call.attempt for call in target_audits] == [1]
+    assert not any(call.attempt >= 3 for call in target_audits)
+    assert not any(
+        failure.item_id.startswith(f"{target_logical_id}:attempt:3")
+        for failure in resumed_cursor.failures
+    )
+
+
+    # Assertion 4: target binding extractor_failed / model_call_attempts_exhausted。
+    resumed_state = _dispatch_state(resumed)
+    assert resumed_state is not None
+    failed_bindings = [
+        (claim_id, prior)
+        for record in resumed.selected_sources
+        for claim_id, prior in (record.get("extractions") or {}).items()
+        if isinstance(prior, Mapping)
+        and prior.get("reason") == "model_call_attempts_exhausted"
+    ]
+    assert len(failed_bindings) == 1
+    assert failed_bindings[0][1] == {
+        "status": "extractor_failed",
+        "reason": "model_call_attempts_exhausted",
+    }
+
+    # Assertion 5: 另一 claim/binding 成功继续（该 (candidate, claim) 对不再
+    # 被物理提取，其他 binding 正常 eligible 并产生 evidence）。
+    target_claim_id = target_logical_id.split(":")[2]
+    target_candidate_id = target_logical_id.split(":")[3]
+    physical_extractions = [
+        call
+        for call in resumed_client.calls
+        if str(call["messages"][0]["content"]).startswith(
+            "You extract one bounded evidence link"
+        )
+    ]
+    assert physical_extractions
+    assert not any(
+        loads(str(call["messages"][1]["content"]))["candidate_id"]
+        == target_candidate_id
+        and loads(str(call["messages"][1]["content"]))["claim_id"]
+        == target_claim_id
+        for call in physical_extractions
+    )
+    assert any(
+        isinstance(prior, Mapping) and prior.get("status") == "eligible"
+        for record in resumed.selected_sources
+        for prior in (record.get("extractions") or {}).values()
+    )
+    linked_claims = {link.claim_id for link in resumed_state.evidence_links}
+    assert linked_claims
+
+    # Assertion 6: terminal stop_reason != active_runtime_unavailable。
+    assert resumed.status in {"completed", "partial"}
+    assert resumed.stop_reason != "active_runtime_unavailable"
+def test_covered_clusters_are_cumulative_across_waves(
+    tmp_path: Any,
+) -> None:
+    """P2 round-4: covered-cluster truth must be run-level cumulative, never
+    the previous wave's read plan (which is overwritten every wave).
+
+    W1 reads wave-1.example/a (cluster X), W2 reads wave-2.example/a
+    (cluster Y), W3 offers wave-1.example/b (rank 1, repeat cluster X) and
+    wave-3.example/a (rank 2, fresh cluster Z). The scheduler must backfill Z -
+    the repeated-cluster candidate never enters a physical read again.
+    """
+    import src.application.active_research_runtime as art_mod
+    from src.web.research.gap_planner import GapSearchIntent
+
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    claim = ResearchClaim(
+        id="claim_major",
+        question_id=question.id,
+        text="Alpha framework current release",
+        kind="factual",
+        priority="major",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    gap = EvidenceGap(
+        id="gap_major",
+        claim_id=claim.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="major",
+        state="open",
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim,),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(gap,),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(
+        RuntimeDatabase(tmp_path / "active-cluster-cumulative.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_cluster_cumulative",
+            query="Alpha framework current release",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+
+    class _PrimaryRoleClient(_StructuredClient):
+        """Same fake as the suite default, but every candidate is assessed as
+        primary/eligible - so a fresh cluster is always schedulable instead of
+        being held back as lead_only by the H9 predicate."""
+
+        def create(self, **kwargs: Any) -> Any:
+            system = str(kwargs["messages"][0]["content"])
+            if "search candidates" in system:
+                request = loads(str(kwargs["messages"][1]["content"]))
+                payload = {
+                    "schema_version": "candidate-assessment-v1",
+                    "assessments": [
+                        {
+                            "candidate_id": item["candidate_id"],
+                            "relevance": "answer_relevant",
+                            "relevance_confidence": 0.98,
+                            "source_role": "primary",
+                            "source_role_confidence": 0.95,
+                            "expected_gain_signals": ["new_primary"],
+                        }
+                        for item in request["candidates"]
+                    ],
+                }
+                content = _json_dumps(payload)
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=content),
+                            finish_reason="stop",
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=10,
+                        completion_tokens=10,
+                        total_tokens=20,
+                    ),
+                )
+            return super().create(**kwargs)
+
+    class _WaveClusterSearchBackend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
+            del max_results
+            self.calls += 1
+            if "wave-1" in query:
+                urls = ["https://wave-1.example/a"]
+            elif "wave-2" in query:
+                urls = ["https://wave-2.example/a"]
+            elif "wave-3" in query:
+                urls = [
+                    "https://wave-1.example/b",
+                    "https://wave-3.example/a",
+                ]
+            else:
+                urls = []
+            return {
+                "status": "ok",
+                "reason": "results_found",
+                "results": [
+                    {
+                        "title": f"Result {index}",
+                        "url": url,
+                        "snippet": "Verified release announcement",
+                        "published_at": "2026-08-01",
+                        "provider": "searxng",
+                    }
+                    for index, url in enumerate(urls)
+                ],
+                "providers_attempted": ["searxng"],
+                "provider_errors": [],
+                "provider_audits": [],
+                "provider_outcomes": [],
+                "searched_at": "2026-08-27T00:00:00+00:00",
+            }
+
+    def _novel_wave_query(
+        cursor: ResearchRuntimeCursor,
+        research_state: ResearchState,
+    ) -> ResearchRuntimeCursor:
+        wave = cursor.wave_index
+        query_text = f"wave-{wave}-cluster-probe"
+        if any(item.query.casefold() == query_text for item in cursor.planned_queries):
+            return cursor
+        open_gap = next(
+            item
+            for item in research_state.gaps
+            if item.state in {"open", "searching"}
+        )
+        runtime_query = RuntimePlannedQuery(
+            id=f"wave-{wave}-cluster-query",
+            gap_id=open_gap.id,
+            claim_id=open_gap.claim_id,
+            intent=GapSearchIntent.DISCOVERY.value,
+            query=query_text,
+            desired_source_role=open_gap.desired_source_role,
+        )
+        return replace(
+            cursor,
+            planned_queries=(*cursor.planned_queries, runtime_query),
+        )
+
+    original_append = art_mod._append_gap_queries
+    art_mod._append_gap_queries = _novel_wave_query
+
+    try:
+        completed = _service(
+            repository,
+            _PrimaryRoleClient(),
+            search_backend=_WaveClusterSearchBackend(),
+        ).execute(run.id, raise_on_error=True)
+    finally:
+        art_mod._append_gap_queries = original_append
+
+    assert completed.status in {"completed", "partial"}
+    assert completed.stop_reason != "active_runtime_unavailable"
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index >= 3
+
+    url_by_id = {
+        item.id: item.url
+        for item in cursor.candidates
+    }
+    candidate_a = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://wave-1.example/a"
+    )
+    candidate_b = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://wave-2.example/a"
+    )
+    candidate_c = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://wave-1.example/b"
+    )
+    candidate_d = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://wave-3.example/a"
+    )
+
+    successful = {
+        outcome.candidate_id
+        for outcome in cursor.read_outcomes
+        if outcome.status == "success"
+    }
+    assert {candidate_a, candidate_b, candidate_d} <= successful
+    assert candidate_c not in successful
+
+    # cluster X (wave-1.example) 只有一次 physical read。
+    read_cluster_counts = Counter(
+        str(record["assessment"]["source_cluster_id"])
+        for record in completed.selected_sources
+        if record.get("read_status") == "read"
+        and isinstance(record.get("assessment"), Mapping)
+        and record["assessment"].get("source_cluster_id")
+    )
+    cluster_x = next(
+        str(record["assessment"]["source_cluster_id"])
+        for record in completed.selected_sources
+        if record.get("read_status") == "read"
+        and isinstance(record.get("assessment"), Mapping)
+        and str((record.get("read") or {}).get("url")) == "https://wave-1.example/a"
+    )
+    assert read_cluster_counts[cluster_x] == 1
+
+    # White-box: the run-level cumulative covered-cluster truth is durable
+    # under its own context key (the read plan alone is overwritten every wave
+    # and can never be the coverage source).
+    covered_durable = completed.research_context.get(
+        ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY
+    )
+    assert isinstance(covered_durable, Mapping)
+    clusters_by_url = {
+        str((record.get("read") or {}).get("url")): str(
+            record["assessment"]["source_cluster_id"]
+        )
+        for record in completed.selected_sources
+        if record.get("read_status") == "read"
+        and isinstance(record.get("assessment"), Mapping)
+    }
+    cluster_y = clusters_by_url["https://wave-2.example/a"]
+    cluster_z = clusters_by_url["https://wave-3.example/a"]
+    assert set(covered_durable.get("claim_major", [])) == {
+        cluster_x,
+        cluster_y,
+        cluster_z,
+    }

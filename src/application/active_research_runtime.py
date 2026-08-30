@@ -91,6 +91,7 @@ ACTIVE_RESEARCH_ASSESSMENTS_KEY = "claim_engine_assessments"
 ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY = "claim_engine_assessment_inputs"
 ACTIVE_RESEARCH_WAVE_BASELINE_KEY = "claim_engine_wave_baseline"
 ACTIVE_RESEARCH_READ_PLAN_KEY = "claim_engine_read_plan"
+ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY = "claim_engine_covered_clusters"
 ACTIVE_RESEARCH_BRIEF_KEY = "claim_engine_evidence_brief"
 ACTIVE_RESEARCH_METRICS_KEY = "claim_engine_metrics"
 ACTIVE_RESEARCH_POLICY_AUDITS_KEY = "claim_engine_policy_audits"
@@ -682,19 +683,33 @@ class ActiveResearchRuntimeExecutor:
                 # whose extraction crashed mid-wave so resume re-extracts them
                 # (per-claim prior status skips completed extractions).
                 completed_read = set(cursor.completed_read_ids)
-                successful_read = {
-                    outcome.candidate_id
-                    for outcome in cursor.read_outcomes
-                    if outcome.status == "success"
-                }
-                _, prior_extraction_targets = _load_read_plan(context)
+                # Covered clusters are run-level CUMULATIVE durable truth,
+                # rebuilt every wave from the accumulated selected sources
+                # (each record carries the claim binding and cluster of the
+                # read-plan entry that produced it, plus the successful-read
+                # status) and persisted back under a dedicated context key. The
+                # current read plan is overwritten every wave, so it can never
+                # be the coverage source - otherwise wave 3 forgets wave 1's
+                # clusters and may re-read a duplicate cluster.
                 covered_clusters_by_claim: dict[str, set[str]] = {}
-                for prior_target in prior_extraction_targets:
-                    if prior_target["candidate_id"] not in successful_read:
+                for covered_record in selected_sources:
+                    if covered_record.get("read_status") != "read":
                         continue
-                    covered_clusters_by_claim.setdefault(
-                        prior_target["claim_id"], set()
-                    ).add(prior_target["cluster_id"])
+                    assessment = covered_record.get("assessment")
+                    if not isinstance(assessment, Mapping):
+                        continue
+                    bound_claim = assessment.get("claim_id")
+                    bound_cluster = assessment.get("source_cluster_id")
+                    if bound_claim and bound_cluster:
+                        covered_clusters_by_claim.setdefault(
+                            str(bound_claim), set()
+                        ).add(str(bound_cluster))
+                context[ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY] = {
+                    claim_id: sorted(cluster_ids)
+                    for claim_id, cluster_ids in sorted(
+                        covered_clusters_by_claim.items()
+                    )
+                }
                 rankings_for_plan = {
                     claim_id: tuple(
                         ranked_candidate
@@ -846,6 +861,35 @@ class ActiveResearchRuntimeExecutor:
                     candidate = _candidate_by_id(cursor, candidate_id)
                     claim = claims_by_id[extraction_target["claim_id"]]
                     read = cast(Mapping[str, Any], source_record["read"])
+                    extraction_logical_call_id = (
+                        f"research_evidence_extract:{run_id}:{claim_id}:{candidate_id}:1"
+                        f"{_extraction_call_suffix(cursor, candidate_id, claim_id)}"
+                    )
+                    try:
+                        extraction_attempt_start = _model_attempt_start(
+                            cursor,
+                            extraction_logical_call_id,
+                        )
+                    except _ModelAttemptBudgetExhausted:
+                        # Both durable attempts for this exact (candidate,
+                        # claim) extraction may already have failed before the
+                        # process exited (the inflight attempt 2 becomes
+                        # interrupted_unknown on resume). Treat it as claim-
+                        # local extraction failure: mark the binding
+                        # extractor_failed, record the failure, checkpoint and
+                        # continue the wave - never a whole-runtime failure and
+                        # never a third physical model call.
+                        extractions[claim_id] = {
+                            "status": "extractor_failed",
+                            "reason": "model_call_attempts_exhausted",
+                        }
+                        _append_failure(
+                            "model_call_attempts_exhausted",
+                            "extracting",
+                            candidate_id,
+                        )
+                        checkpoint()
+                        continue
                     extracted = self.evidence_extractor.extract(
                         run_id=run_id,
                         claim=claim,
@@ -859,11 +903,7 @@ class ActiveResearchRuntimeExecutor:
                         call_id_suffix=_extraction_call_suffix(
                             cursor, candidate_id, claim_id
                         ),
-                        attempt_start=_model_attempt_start(
-                            cursor,
-                            f"research_evidence_extract:{run_id}:{claim_id}:{candidate_id}:1"
-                            f"{_extraction_call_suffix(cursor, candidate_id, claim_id)}",
-                        ),
+                        attempt_start=extraction_attempt_start,
                     )
                     ensure_active()
                     if extracted.status != "completed" or extracted.extraction is None:
