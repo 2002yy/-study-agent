@@ -309,6 +309,15 @@ class ActiveResearchRuntimeExecutor:
                 provider_status = "found"
                 reason = "evidence_gate_pass"
                 confidence = "high"
+            elif elapsed() >= state.budget.hard_timeout_seconds:
+                # A bounded external call may start before the deadline and
+                # return after it. Hard exhaustion is then the terminal truth;
+                # saturation or the implementation wave ceiling must not mask
+                # the exhausted shared budget.
+                final_status = "partial"
+                provider_status = "insufficient"
+                reason = "evidence_budget_exhausted"
+                confidence = "partial"
             elif not open_gap_claims:
                 final_status = "partial"
                 provider_status = "insufficient"
@@ -328,11 +337,6 @@ class ActiveResearchRuntimeExecutor:
                 provider_status = "insufficient"
                 reason = "wave_limit_exhausted"
                 confidence = "partial" if state.evidence else "none"
-            elif elapsed() >= state.budget.hard_timeout_seconds:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_budget_exhausted"
-                confidence = "partial"
             else:
                 cursor = replace(
                     cursor,
@@ -660,6 +664,19 @@ class ActiveResearchRuntimeExecutor:
                 # whose extraction crashed mid-wave so resume re-extracts them
                 # (per-claim prior status skips completed extractions).
                 completed_read = set(cursor.completed_read_ids)
+                successful_read = {
+                    outcome.candidate_id
+                    for outcome in cursor.read_outcomes
+                    if outcome.status == "success"
+                }
+                _, prior_extraction_targets = _load_read_plan(context)
+                covered_clusters_by_claim: dict[str, set[str]] = {}
+                for prior_target in prior_extraction_targets:
+                    if prior_target["candidate_id"] not in successful_read:
+                        continue
+                    covered_clusters_by_claim.setdefault(
+                        prior_target["claim_id"], set()
+                    ).add(prior_target["cluster_id"])
                 rankings_for_plan = {
                     claim_id: tuple(
                         ranked_candidate
@@ -669,7 +686,9 @@ class ActiveResearchRuntimeExecutor:
                     for claim_id, ranked in claim_rankings.items()
                 }
                 physical_reads, extraction_targets = _fair_read_plan(
-                    state, rankings_for_plan
+                    state,
+                    rankings_for_plan,
+                    covered_cluster_ids_by_claim=covered_clusters_by_claim,
                 )
                 # Already-read candidates whose extraction crashed mid-wave
                 # stay extractable on resume, but physical reuse never bypasses
@@ -1313,6 +1332,8 @@ def _ranked_from_dict(raw: Mapping[str, Any]) -> RankedCandidate:
 def _fair_read_plan(
     state: ResearchState,
     rankings: Mapping[str, tuple[RankedCandidate, ...]],
+    *,
+    covered_cluster_ids_by_claim: Mapping[str, set[str]] | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Return ``(physical_reads, extraction_targets)`` for the read stage.
 
@@ -1331,7 +1352,10 @@ def _fair_read_plan(
     # H8: cluster diversity must span every wave of a claim, including
     # selections already bound through reusable candidates, so the fresh
     # acceptance loop skips clusters this claim already covers.
-    claim_clusters: dict[str, set[str]] = {}
+    claim_clusters: dict[str, set[str]] = {
+        claim_id: set(cluster_ids)
+        for claim_id, cluster_ids in (covered_cluster_ids_by_claim or {}).items()
+    }
     reserve = ceil(state.budget.max_reads / 3)
     normal_limit = max(0, state.budget.max_reads - state.budget.reads_used - reserve)
 

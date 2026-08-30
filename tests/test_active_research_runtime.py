@@ -366,6 +366,7 @@ def _service(
     *,
     search_backend: Any | None = None,
     read_gateway: Any | None = None,
+    monotonic: Callable[[], float] = perf_counter,
 ) -> ClaimEngineDispatchWebLookupService:
     def gateway_factory() -> ActiveResearchGateway:
         return ActiveResearchGateway(
@@ -382,7 +383,12 @@ def _service(
             model_name="test-model",
             timeout_seconds=20,
         )
-        return ActiveResearchRuntimeExecutor(repo, gateway, model_gateway=model)
+        return ActiveResearchRuntimeExecutor(
+            repo,
+            gateway,
+            model_gateway=model,
+            monotonic=monotonic,
+        )
 
     return ClaimEngineDispatchWebLookupService(
         repository,
@@ -1277,6 +1283,28 @@ def test_read_plan_cluster_diversity_spans_reusable_and_fresh() -> None:
     assert ("R", "cluster_Y") in b_pairs
     assert "Q" not in {item["candidate_id"] for item in physical}
 
+    # Later-wave planning removes the already-read P from fresh rankings, but
+    # must still seed claim B with P's persisted cluster X. Q is therefore
+    # skipped and the independent cluster Y candidate R is selected.
+    later_physical, later_targets = _fair_read_plan(
+        state,
+        {
+            "claim_B": (
+                ranked("Q", "cluster_X", 2),
+                ranked("R", "cluster_Y", 3),
+            )
+        },
+        covered_cluster_ids_by_claim={"claim_B": {"cluster_X"}},
+    )
+    later_pairs = {
+        (item["candidate_id"], item["cluster_id"])
+        for item in later_targets
+        if item["claim_id"] == "claim_B"
+    }
+    assert ("Q", "cluster_X") not in later_pairs
+    assert ("R", "cluster_Y") in later_pairs
+    assert {item["candidate_id"] for item in later_physical} == {"R"}
+
 
 def _load_smoke_module() -> Any:
     import importlib.util
@@ -1801,6 +1829,62 @@ def test_wave_limit_exhausted_is_not_fake_saturation(tmp_path: Any) -> None:
     assert "claim_wave_limit" not in saturated_claim_ids(
         SaturationState(no_gain_batches_by_claim=dict(cursor.no_gain_batches_by_claim))
     )
+
+
+def test_hard_budget_precedes_wave_limit_after_external_call(tmp_path: Any) -> None:
+    import src.application.active_research_runtime as art_mod
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            return self.value
+
+    clock = _Clock()
+
+    class _DeadlineCrossingSearch(_EmptySearchBackend):
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
+            result = super().search_exact(query, max_results=max_results)
+            clock.value = 61.0
+            return result
+
+    state = _two_gap_state()
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-hard-budget.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_hard_budget_precedence",
+            query="Compare releases",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+
+    original_limit = art_mod.MAX_RESEARCH_WAVES
+    art_mod.MAX_RESEARCH_WAVES = 1
+    try:
+        completed = _service(
+            repository,
+            _StructuredClient(),
+            search_backend=_DeadlineCrossingSearch(),
+            monotonic=clock,
+        ).execute(run.id, raise_on_error=True)
+    finally:
+        art_mod.MAX_RESEARCH_WAVES = original_limit
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_budget_exhausted"
+    assert completed.stop_reason != "wave_limit_exhausted"
+    assert completed.stop_reason != "evidence_saturated"
+
 
 def test_resume_restores_missing_claim_binding_after_extraction_crash(
     tmp_path: Any,
