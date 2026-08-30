@@ -352,6 +352,46 @@ class _ReadGateway:
         }
 
 
+class _PrimaryRoleClient(_StructuredClient):
+    """Same fake as the suite default, but every candidate is assessed as
+    primary/eligible - so a fresh cluster is always schedulable instead of
+    being held back as lead_only by the H9 predicate."""
+
+    def create(self, **kwargs: Any) -> Any:
+        system = str(kwargs["messages"][0]["content"])
+        if "search candidates" in system:
+            request = loads(str(kwargs["messages"][1]["content"]))
+            payload = {
+                "schema_version": "candidate-assessment-v1",
+                "assessments": [
+                    {
+                        "candidate_id": item["candidate_id"],
+                        "relevance": "answer_relevant",
+                        "relevance_confidence": 0.98,
+                        "source_role": "primary",
+                        "source_role_confidence": 0.95,
+                        "expected_gain_signals": ["new_primary"],
+                    }
+                    for item in request["candidates"]
+                ],
+            }
+            content = _json_dumps(payload)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=content),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=SimpleNamespace(
+                    prompt_tokens=10,
+                    completion_tokens=10,
+                    total_tokens=20,
+                ),
+            )
+        return super().create(**kwargs)
+
+
 class _TrackingRepository(WebLookupRepository):
     def __init__(self, database: RuntimeDatabase) -> None:
         super().__init__(database)
@@ -2674,45 +2714,6 @@ def test_covered_clusters_are_cumulative_across_waves(
         )
     )
 
-    class _PrimaryRoleClient(_StructuredClient):
-        """Same fake as the suite default, but every candidate is assessed as
-        primary/eligible - so a fresh cluster is always schedulable instead of
-        being held back as lead_only by the H9 predicate."""
-
-        def create(self, **kwargs: Any) -> Any:
-            system = str(kwargs["messages"][0]["content"])
-            if "search candidates" in system:
-                request = loads(str(kwargs["messages"][1]["content"]))
-                payload = {
-                    "schema_version": "candidate-assessment-v1",
-                    "assessments": [
-                        {
-                            "candidate_id": item["candidate_id"],
-                            "relevance": "answer_relevant",
-                            "relevance_confidence": 0.98,
-                            "source_role": "primary",
-                            "source_role_confidence": 0.95,
-                            "expected_gain_signals": ["new_primary"],
-                        }
-                        for item in request["candidates"]
-                    ],
-                }
-                content = _json_dumps(payload)
-                return SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            message=SimpleNamespace(content=content),
-                            finish_reason="stop",
-                        )
-                    ],
-                    usage=SimpleNamespace(
-                        prompt_tokens=10,
-                        completion_tokens=10,
-                        total_tokens=20,
-                    ),
-                )
-            return super().create(**kwargs)
-
     class _WaveClusterSearchBackend:
         def __init__(self) -> None:
             self.calls = 0
@@ -2873,3 +2874,229 @@ def test_covered_clusters_are_cumulative_across_waves(
         cluster_y,
         cluster_z,
     }
+
+def test_covered_clusters_preserved_for_shared_read_claims(
+    tmp_path: Any,
+) -> None:
+    """P2 round-4 follow-up: a physical read shared by two claims must record
+    coverage for BOTH claims - never only the assessment owner claim.
+
+    W1 reads shared.example/p (cluster X) bound to claim_a AND claim_b (H3).
+    W2 offers claim_b: shared.example/q (rank 1, repeat cluster X) and
+    fresh.example/r (rank 2, fresh cluster Y). claim_b must remember X and
+    backfill R - Q must never enter a physical read, and cluster X is read
+    exactly once."""
+    import src.application.active_research_runtime as art_mod
+    from src.web.research.gap_planner import GapSearchIntent
+
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    claim_a = ResearchClaim(
+        id="claim_a",
+        question_id=question.id,
+        text="Alpha framework current release",
+        kind="factual",
+        priority="major",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    claim_b = ResearchClaim(
+        id="claim_b",
+        question_id=question.id,
+        text="Alpha framework release announcement",
+        kind="factual",
+        priority="major",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    gap_a = EvidenceGap(
+        id="gap_a",
+        claim_id=claim_a.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="major",
+        state="open",
+    )
+    gap_b = EvidenceGap(
+        id="gap_b",
+        claim_id=claim_b.id,
+        gap_type="missing_evidence",
+        desired_source_role="primary",
+        priority="major",
+        state="open",
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(claim_a, claim_b),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(gap_a, gap_b),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-28",
+        known_evidence_ids=(),
+    )
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(
+        RuntimeDatabase(tmp_path / "active-shared-coverage.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_shared_coverage",
+            query="Alpha framework current release",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+
+    class _SharedCoverageSearchBackend:
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
+            del max_results
+            if "wave-1-probe" in query:
+                urls = ["https://shared.example/p"]
+            elif "wave-2-probe-gap_b" in query:
+                urls = ["https://shared.example/q", "https://fresh.example/r"]
+            else:
+                urls = []
+            return {
+                "status": "ok",
+                "reason": "results_found",
+                "results": [
+                    {
+                        "title": f"Result {index}",
+                        "url": url,
+                        "snippet": "Verified release announcement",
+                        "published_at": "2026-08-01",
+                        "provider": "searxng",
+                    }
+                    for index, url in enumerate(urls)
+                ],
+                "providers_attempted": ["searxng"],
+                "provider_errors": [],
+                "provider_audits": [],
+                "provider_outcomes": [],
+                "searched_at": "2026-08-27T00:00:00+00:00",
+            }
+
+    def _novel_wave_query(
+        cursor: ResearchRuntimeCursor,
+        research_state: ResearchState,
+    ) -> ResearchRuntimeCursor:
+        wave = cursor.wave_index
+        appended: list[RuntimePlannedQuery] = []
+        for open_gap in (
+            item
+            for item in research_state.gaps
+            if item.state in {"open", "searching"}
+        ):
+            query_text = f"wave-{wave}-probe-{open_gap.id}"
+            if any(item.query.casefold() == query_text for item in cursor.planned_queries):
+                continue
+            appended.append(
+                RuntimePlannedQuery(
+                    id=f"wave-{wave}-probe-{open_gap.id}-query",
+                    gap_id=open_gap.id,
+                    claim_id=open_gap.claim_id,
+                    intent=GapSearchIntent.DISCOVERY.value,
+                    query=query_text,
+                    desired_source_role=open_gap.desired_source_role,
+                )
+            )
+        if not appended:
+            return cursor
+        return replace(
+            cursor,
+            planned_queries=(*cursor.planned_queries, *appended),
+        )
+
+    original_append = art_mod._append_gap_queries
+    art_mod._append_gap_queries = _novel_wave_query
+    try:
+        completed = _service(
+            repository,
+            _PrimaryRoleClient(),
+            search_backend=_SharedCoverageSearchBackend(),
+        ).execute(run.id, raise_on_error=True)
+    finally:
+        art_mod._append_gap_queries = original_append
+
+    assert completed.status in {"completed", "partial"}
+    assert completed.stop_reason != "active_runtime_unavailable"
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index >= 3
+
+    url_by_id = {item.id: item.url for item in cursor.candidates}
+    candidate_p = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://shared.example/p"
+    )
+    candidate_q = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://shared.example/q"
+    )
+    candidate_r = next(
+        candidate_id
+        for candidate_id, url in url_by_id.items()
+        if url == "https://fresh.example/r"
+    )
+
+    successful = {
+        outcome.candidate_id
+        for outcome in cursor.read_outcomes
+        if outcome.status == "success"
+    }
+    assert candidate_p in successful
+    assert candidate_r in successful
+    assert candidate_q not in successful
+
+    # cluster X (shared.example) 只读一次：Q 的重复 cluster 候选永不物理读。
+    read_cluster_counts = Counter(
+        str(record["assessment"]["source_cluster_id"])
+        for record in completed.selected_sources
+        if record.get("read_status") == "read"
+        and isinstance(record.get("assessment"), Mapping)
+        and record["assessment"].get("source_cluster_id")
+    )
+    cluster_x = next(
+        str(record["assessment"]["source_cluster_id"])
+        for record in completed.selected_sources
+        if record.get("read_status") == "read"
+        and isinstance(record.get("assessment"), Mapping)
+        and str((record.get("read") or {}).get("url")) == "https://shared.example/p"
+    )
+    assert read_cluster_counts[cluster_x] == 1
+
+    # 共享 read 的两个 claim 都必须记住 cluster X（白盒）。
+    covered_durable = completed.research_context.get(
+        ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY
+    )
+    assert isinstance(covered_durable, Mapping)
+    assert cluster_x in set(
+        str(cluster) for cluster in covered_durable.get("claim_a", [])
+    )
+    assert cluster_x in set(
+        str(cluster) for cluster in covered_durable.get("claim_b", [])
+    )

@@ -683,26 +683,46 @@ class ActiveResearchRuntimeExecutor:
                 # whose extraction crashed mid-wave so resume re-extracts them
                 # (per-claim prior status skips completed extractions).
                 completed_read = set(cursor.completed_read_ids)
-                # Covered clusters are run-level CUMULATIVE durable truth,
-                # rebuilt every wave from the accumulated selected sources
-                # (each record carries the claim binding and cluster of the
-                # read-plan entry that produced it, plus the successful-read
-                # status) and persisted back under a dedicated context key. The
-                # current read plan is overwritten every wave, so it can never
-                # be the coverage source - otherwise wave 3 forgets wave 1's
-                # clusters and may re-read a duplicate cluster.
+                # Covered clusters are run-level CUMULATIVE durable truth. The
+                # durable map is read back, merged with every claim bound to a
+                # successfully read source, and written back - never rebuilt
+                # from scratch and overwritten. One physical read serves
+                # multiple claims (H3), but a source record's assessment only
+                # names the claim that triggered the read; the record's
+                # extraction map holds every claim actually bound to it, so
+                # coverage must merge the owner claim AND all extraction-map
+                # keys, or a secondary claim forgets the cluster (H8).
+                raw_covered = context.get(ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY)
                 covered_clusters_by_claim: dict[str, set[str]] = {}
+                if isinstance(raw_covered, Mapping):
+                    for claim_id, cluster_ids in raw_covered.items():
+                        if isinstance(cluster_ids, (list, tuple, set)):
+                            covered_clusters_by_claim[str(claim_id)] = {
+                                str(item) for item in cluster_ids
+                            }
                 for covered_record in selected_sources:
                     if covered_record.get("read_status") != "read":
                         continue
                     assessment = covered_record.get("assessment")
                     if not isinstance(assessment, Mapping):
                         continue
-                    bound_claim = assessment.get("claim_id")
                     bound_cluster = assessment.get("source_cluster_id")
-                    if bound_claim and bound_cluster:
+                    if not bound_cluster:
+                        continue
+                    bound_claims: set[str] = set()
+                    owner_claim = assessment.get("claim_id")
+                    if owner_claim:
+                        bound_claims.add(str(owner_claim))
+                    extraction_map = covered_record.get("extractions")
+                    if isinstance(extraction_map, Mapping):
+                        bound_claims.update(
+                            str(item)
+                            for item in extraction_map
+                            if isinstance(item, str)
+                        )
+                    for claim_id in bound_claims:
                         covered_clusters_by_claim.setdefault(
-                            str(bound_claim), set()
+                            claim_id, set()
                         ).add(str(bound_cluster))
                 context[ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY] = {
                     claim_id: sorted(cluster_ids)
