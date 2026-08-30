@@ -18,6 +18,7 @@ from src.application.active_research_runtime import (
     ACTIVE_RESEARCH_WAVE_BASELINE_KEY,
     ActiveResearchRuntimeExecutor,
     _append_gap_queries,
+    _restore_completed_read_targets,
 )
 from src.application.research_web_lookup_dispatch import (
     _dispatch_state,
@@ -757,7 +758,13 @@ def test_model_crash_after_success_before_semantic_persist_recovers_via_new_atte
     ]
     assert len(planning_audits) == 1
     assert planning_audits[0].status == "completed"
-    assert planning_audits[0].attempt == 1
+    assert planning_audits[0].attempt == 2
+    assert planning_audits[0].call_id.endswith(":attempt:2")
+    assert any(
+        item.code == "interrupted_unknown"
+        and item.item_id.endswith(":attempt:1")
+        for item in cursor.failures
+    )
     assert len({item.call_id for item in cursor.model_calls}) == len(cursor.model_calls)
 
 
@@ -1438,6 +1445,96 @@ def test_reusable_candidates_obey_scheduler_eligibility() -> None:
     assert ("Z", "cluster_Z") in b_pairs
     assert "X" not in {item["candidate_id"] for item in physical if item["claim_id"] == "claim_B"}
 
+
+@pytest.mark.parametrize(
+    ("eligibility", "signals"),
+    [
+        ("rejected", ()),
+        ("lead_only", ()),
+    ],
+)
+def test_restored_read_binding_rechecks_per_claim_eligibility(
+    eligibility: str,
+    signals: tuple[str, ...],
+) -> None:
+    from src.web.research.candidate_assessment import CandidateSemanticAssessment
+    from src.web.research.candidate_pool import CandidatePoolItem
+    from src.web.research.candidate_ranking import RankedCandidate
+
+    candidate = CandidatePoolItem(
+        id="shared",
+        canonical_url="https://x.example/shared",
+        url="https://x.example/shared",
+        title="shared",
+        snippet="",
+        source="",
+        published_at="",
+        query_ids=("q1",),
+        intents=(),
+        providers=("searxng",),
+        first_seen_rank=1,
+    )
+
+    def ranked(
+        *,
+        role: str,
+        cluster: str,
+        item_eligibility: str,
+        item_signals: tuple[str, ...],
+    ) -> RankedCandidate:
+        return RankedCandidate(
+            candidate=candidate,
+            assessment=CandidateSemanticAssessment(
+                candidate_id=candidate.id,
+                relevance="answer_relevant",
+                relevance_confidence=0.9,
+                source_role=role,
+                source_role_confidence=0.9,
+                cluster_id=cluster,
+                expected_gain_signals=item_signals,
+                freshness_score=0.5,
+                estimated_read_cost=1.0,
+            ),
+            rank=1,
+            eligibility=item_eligibility,
+            reason_codes=(),
+            new_cluster=False,
+            expected_information_gain=1,
+        )
+
+    restored = _restore_completed_read_targets(
+        [],
+        completed_read_ids={candidate.id},
+        rankings={
+            "claim_A": (
+                ranked(
+                    role="primary",
+                    cluster="cluster_A",
+                    item_eligibility="eligible",
+                    item_signals=("new_primary",),
+                ),
+            ),
+            "claim_B": (
+                ranked(
+                    role="community",
+                    cluster="cluster_B",
+                    item_eligibility=eligibility,
+                    item_signals=signals,
+                ),
+            ),
+        },
+    )
+
+    assert restored == [
+        {
+            "candidate_id": "shared",
+            "claim_id": "claim_A",
+            "cluster_id": "cluster_A",
+            "source_role": "primary",
+        }
+    ]
+
+
 def test_major_claim_saturates_after_two_no_gain_waves(tmp_path: Any) -> None:
     """Frozen rule: non-critical claims saturate after exactly two no-gain
     waves - the optional third batch is a critical/conflict privilege only."""
@@ -1512,6 +1609,103 @@ def test_major_claim_saturates_after_two_no_gain_waves(tmp_path: Any) -> None:
     assert cursor.no_gain_batches_by_claim == {"claim_major": 2}
     assert cursor.no_gain_batches_by_gap == {"gap_major": 2}
     assert len(cursor.gain_history) == 2
+
+
+def test_deferred_context_gap_does_not_block_critical_saturation(tmp_path: Any) -> None:
+    question = ResearchQuestion(id="question_1", question_surface="Compare releases")
+    requirement = EvidenceRequirement(
+        source_roles=("primary", "independent_secondary"),
+        min_independent_sources=2,
+        requires_primary_source=True,
+    )
+    critical = ResearchClaim(
+        id="claim_critical",
+        question_id=question.id,
+        text="Alpha framework current release",
+        kind="factual",
+        priority="critical",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    context_claim = ResearchClaim(
+        id="claim_context",
+        question_id=question.id,
+        text="Historical background",
+        kind="factual",
+        priority="context",
+        state="searching",
+        evidence_requirement=requirement,
+    )
+    gaps = (
+        EvidenceGap(
+            id="gap_critical",
+            claim_id=critical.id,
+            gap_type="missing_evidence",
+            desired_source_role="primary",
+            priority="critical",
+            state="open",
+        ),
+        EvidenceGap(
+            id="gap_context",
+            claim_id=context_claim.id,
+            gap_type="missing_context",
+            desired_source_role="independent_secondary",
+            priority="context",
+            state="open",
+        ),
+    )
+    state = build_research_state(
+        mode="active",
+        questions=(question,),
+        claims=(critical, context_claim),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=gaps,
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+        reference_date="2026-08-30",
+        known_evidence_ids=(),
+    )
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-context-gap.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_context_gap_saturation",
+            query="Alpha framework current release",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    search = _EmptySearchBackend()
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        search_backend=search,
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_saturated"
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.wave_index == 3
+    assert cursor.no_gain_batches_by_claim == {"claim_critical": 3}
+    assert cursor.no_gain_batches_by_gap == {"gap_critical": 3}
+    assert cursor.active_gap_ids == ("gap_critical",)
+    final_state = _dispatch_state(completed)
+    assert final_state is not None
+    deferred = next(gap for gap in final_state.gaps if gap.id == "gap_context")
+    assert deferred.state == "open"
 
 
 def test_wave_limit_exhausted_is_not_fake_saturation(tmp_path: Any) -> None:

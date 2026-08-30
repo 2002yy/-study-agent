@@ -102,6 +102,10 @@ class ActiveResearchCancelled(RuntimeError):
     pass
 
 
+class _ModelAttemptBudgetExhausted(RuntimeError):
+    pass
+
+
 class ActiveResearchRuntimeExecutor:
     """Execute one active run under the durable WebLookupRun owner."""
 
@@ -282,11 +286,10 @@ class ActiveResearchRuntimeExecutor:
             """Advance or finish one gain-accounted wave exactly once."""
 
             nonlocal cursor
-            open_gap_claims = {
-                gap.claim_id
-                for gap in state.gaps
-                if gap.state in {"open", "searching"}
-            }
+            # Settlement must use the same actionable scope as planning.
+            # Context gaps are deliberately deferred by _ordered_gaps(); they
+            # therefore cannot keep an otherwise saturated active run alive.
+            open_gap_claims = {gap.claim_id for gap in _ordered_gaps(state)}
             extra_batch_claims = {
                 claim.id for claim in state.claims if claim.priority == "critical"
             } | {conflict.claim_id for conflict in state.conflict_gaps}
@@ -393,6 +396,10 @@ class ActiveResearchRuntimeExecutor:
                     timeout_seconds=remaining_timeout(),
                     on_attempt_started=on_model_started,
                     on_attempt_finished=on_model_finished,
+                    attempt_start=_model_attempt_start(
+                        cursor,
+                        f"research_claim_plan:{run.id}:1",
+                    ),
                 )
                 ensure_active()
                 if not bootstrap.completed or bootstrap.state is None:
@@ -665,46 +672,15 @@ class ActiveResearchRuntimeExecutor:
                     state, rankings_for_plan
                 )
                 # Already-read candidates whose extraction crashed mid-wave
-                # must stay extractable on resume. Restore per-claim bindings
-                # (candidate_id, claim_id) from the FULL rankings — a candidate
-                # served by two claims keeps both bindings even though its
-                # physical read completed; the per-claim extraction prior
-                # status skips claims whose extraction already finished.
-                targeted_pairs = {
-                    (target_item["candidate_id"], target_item["claim_id"])
-                    for target_item in extraction_targets
-                }
-                claims_by_candidate: dict[str, set[str]] = {}
-                for claim_id, ranked in claim_rankings.items():
-                    for ranked_candidate in ranked:
-                        claims_by_candidate.setdefault(
-                            ranked_candidate.candidate.id, set()
-                        ).add(claim_id)
-                for candidate_id in sorted(completed_read):
-                    for claim_id in sorted(claims_by_candidate.get(candidate_id, set())):
-                        if (candidate_id, claim_id) in targeted_pairs:
-                            continue
-                        record = _source_by_candidate(selected_sources, candidate_id)
-                        cluster_id = ""
-                        source_role = ""
-                        if record is not None:
-                            assessment = record.get("assessment")
-                            if isinstance(assessment, Mapping):
-                                cluster_id = str(
-                                    assessment.get("source_cluster_id") or ""
-                                )
-                                source_role = str(
-                                    assessment.get("source_role") or ""
-                                )
-                        extraction_targets = [
-                            *extraction_targets,
-                            {
-                                "candidate_id": candidate_id,
-                                "claim_id": claim_id,
-                                "cluster_id": cluster_id,
-                                "source_role": source_role,
-                            },
-                        ]
+                # stay extractable on resume, but physical reuse never bypasses
+                # per-claim eligibility. Rebuild each binding from that claim's
+                # own full ranking and shared scheduler predicate; the
+                # per-claim extraction prior skips work already finished.
+                extraction_targets = _restore_completed_read_targets(
+                    extraction_targets,
+                    completed_read_ids=completed_read,
+                    rankings=claim_rankings,
+                )
                 context[ACTIVE_RESEARCH_READ_PLAN_KEY] = {
                     "physical_reads": physical_reads,
                     "extraction_targets": extraction_targets,
@@ -1470,6 +1446,45 @@ def _fair_read_plan(
     return physical[:read_cap], targets
 
 
+def _restore_completed_read_targets(
+    extraction_targets: list[dict[str, str]],
+    *,
+    completed_read_ids: set[str],
+    rankings: Mapping[str, tuple[RankedCandidate, ...]],
+) -> list[dict[str, str]]:
+    """Restore only eligible per-claim bindings for already-read candidates.
+
+    Physical-read reuse never grants semantic eligibility to another claim.
+    The binding is rebuilt from that claim's own RankedCandidate, including its
+    own role and cluster, and must pass the scheduler's shared predicate.
+    """
+
+    restored = list(extraction_targets)
+    targeted_pairs = {
+        (item["candidate_id"], item["claim_id"]) for item in extraction_targets
+    }
+    for claim_id in sorted(rankings):
+        for item in rankings[claim_id]:
+            candidate_id = item.candidate.id
+            pair = (candidate_id, claim_id)
+            if (
+                candidate_id not in completed_read_ids
+                or pair in targeted_pairs
+                or not is_schedulable_candidate(item)
+            ):
+                continue
+            restored.append(
+                {
+                    "candidate_id": candidate_id,
+                    "claim_id": claim_id,
+                    "cluster_id": item.assessment.cluster_id,
+                    "source_role": item.assessment.source_role,
+                }
+            )
+            targeted_pairs.add(pair)
+    return restored
+
+
 def _read_plan_entries(raw: Any, keys: tuple[str, ...]) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
@@ -1871,17 +1886,32 @@ def _model_attempt_start(
 ) -> int:
     """P1-C batch 2: next attempt for a logical model operation.
 
-    Derived from the durable call history of the SAME logical call id (never
-    from failure text): a completed/inflight attempt 1 means resume must run
-    attempt 2 so physical call ids stay unique and the interrupted_unknown ->
-    bounded retry truth is preserved.
+    Derived from completed audits plus exact recovered call IDs for the SAME
+    logical call. A process crash leaves no completed audit, so the durable
+    interrupted_unknown item is required to advance attempt 1 -> attempt 2.
+    Once the frozen ceiling has been consumed, fail before another physical
+    model call can reuse the last call ID.
     """
     previous = [
         call.attempt
         for call in cursor.model_calls
         if call.logical_call_id == logical_call_id
     ]
-    return min(MAX_RESEARCH_MODEL_ATTEMPTS, max(previous, default=0) + 1)
+    recovered_prefix = f"{logical_call_id}:attempt:"
+    for failure in cursor.failures:
+        if failure.code != "interrupted_unknown" or not failure.item_id.startswith(
+            recovered_prefix
+        ):
+            continue
+        raw_attempt = failure.item_id[len(recovered_prefix) :]
+        if raw_attempt.isdigit():
+            previous.append(int(raw_attempt))
+    last_attempt = max(previous, default=0)
+    if last_attempt >= MAX_RESEARCH_MODEL_ATTEMPTS:
+        raise _ModelAttemptBudgetExhausted(
+            f"model attempts exhausted for logical call: {logical_call_id}"
+        )
+    return last_attempt + 1
 
 
 def _assessment_call_suffix(

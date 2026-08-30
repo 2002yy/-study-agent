@@ -94,6 +94,7 @@ class RuntimeClaimPlanner:
         timeout_seconds: float | None = None,
         on_attempt_started: AttemptStartedHook | None = None,
         on_attempt_finished: AttemptFinishedHook | None = None,
+        attempt_start: int = 1,
     ) -> ClaimBootstrapResult:
         normalized_run_id = _required_text(run_id, 300, "run_id")
         if mode not in {"shadow", "active"}:
@@ -133,6 +134,7 @@ class RuntimeClaimPlanner:
             timeout_seconds=timeout_seconds,
             on_attempt_started=on_attempt_started,
             on_attempt_finished=on_attempt_finished,
+            attempt_start=attempt_start,
         )
         if not result.completed or result.value is None:
             return ClaimBootstrapResult(

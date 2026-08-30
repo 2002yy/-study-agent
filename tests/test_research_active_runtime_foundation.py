@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from src.application.active_research_runtime import _model_attempt_start
 from src.web.research.claim_planner import (
     RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
     RuntimeClaimPlanner,
@@ -127,7 +128,11 @@ def _valid_claim_payload() -> str:
     )
 
 
-def _attempt_marker(call_id: str = "logical:attempt:1") -> ResearchModelAttemptStart:
+def _attempt_marker(
+    call_id: str = "logical:attempt:1",
+    *,
+    attempt: int = 1,
+) -> ResearchModelAttemptStart:
     return ResearchModelAttemptStart(
         call_id=call_id,
         logical_call_id="logical",
@@ -135,7 +140,7 @@ def _attempt_marker(call_id: str = "logical:attempt:1") -> ResearchModelAttemptS
         provider_profile="openai",
         model_profile="flash",
         model_name="test-model",
-        attempt=1,
+        attempt=attempt,
         started_at="2026-08-27T12:00:00+00:00",
         response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
         input_sha256="a" * 64,
@@ -457,6 +462,28 @@ def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
     assert recovered.inflight_model_call is None
     assert recovered.failures[-1].code == "interrupted_unknown"
     assert recovered.failures[-1].item_id == "logical:attempt:1"
+
+
+def test_recovered_model_attempt_advances_once_then_exhausts_ceiling() -> None:
+    first = recover_interrupted_model_attempt(
+        begin_model_attempt(ResearchRuntimeCursor(phase="planning"), _attempt_marker())
+    )
+
+    assert _model_attempt_start(first, "logical") == 2
+
+    second = recover_interrupted_model_attempt(
+        begin_model_attempt(
+            first,
+            _attempt_marker("logical:attempt:2", attempt=2),
+        )
+    )
+
+    assert [item.item_id for item in second.failures] == [
+        "logical:attempt:1",
+        "logical:attempt:2",
+    ]
+    with pytest.raises(RuntimeError, match="model attempts exhausted"):
+        _model_attempt_start(second, "logical")
 
 
 def test_inflight_external_call_recovers_as_interrupted_unknown() -> None:
