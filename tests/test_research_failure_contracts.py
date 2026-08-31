@@ -33,6 +33,11 @@ ACTIVE_RUNTIME_STOP_REASONS = {
     "active_runtime_unavailable",
 }
 
+# Durable compatibility writers outside the active runtime must remain in the
+# catalog too.  Migration 15 writes this value into web_lookup_runs when an old
+# running row is recovered during schema upgrade.
+LEGACY_DURABLE_STOP_REASONS = {"legacy_run_interrupted"}
+
 P1_CANONICAL_FAILURE_CODES = {
     "policy_blocked",
     "claim_planning_failed",
@@ -66,6 +71,7 @@ def test_literal_and_frozenset_catalogs_stay_in_lockstep() -> None:
 def test_stop_reason_catalog_contains_current_production_reasons() -> None:
     assert RESEARCH_STOP_REASON_CATALOG_VERSION == "research-stop-reason-catalog-v1"
     assert ACTIVE_RUNTIME_STOP_REASONS <= RESEARCH_STOP_REASONS
+    assert LEGACY_DURABLE_STOP_REASONS <= RESEARCH_STOP_REASONS
 
 
 def test_failure_codes_are_lower_snake_case() -> None:
