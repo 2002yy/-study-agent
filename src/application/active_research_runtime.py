@@ -55,6 +55,7 @@ from src.web.research.evidence_gain import (
     saturated_claim_ids,
     update_saturation,
 )
+from src.web.research.failure_contracts import ResearchFailureCode
 from src.web.research.gap_planner import GapQueryBatch, GapSearchIntent, PlannedGapQuery, plan_gap_queries
 from src.web.research.model_gateway import (
     MAX_RESEARCH_MODEL_ATTEMPTS,
@@ -67,18 +68,22 @@ from src.web.research.runtime import (
     ResearchRuntimeCursor,
     RuntimeCandidate,
     RuntimeExternalAttemptStart,
-    RuntimeFailure,
+    RuntimePhase,
     RuntimePlannedQuery,
     RuntimeQueryOutcome,
     RuntimeReadOutcome,
+    append_runtime_failure,
     attach_runtime_cursor,
     begin_external_attempt,
     begin_model_attempt,
+    build_runtime_failure,
     finish_external_attempt,
     finish_model_attempt,
     load_runtime_cursor,
     recover_interrupted_external_attempt,
     recover_interrupted_model_attempt,
+    runtime_failure_id,
+    runtime_failure_id_unattached,
 )
 from src.web.research.scheduler import (
     ReadSchedulerPolicy,
@@ -293,9 +298,6 @@ class ActiveResearchRuntimeExecutor:
                 }
             )
             context[ACTIVE_RESEARCH_POLICY_AUDITS_KEY] = audits[-100:]
-            if not allowed:
-                _append_failure("blocked_by_policy", cursor.phase, purpose)
-                checkpoint()
             return allowed
 
         def on_model_started(marker: ResearchModelAttemptStart) -> None:
@@ -316,11 +318,42 @@ class ActiveResearchRuntimeExecutor:
             cursor = finish_model_attempt(cursor, audit)
             ensure_active()
 
-        def _append_failure(code: str, phase: str, item_id: str = "") -> None:
+        def _append_failure(
+            code: ResearchFailureCode,
+            phase: RuntimePhase,
+            *,
+            logical_call_id: str = "",
+            item_id: str = "",
+            detail: str = "",
+            provider_code: str = "",
+            exception_type: str = "",
+            attempt_id: str = "",
+        ) -> None:
             nonlocal cursor
+            durable_attempt_id = attempt_id or f"run-attempt:{context['run_attempt']}"
+            failure_id = (
+                runtime_failure_id(logical_call_id=logical_call_id, code=code)
+                if logical_call_id
+                else runtime_failure_id_unattached(
+                    phase=phase,
+                    item_id=item_id,
+                    attempt_id=durable_attempt_id,
+                    code=code,
+                )
+            )
+            failure = build_runtime_failure(
+                failure_id=failure_id,
+                code=code,
+                phase=phase,
+                item_id=item_id,
+                detail=detail,
+                provider_code=provider_code,
+                exception_type=exception_type,
+                attempt_id=durable_attempt_id,
+            )
             cursor = replace(
                 cursor,
-                failures=(*cursor.failures, RuntimeFailure(code=code, phase=phase, item_id=item_id)),
+                failures=append_runtime_failure(cursor.failures, failure),
             )
 
         def settle_completed_wave(
@@ -444,6 +477,13 @@ class ActiveResearchRuntimeExecutor:
                 checkpoint(stage="planned")
                 categories = ("public_research_question", "research_time_context")
                 if not model_allowed("research_claim_planning", categories):
+                    _append_failure(
+                        "policy_blocked",
+                        "planning",
+                        logical_call_id=f"policy:research_claim_planning:{run_id}",
+                        item_id="research_claim_planning",
+                        detail="blocked_by_policy",
+                    )
                     return self._terminal_unavailable(
                         run_id,
                         operation_id=operation_id,
@@ -472,7 +512,18 @@ class ActiveResearchRuntimeExecutor:
                 )
                 ensure_active()
                 if not bootstrap.completed or bootstrap.state is None:
-                    _append_failure(bootstrap.reason or "claim_plan_unavailable", "planning")
+                    planning_reason = bootstrap.reason or "claim_plan_unavailable"
+                    planning_code: ResearchFailureCode = (
+                        "model_attempts_exhausted"
+                        if planning_reason == "model_call_attempts_exhausted"
+                        else "claim_planning_failed"
+                    )
+                    _append_failure(
+                        planning_code,
+                        "planning",
+                        logical_call_id=f"research_claim_plan:{run.id}:1",
+                        detail=planning_reason,
+                    )
                     checkpoint()
                     return self._terminal_unavailable(
                         run_id,
@@ -611,6 +662,16 @@ class ActiveResearchRuntimeExecutor:
                         checkpoint()
                     ensure_active()
                     outcome = batch_result.outcomes[0]
+                    if outcome.status == "unavailable":
+                        _append_failure(
+                            "search_failed",
+                            "searching",
+                            logical_call_id=marker.call_id,
+                            item_id=planned.id,
+                            detail=outcome.reason or "search_unavailable",
+                            provider_code=";".join(outcome.provider_errors),
+                            attempt_id=marker.call_id,
+                        )
                     cursor = replace(
                         cursor,
                         query_outcomes=(
@@ -620,7 +681,11 @@ class ActiveResearchRuntimeExecutor:
                                 status=_runtime_query_status(outcome.status),
                                 result_count=outcome.result_count,
                                 providers=outcome.providers_attempted,
-                                error_code=outcome.reason if outcome.status == "unavailable" else "",
+                                error_code=(
+                                    "search_failed"
+                                    if outcome.status == "unavailable"
+                                    else ""
+                                ),
                             ),
                         ),
                         candidates=_merge_runtime_candidates(
@@ -679,13 +744,20 @@ class ActiveResearchRuntimeExecutor:
                     clusters = cluster_candidate_sources(candidates)
                     assignments = {item.candidate_id: item for item in clusters.assignments}
                     categories = ("public_research_claim", "public_candidate_metadata")
-                    if not model_allowed("research_candidate_assessment", categories):
-                        _append_failure("candidate_assessment_blocked_by_policy", "assessing", claim.id)
-                        continue
                     assessment_logical_call_id = (
                         f"research_candidate_assessment:{run_id}:{claim.id}:1"
                         f"{_assessment_call_suffix(cursor, claim.id, candidate_ids)}"
                     )
+                    if not model_allowed("research_candidate_assessment", categories):
+                        _append_failure(
+                            "policy_blocked",
+                            "assessing",
+                            logical_call_id=f"policy:{assessment_logical_call_id}",
+                            item_id=claim.id,
+                            detail="blocked_by_policy",
+                        )
+                        checkpoint()
+                        continue
                     try:
                         assessment_attempt_start = _model_attempt_start(
                             cursor,
@@ -698,9 +770,11 @@ class ActiveResearchRuntimeExecutor:
                         # attempt exhaustion is not a whole-runtime failure and
                         # must never create a third physical model call.
                         _append_failure(
-                            "candidate_assessment_unavailable",
+                            "model_attempts_exhausted",
                             "assessing",
-                            claim.id,
+                            logical_call_id=assessment_logical_call_id,
+                            item_id=claim.id,
+                            detail="model_call_attempts_exhausted",
                         )
                         checkpoint()
                         continue
@@ -720,7 +794,21 @@ class ActiveResearchRuntimeExecutor:
                     )
                     ensure_active()
                     if assessed.status != "completed" or not assessed.assessments:
-                        _append_failure(assessed.reason or "candidate_assessment_unavailable", "assessing", claim.id)
+                        assessment_reason = (
+                            assessed.reason or "candidate_assessment_unavailable"
+                        )
+                        assessment_code: ResearchFailureCode = (
+                            "model_attempts_exhausted"
+                            if assessment_reason == "model_call_attempts_exhausted"
+                            else "assessment_failed"
+                        )
+                        _append_failure(
+                            assessment_code,
+                            "assessing",
+                            logical_call_id=assessment_logical_call_id,
+                            item_id=claim.id,
+                            detail=assessment_reason,
+                        )
                         checkpoint()
                         continue
                     ranked = rank_candidate_pool(
@@ -873,9 +961,11 @@ class ActiveResearchRuntimeExecutor:
                     )
                     cursor = begin_external_attempt(cursor, marker)
                     checkpoint()
+                    read_exception_type = ""
                     try:
                         raw_read = dict(self.gateway.read(candidate.url, max_chars=source_limit) or {})
                     except Exception as exc:
+                        read_exception_type = type(exc).__name__
                         raw_read = {
                             "ok": False,
                             "status": "failed",
@@ -889,6 +979,21 @@ class ActiveResearchRuntimeExecutor:
                     content = str(raw_read.get("content") or raw_read.get("readme") or "")[:source_limit]
                     ok = bool(raw_read.get("ok") is True and content.strip())
                     status = "success" if ok else "failed"
+                    if not ok:
+                        _append_failure(
+                            "read_failed",
+                            "reading",
+                            logical_call_id=marker.call_id,
+                            item_id=candidate_id,
+                            detail=_bounded_text(
+                                raw_read.get("error") or "read_failed", 2000
+                            ),
+                            provider_code=_bounded_text(
+                                raw_read.get("error_code"), 200
+                            ),
+                            exception_type=read_exception_type,
+                            attempt_id=marker.call_id,
+                        )
                     if ok:
                         successful_reads += 1
                         used_chars += len(content)
@@ -900,7 +1005,7 @@ class ActiveResearchRuntimeExecutor:
                                 candidate_id=candidate_id,
                                 status=status,
                                 content_chars=len(content) if ok else 0,
-                                error_code="" if ok else _bounded_text(raw_read.get("error") or "read_failed", 200),
+                                error_code="" if ok else "read_failed",
                             ),
                         ),
                     )
@@ -948,18 +1053,24 @@ class ActiveResearchRuntimeExecutor:
                         "public_candidate_metadata",
                         "bounded_public_page_excerpt",
                     )
+                    extraction_logical_call_id = (
+                        f"research_evidence_extract:{run_id}:{claim_id}:{candidate_id}:1"
+                        f"{_extraction_call_suffix(cursor, candidate_id, claim_id)}"
+                    )
                     if not model_allowed("research_evidence_extraction", extraction_categories):
                         extractions[claim_id] = {"status": "extractor_failed", "reason": "blocked_by_policy"}
-                        _append_failure("extraction_blocked_by_policy", "extracting", candidate_id)
+                        _append_failure(
+                            "policy_blocked",
+                            "extracting",
+                            logical_call_id=f"policy:{extraction_logical_call_id}",
+                            item_id=candidate_id,
+                            detail="blocked_by_policy",
+                        )
                         checkpoint()
                         continue
                     candidate = _candidate_by_id(cursor, candidate_id)
                     claim = claims_by_id[extraction_target["claim_id"]]
                     read = cast(Mapping[str, Any], source_record["read"])
-                    extraction_logical_call_id = (
-                        f"research_evidence_extract:{run_id}:{claim_id}:{candidate_id}:1"
-                        f"{_extraction_call_suffix(cursor, candidate_id, claim_id)}"
-                    )
                     try:
                         extraction_attempt_start = _model_attempt_start(
                             cursor,
@@ -979,9 +1090,11 @@ class ActiveResearchRuntimeExecutor:
                             "reason": "model_call_attempts_exhausted",
                         }
                         _append_failure(
-                            "model_call_attempts_exhausted",
+                            "model_attempts_exhausted",
                             "extracting",
-                            candidate_id,
+                            logical_call_id=extraction_logical_call_id,
+                            item_id=candidate_id,
+                            detail="model_call_attempts_exhausted",
                         )
                         checkpoint()
                         continue
@@ -1002,11 +1115,23 @@ class ActiveResearchRuntimeExecutor:
                     )
                     ensure_active()
                     if extracted.status != "completed" or extracted.extraction is None:
+                        extraction_reason = extracted.reason or "extractor_unavailable"
                         extractions[claim_id] = {
                             "status": "extractor_failed",
-                            "reason": extracted.reason or "extractor_unavailable",
+                            "reason": extraction_reason,
                         }
-                        _append_failure(extracted.reason or "extractor_unavailable", "extracting", candidate_id)
+                        extraction_code: ResearchFailureCode = (
+                            "model_attempts_exhausted"
+                            if extraction_reason == "model_call_attempts_exhausted"
+                            else "extraction_failed"
+                        )
+                        _append_failure(
+                            extraction_code,
+                            "extracting",
+                            logical_call_id=extraction_logical_call_id,
+                            item_id=candidate_id,
+                            detail=extraction_reason,
+                        )
                         checkpoint()
                         continue
                     link = extracted.extraction
@@ -1107,7 +1232,6 @@ class ActiveResearchRuntimeExecutor:
             return self.repository.finish_cancel(run_id, operation_id=operation_id)
         except _HardBudgetReached:
             update_budget()
-            _append_failure("hard_budget_reached", cursor.phase)
             refresh_steering()
             mark_pending_steering_late("hard_budget_exhausted")
             checkpoint()
@@ -1157,7 +1281,13 @@ class ActiveResearchRuntimeExecutor:
                 if raise_on_error:
                     raise
                 return latest
-            _append_failure(type(exc).__name__, cursor.phase)
+            _append_failure(
+                "runtime_internal_failed",
+                cursor.phase,
+                item_id=run_id,
+                detail="active_runtime_exception",
+                exception_type=type(exc).__name__,
+            )
             try:
                 checkpoint()
             except Exception:
@@ -2307,7 +2437,7 @@ def _update_metrics(
 
 def _attempt_number(cursor: ResearchRuntimeCursor, item_id: str) -> int:
     interrupted = sum(
-        failure.code == "interrupted_unknown" and item_id in failure.item_id
+        _is_interrupted_failure(failure) and item_id in failure.item_id
         for failure in cursor.failures
     )
     return min(2, 1 + interrupted)
@@ -2321,7 +2451,8 @@ def _model_attempt_start(
 
     Derived from completed audits plus exact recovered call IDs for the SAME
     logical call. A process crash leaves no completed audit, so the durable
-    interrupted_unknown item is required to advance attempt 1 -> attempt 2.
+    A legacy interrupted_unknown code or canonical v2 interrupted_unknown
+    detail is required to advance attempt 1 -> attempt 2.
     Once the frozen ceiling has been consumed, fail before another physical
     model call can reuse the last call ID.
     """
@@ -2332,7 +2463,7 @@ def _model_attempt_start(
     ]
     recovered_prefix = f"{logical_call_id}:attempt:"
     for failure in cursor.failures:
-        if failure.code != "interrupted_unknown" or not failure.item_id.startswith(
+        if not _is_interrupted_failure(failure) or not failure.item_id.startswith(
             recovered_prefix
         ):
             continue
@@ -2345,6 +2476,14 @@ def _model_attempt_start(
             f"model attempts exhausted for logical call: {logical_call_id}"
         )
     return last_attempt + 1
+
+
+def _is_interrupted_failure(failure: Any) -> bool:
+    """Recognize legacy v1 and canonical v2 interruption records."""
+
+    return failure.code == "interrupted_unknown" or (
+        failure.detail == "interrupted_unknown" and bool(failure.attempt_id)
+    )
 
 
 def _assessment_call_suffix(

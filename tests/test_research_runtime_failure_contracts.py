@@ -46,7 +46,9 @@ def test_v2_round_trip_preserves_all_fields() -> None:
 
 def test_v1_known_code_compatibility() -> None:
     raw = {"code": "search_failed", "phase": "searching", "item_id": "q_1"}
-    failure = RuntimeFailure.from_dict(raw)
+    failure = RuntimeFailure.from_dict(
+        raw, schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    )
     assert failure.code == "search_failed"
     assert failure.phase == "searching"
     assert failure.item_id == "q_1"
@@ -60,7 +62,9 @@ def test_v1_known_code_compatibility() -> None:
 
 def test_v1_unknown_historical_code_stays_raw() -> None:
     raw = {"code": "SomeOldProviderTimeoutError", "phase": "reading", "item_id": "c_2"}
-    failure = RuntimeFailure.from_dict(raw)
+    failure = RuntimeFailure.from_dict(
+        raw, schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    )
     assert failure.code == "SomeOldProviderTimeoutError"
     assert failure.item_id == "c_2"
     assert failure.legacy_input is True

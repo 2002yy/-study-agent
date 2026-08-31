@@ -20,10 +20,10 @@ from src.web.research.model_gateway import (
 )
 from src.web.research.runtime import (
     CLAIM_ENGINE_RUNTIME_CONTEXT_KEY,
+    RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
     ResearchRuntimeCursor,
     RuntimeCandidate,
     RuntimeExternalAttemptStart,
-    RuntimeFailure,
     RuntimePlannedQuery,
     RuntimeQueryOutcome,
     attach_runtime_cursor,
@@ -379,7 +379,7 @@ def test_runtime_cursor_round_trip_and_attach_preserves_unrelated_context() -> N
     assert restored == cursor
     context = attach_runtime_cursor({"legacy": {"keep": True}}, cursor)
     assert context["legacy"] == {"keep": True}
-    assert context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]["schema_version"] == "research-runtime-v1"
+    assert context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]["schema_version"] == "research-runtime-v2"
     loaded = load_runtime_cursor(context)
     assert loaded.available is True
     assert loaded.cursor == cursor
@@ -460,7 +460,9 @@ def test_inflight_model_call_recovers_as_interrupted_unknown() -> None:
 
     recovered = recover_interrupted_model_attempt(started)
     assert recovered.inflight_model_call is None
-    assert recovered.failures[-1].code == "interrupted_unknown"
+    assert recovered.failures[-1].code == "claim_planning_failed"
+    assert recovered.failures[-1].detail == "interrupted_unknown"
+    assert recovered.failures[-1].failure_id
     assert recovered.failures[-1].item_id == "logical:attempt:1"
 
 
@@ -499,15 +501,19 @@ def test_inflight_external_call_recovers_as_interrupted_unknown() -> None:
     recovered = recover_interrupted_external_attempt(started)
 
     assert recovered.inflight_external_call is None
-    assert recovered.failures[-1] == RuntimeFailure(
-        code="interrupted_unknown",
-        phase="reading",
-        item_id=marker.call_id,
-    )
+    failure = recovered.failures[-1]
+    assert failure.code == "read_failed"
+    assert failure.phase == "reading"
+    assert failure.item_id == marker.call_id
+    assert failure.detail == "interrupted_unknown"
+    assert failure.attempt_id == marker.call_id
+    assert failure.failure_id
 
 
 def test_pre_b5_v1_cursor_loads_with_no_external_call_inflight() -> None:
-    legacy = ResearchRuntimeCursor(phase="searching").to_dict()
+    legacy = ResearchRuntimeCursor(
+        phase="searching", schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    ).to_dict()
     del legacy["inflight_external_call"]
 
     restored = ResearchRuntimeCursor.from_dict(legacy)
@@ -516,7 +522,9 @@ def test_pre_b5_v1_cursor_loads_with_no_external_call_inflight() -> None:
 
 
 def test_pre_p1c_v1_cursor_loads_with_empty_wave_truth() -> None:
-    legacy = ResearchRuntimeCursor(phase="searching").to_dict()
+    legacy = ResearchRuntimeCursor(
+        phase="searching", schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    ).to_dict()
     for key in (
         "wave_index",
         "wave_id",

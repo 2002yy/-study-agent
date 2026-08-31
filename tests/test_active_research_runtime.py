@@ -258,6 +258,26 @@ class _EmptySearchBackend:
         }
 
 
+class _UnavailableSearchBackend:
+    def search_exact(
+        self,
+        query: str,
+        *,
+        max_results: int = 5,
+    ) -> dict[str, Any]:
+        del query, max_results
+        return {
+            "status": "unavailable",
+            "reason": "providers_failed",
+            "results": [],
+            "providers_attempted": ["searxng"],
+            "provider_errors": ["searxng:provider_timeout"],
+            "provider_audits": [],
+            "provider_outcomes": [],
+            "searched_at": "2026-09-01T00:00:00+00:00",
+        }
+
+
 class _FloodSearchBackend:
     """Return a full pool of candidates on the first query (B5-H2)."""
 
@@ -350,6 +370,12 @@ class _ReadGateway:
             "title": "Read source",
             "content": "Verified fact: The release date is 2026-08-01."[:max_chars],
         }
+
+
+class _RaisingReadGateway:
+    def read(self, url: str, *, max_chars: int = 6000) -> dict[str, Any]:
+        del url, max_chars
+        raise TimeoutError("private reader detail")
 
 
 class _PrimaryRoleClient(_StructuredClient):
@@ -522,6 +548,73 @@ def test_active_model_policy_denial_fails_closed_before_external_call(tmp_path: 
     assert client.calls == []
     audits = failed.research_context["claim_engine_policy_audits"]
     assert audits[-1]["status"] == "blocked_by_policy"
+    cursor = ResearchRuntimeCursor.from_dict(
+        failed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.schema_version == "research-runtime-v2"
+    assert [failure.code for failure in cursor.failures] == ["policy_blocked"]
+    assert cursor.failures[0].detail == "blocked_by_policy"
+    assert cursor.failures[0].failure_id
+
+
+def test_unavailable_search_projects_canonical_outcome_and_failure(tmp_path: Any) -> None:
+    repository = WebLookupRepository(RuntimeDatabase(tmp_path / "search-failure.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_search_failure",
+            query="Research unavailable providers",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+        )
+    )
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        search_backend=_UnavailableSearchBackend(),
+    ).execute(run.id, raise_on_error=True)
+
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.query_outcomes
+    assert all(item.error_code == "search_failed" for item in cursor.query_outcomes)
+    search_failures = [item for item in cursor.failures if item.code == "search_failed"]
+    assert search_failures
+    assert all(item.detail == "providers_failed" for item in search_failures)
+    assert all(item.provider_code == "searxng:provider_timeout" for item in search_failures)
+    assert len({item.failure_id for item in search_failures}) == len(search_failures)
+
+
+def test_failed_read_projects_canonical_outcome_and_failure(tmp_path: Any) -> None:
+    repository = WebLookupRepository(RuntimeDatabase(tmp_path / "read-failure.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_read_failure",
+            query="Research reader failures",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+        )
+    )
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        read_gateway=_RaisingReadGateway(),
+    ).execute(run.id, raise_on_error=True)
+
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert cursor.read_outcomes
+    assert all(item.error_code == "read_failed" for item in cursor.read_outcomes)
+    read_failures = [item for item in cursor.failures if item.code == "read_failed"]
+    assert read_failures
+    assert all(item.detail == "TimeoutError" for item in read_failures)
+    assert all(item.exception_type == "TimeoutError" for item in read_failures)
+    assert len({item.failure_id for item in read_failures}) == len(read_failures)
 
 
 def _two_gap_state(*, same_claim_text: bool = False) -> Any:
@@ -804,7 +897,11 @@ def test_model_crash_after_success_before_semantic_persist_recovers_via_new_atte
         recovered.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
     )
     assert cursor.inflight_model_call is None
-    assert any(item.code == "interrupted_unknown" for item in cursor.failures)
+    assert any(
+        item.code == "claim_planning_failed"
+        and item.detail == "interrupted_unknown"
+        for item in cursor.failures
+    )
     planning_audits = [
         item
         for item in cursor.model_calls
@@ -815,7 +912,8 @@ def test_model_crash_after_success_before_semantic_persist_recovers_via_new_atte
     assert planning_audits[0].attempt == 2
     assert planning_audits[0].call_id.endswith(":attempt:2")
     assert any(
-        item.code == "interrupted_unknown"
+        item.code == "claim_planning_failed"
+        and item.detail == "interrupted_unknown"
         and item.item_id.endswith(":attempt:1")
         for item in cursor.failures
     )
@@ -2114,6 +2212,13 @@ def test_hard_budget_precedes_wave_limit_after_external_call(tmp_path: Any) -> N
     assert completed.stop_reason == "evidence_budget_exhausted"
     assert completed.stop_reason != "wave_limit_exhausted"
     assert completed.stop_reason != "evidence_saturated"
+    hard_budget_cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert all(
+        failure.code != "runtime_internal_failed"
+        for failure in hard_budget_cursor.failures
+    )
 
 
 def test_resume_restores_missing_claim_binding_after_extraction_crash(
@@ -2196,11 +2301,17 @@ def test_resume_restores_missing_claim_binding_after_extraction_crash(
     # Logical call identity must not drift across the crash/resume boundary:
     # the crashed extraction re-runs under the SAME logical_call_id with
     # attempt 2 (the wrapper crash lands in the executor exception fallback,
-    # so the durable failure is the exception type rather than
-    # interrupted_unknown; a process-level crash produces the inflight ->
-    # interrupted_unknown path instead). Physical call ids stay unique.
+    # so the durable failure is canonical runtime_internal_failed with the
+    # Python type in exception_type; a process-level crash produces a
+    # stage-specific canonical code with interrupted_unknown detail instead).
+    # Physical call ids stay unique.
     cursor = ResearchRuntimeCursor.from_dict(
         resumed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    assert any(
+        failure.code == "runtime_internal_failed"
+        and failure.exception_type == "RuntimeError"
+        for failure in cursor.failures
     )
     extraction_calls = [
         call
@@ -2342,7 +2453,7 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
             ]
             if len(exhausted) == 2 and any(
                 failure.phase == "assessing"
-                and failure.code == "model_call_attempts_exhausted"
+                and failure.code == "model_attempts_exhausted"
                 for failure in cursor.failures
             ):
                 self.crashed = True
@@ -2405,7 +2516,7 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
     ]
     assert [call.attempt for call in same_logical_calls] == [1, 2]
     assert any(
-        failure.code == "candidate_assessment_unavailable"
+        failure.code == "model_attempts_exhausted"
         and failure.item_id == crashed_cursor.failures[-1].item_id
         for failure in resumed_cursor.failures
     )
@@ -2578,8 +2689,9 @@ def test_extraction_attempt_exhaustion_crash_is_claim_local(tmp_path: Any) -> No
     assert [
         failure.item_id
         for failure in resumed_cursor.failures
-        if failure.code == "interrupted_unknown"
-        and failure.item_id == recovered_item
+            if failure.code == "extraction_failed"
+            and failure.detail == "interrupted_unknown"
+            and failure.item_id == recovered_item
     ] == [recovered_item]
 
     # Assertion 3: 不存在 attempt 3（model_calls 无 target attempt 2/3 审计、
