@@ -38,11 +38,13 @@ from src.web.research.claim_planner import RuntimeClaimPlanner
 from src.web.research.contracts import (
     EvidenceCluster,
     EvidenceGap,
+    EvidenceRequirement,
     ResearchBrief,
     ResearchClaim,
     ResearchClaimEvidenceLink,
     ResearchEvidence,
     ResearchState,
+    ResearchTraceEvent,
     build_research_state,
 )
 from src.web.research.evidence_gate import EvidenceGateResult, evaluate_evidence_gate
@@ -86,6 +88,15 @@ from src.web.research.scheduler import (
 )
 from src.web.research.source_cluster import cluster_candidate_sources
 from src.web.research.state import attach_claim_engine_state
+from src.web.research.steering import (
+    ACTIVE_RESEARCH_STEERING_KEY,
+    active_steering_entries,
+    merge_active_steering_context,
+)
+from src.application.research_stop_gate import (
+    ResearchStopGate,
+    ResearchStopSignal,
+)
 
 ACTIVE_RESEARCH_ASSESSMENTS_KEY = "claim_engine_assessments"
 ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY = "claim_engine_assessment_inputs"
@@ -212,7 +223,7 @@ class ActiveResearchRuntimeExecutor:
                 known_evidence_ids=known_evidence_ids(),
             )
             _update_metrics(context, state, cursor)
-            return self.repository.checkpoint(
+            persisted = self.repository.checkpoint(
                 run_id,
                 operation_id=operation_id,
                 research_context=context,
@@ -225,6 +236,38 @@ class ActiveResearchRuntimeExecutor:
                 stop_reason="",
                 answer_confidence="",
             )
+            # The repository may have merged a steering entry that arrived
+            # concurrently with this checkpoint.  Keep the executor's local
+            # copy aligned so the next wave boundary can consume it.
+            context = dict(persisted.research_context)
+            return persisted
+
+        def refresh_steering() -> None:
+            nonlocal context
+            context = merge_active_steering_context(
+                context,
+                self._required(run_id).research_context,
+            )
+
+        def apply_pending_steering(*, wave_index: int) -> tuple[str, ...]:
+            nonlocal context, state
+            state, context, applied_ids = _apply_pending_active_steering(
+                state,
+                context,
+                run_id=run_id,
+                wave_index=wave_index,
+                applied_at=self.utc_now(),
+                known_evidence_ids=known_evidence_ids(),
+            )
+            return applied_ids
+
+        def mark_pending_steering_late(reason: str) -> tuple[str, ...]:
+            nonlocal context
+            context, late_ids = _mark_pending_active_steering_late(
+                context,
+                reason=reason,
+            )
+            return late_ids
 
         def remaining_timeout() -> float:
             return max(1.0, min(20.0, state.budget.hard_timeout_seconds - elapsed()))
@@ -287,6 +330,33 @@ class ActiveResearchRuntimeExecutor:
             """Advance or finish one gain-accounted wave exactly once."""
 
             nonlocal cursor
+            ensure_active()
+            refresh_steering()
+            pending = _pending_active_steering_ids(context)
+            hard_exhausted = elapsed() >= state.budget.hard_timeout_seconds
+            wave_exhausted = cursor.wave_index >= MAX_RESEARCH_WAVES
+            if pending and (hard_exhausted or wave_exhausted):
+                mark_pending_steering_late(
+                    "hard_budget_exhausted"
+                    if hard_exhausted
+                    else "wave_limit_reached"
+                )
+                checkpoint()
+            elif pending:
+                # A pending user direction invalidates completion computed from
+                # the pre-steering graph.  Apply it exactly once and advance to
+                # the next bounded wave without mutating the user's budget.
+                next_wave = cursor.wave_index + 1
+                apply_pending_steering(wave_index=next_wave)
+                cursor = replace(
+                    cursor,
+                    wave_index=next_wave,
+                    wave_id="",
+                    active_gap_ids=(),
+                    phase="searching",
+                )
+                checkpoint()
+                return None
             # Settlement must use the same actionable scope as planning.
             # Context gaps are deliberately deferred by _ordered_gaps(); they
             # therefore cannot keep an otherwise saturated active run alive.
@@ -305,40 +375,34 @@ class ActiveResearchRuntimeExecutor:
                 )
             )
 
-            if gate.status == "pass":
-                final_status = "completed"
-                provider_status = "found"
-                reason = "evidence_gate_pass"
-                confidence = "high"
-            elif elapsed() >= state.budget.hard_timeout_seconds:
-                # A bounded external call may start before the deadline and
-                # return after it. Hard exhaustion is then the terminal truth;
-                # saturation or the implementation wave ceiling must not mask
-                # the exhausted shared budget.
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_budget_exhausted"
-                confidence = "partial"
-            elif not open_gap_claims:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_gap_open"
-                confidence = "partial" if state.evidence else "none"
-            elif open_gap_claims <= saturated_claims:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_saturated"
-                confidence = "partial" if state.evidence else "none"
-            elif cursor.wave_index >= MAX_RESEARCH_WAVES:
-                # Implementation safety ceiling only: the run is not
-                # necessarily saturated, so the persisted reason must not
-                # claim evidence saturation. Product semantics for this
-                # terminal stop belong to the ResearchStopGate batch.
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "wave_limit_exhausted"
-                confidence = "partial" if state.evidence else "none"
-            else:
+            # P1-C batch 3: the single stop truth lives in ResearchStopGate.
+            # The executor derives durable signals and never decides a stop
+            # reason itself; the frozen priority (gate pass > hard budget >
+            # no actionable gaps > saturation > wave ceiling > continue) is
+            # locked inside the gate.  Whether a late steering blocks the old
+            # graph's gate pass is recomputed from the merged durable context
+            # (steering status=late is durable truth), never from the return
+            # value of this invocation's mark call - a crash between the late
+            # checkpoint and the terminal complete must resume to the same
+            # decision.
+            unapplied_steering = _unapplied_steering_blocks_completion(context)
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=gate.status == "pass",
+                    hard_budget_exhausted=(
+                        hard_exhausted
+                    ),
+                    has_actionable_gaps=(
+                        bool(open_gap_claims) or unapplied_steering
+                    ),
+                    all_actionable_saturated=bool(open_gap_claims)
+                    and open_gap_claims <= saturated_claims,
+                    wave_limit_reached=wave_exhausted,
+                    has_evidence=bool(state.evidence),
+                    unapplied_steering_blocks_completion=unapplied_steering,
+                )
+            )
+            if stop.decision == "continue":
                 cursor = replace(
                     cursor,
                     wave_index=cursor.wave_index + 1,
@@ -351,7 +415,7 @@ class ActiveResearchRuntimeExecutor:
 
             cursor = replace(
                 cursor,
-                phase="completed" if gate.status == "pass" else "unavailable",
+                phase="completed" if stop.decision == "success" else "unavailable",
             )
             checkpoint()
             return self.repository.complete(
@@ -364,10 +428,10 @@ class ActiveResearchRuntimeExecutor:
                 query_attempts=query_attempts,
                 selected_sources=selected_sources,
                 rejected_sources=rejected_sources,
-                provider_status=provider_status,
-                stop_reason=reason,
-                answer_confidence=confidence,
-                final_status=final_status,
+                provider_status=stop.provider_status,
+                stop_reason=stop.reason,
+                answer_confidence=stop.answer_confidence,
+                final_status=stop.final_status,
             )
 
         try:
@@ -436,6 +500,11 @@ class ActiveResearchRuntimeExecutor:
             while True:
                 if cursor.wave_index == 0:
                     cursor = replace(cursor, wave_index=1)
+                    refresh_steering()
+                    if _pending_active_steering_ids(context):
+                        ensure_budget()
+                        apply_pending_steering(wave_index=1)
+                    checkpoint()
                 wave_id = f"research_wave:{run_id}:{cursor.wave_index}"
 
                 # A crash after gain/saturation persisted but before terminal
@@ -572,6 +641,12 @@ class ActiveResearchRuntimeExecutor:
                             "provider_errors": list(outcome.provider_errors),
                             "run_attempt": context["run_attempt"],
                             "operation_id": operation_id,
+                            "influenced_by_steering": bool(
+                                _steering_ids_for_claim(context, planned.claim_id)
+                            ),
+                            "steering_ids": list(
+                                _steering_ids_for_claim(context, planned.claim_id)
+                            ),
                             **({"provider_audit": {"schema_version": "research-provider-audit-v1", **audit}} if audit else {}),
                         }
                     )
@@ -1024,6 +1099,8 @@ class ActiveResearchRuntimeExecutor:
             # on_model_finished records the cleared inflight marker and any
             # completed audit; the cancelled run is terminal and never resumes.
             try:
+                refresh_steering()
+                mark_pending_steering_late("user_cancelled")
                 checkpoint()
             except Exception:
                 pass
@@ -1031,11 +1108,32 @@ class ActiveResearchRuntimeExecutor:
         except _HardBudgetReached:
             update_budget()
             _append_failure("hard_budget_reached", cursor.phase)
+            refresh_steering()
+            mark_pending_steering_late("hard_budget_exhausted")
             checkpoint()
             gate = evaluate_evidence_gate(state)
             brief = _evidence_brief(state, gate, selected_sources)
             context[ACTIVE_RESEARCH_BRIEF_KEY] = brief
             checkpoint()
+            # P1-C batch 3: the stop truth comes from the gate; the frozen
+            # exception-path confidence ("partial" if evidence else "none")
+            # is preserved exactly as in 533b60c7. The late steering blocks
+            # the old graph's gate pass via the durable recomputed signal,
+            # so a crash after the late checkpoint resumes to the same
+            # evidence_budget_exhausted decision.
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=gate.status == "pass",
+                    hard_budget_exhausted=True,
+                    has_actionable_gaps=True,
+                    all_actionable_saturated=False,
+                    wave_limit_reached=False,
+                    has_evidence=bool(state.evidence),
+                    unapplied_steering_blocks_completion=(
+                        _unapplied_steering_blocks_completion(context)
+                    ),
+                )
+            )
             return self.repository.complete(
                 run_id,
                 operation_id=operation_id,
@@ -1046,10 +1144,12 @@ class ActiveResearchRuntimeExecutor:
                 query_attempts=query_attempts,
                 selected_sources=selected_sources,
                 rejected_sources=rejected_sources,
-                provider_status="insufficient",
-                stop_reason="evidence_budget_exhausted",
-                answer_confidence="partial" if state.evidence else "none",
-                final_status="partial",
+                provider_status=stop.provider_status,
+                stop_reason=stop.reason,
+                answer_confidence=(
+                    "partial" if state.evidence else "none"
+                ),
+                final_status=stop.final_status,
             )
         except Exception as exc:
             latest = self._required(run_id)
@@ -1062,6 +1162,19 @@ class ActiveResearchRuntimeExecutor:
                 checkpoint()
             except Exception:
                 pass
+            # P1-C batch 3: the canonical stop reason comes from the gate;
+            # the frozen evidence-shaped finish (complete vs fail) is kept.
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=False,
+                    hard_budget_exhausted=False,
+                    has_actionable_gaps=True,
+                    all_actionable_saturated=False,
+                    wave_limit_reached=False,
+                    has_evidence=bool(state.evidence),
+                    unavailable_reason="active_runtime_unavailable",
+                )
+            )
             if state.evidence:
                 result = self.repository.complete(
                     run_id,
@@ -1075,8 +1188,8 @@ class ActiveResearchRuntimeExecutor:
                     query_attempts=query_attempts,
                     selected_sources=selected_sources,
                     rejected_sources=rejected_sources,
-                    provider_status="unavailable",
-                    stop_reason="active_runtime_unavailable",
+                    provider_status=stop.provider_status,
+                    stop_reason=stop.reason,
                     answer_confidence="partial",
                     final_status="partial",
                 )
@@ -1086,8 +1199,8 @@ class ActiveResearchRuntimeExecutor:
                     "active research unavailable",
                     research_context=context,
                     query_attempts=query_attempts,
-                    provider_status="unavailable",
-                    stop_reason="active_runtime_unavailable",
+                    provider_status=stop.provider_status,
+                    stop_reason=stop.reason,
                     operation_id=operation_id,
                 )
             if raise_on_error:
@@ -1116,13 +1229,25 @@ class ActiveResearchRuntimeExecutor:
                 ref.id for ref in _evidence_snapshot(run_id, selected_sources, rejected_sources).refs
             ),
         )
+        # P1-C batch 3: the canonical stop reason flows through the gate.
+        stop = ResearchStopGate.evaluate(
+            ResearchStopSignal(
+                gate_pass=False,
+                hard_budget_exhausted=False,
+                has_actionable_gaps=True,
+                all_actionable_saturated=False,
+                wave_limit_reached=False,
+                has_evidence=bool(state.evidence),
+                unavailable_reason=reason,
+            )
+        )
         return self.repository.fail(
             run_id,
             "active research unavailable",
             research_context=context,
             query_attempts=query_attempts,
-            provider_status="unavailable",
-            stop_reason=reason,
+            provider_status=stop.provider_status,
+            stop_reason=stop.reason,
             operation_id=operation_id,
         )
 
@@ -1141,6 +1266,190 @@ def _default_policy_check(context: Mapping[str, Any], purpose: str) -> bool:
     del purpose
     policy = context.get("external_data_policy")
     return isinstance(policy, Mapping) and policy.get("web_allowed") is True
+
+
+def _pending_active_steering_ids(context: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(item["id"])
+        for item in active_steering_entries(context)
+        if item.get("status") == "pending"
+    )
+
+
+def _unapplied_steering_blocks_completion(context: Mapping[str, Any]) -> bool:
+    """Durable signal: a steering marked late against the exhausted hard or
+    wave budget invalidates completion computed from the pre-steering graph.
+
+    Recomputed from the merged durable context on every settlement (including
+    a crash/resume), never taken from this invocation's mark return value.
+    User-cancelled late entries stay owned by the cancellation lifecycle and
+    do not participate in StopGate truth.
+    """
+
+    return any(
+        item.get("status") == "late"
+        and item.get("late_reason") in {"hard_budget_exhausted", "wave_limit_reached"}
+        for item in active_steering_entries(context)
+    )
+
+
+def _steering_ids_for_claim(
+    context: Mapping[str, Any],
+    claim_id: str,
+) -> tuple[str, ...]:
+    return tuple(
+        str(item["id"])
+        for item in active_steering_entries(context)
+        if item.get("status") == "applied" and item.get("claim_id") == claim_id
+    )
+
+
+def _steering_graph_ids(entry_id: str) -> tuple[str, str]:
+    digest = hashlib.sha256(entry_id.encode("utf-8")).hexdigest()[:24]
+    return f"claim_steering_{digest}", f"gap_steering_{digest}"
+
+
+def _apply_pending_active_steering(
+    state: ResearchState,
+    context: Mapping[str, Any],
+    *,
+    run_id: str,
+    wave_index: int,
+    applied_at: str,
+    known_evidence_ids: tuple[str, ...],
+) -> tuple[ResearchState, dict[str, Any], tuple[str, ...]]:
+    """Map pending metadata into one user claim and critical gap per entry."""
+
+    entries = active_steering_entries(context)
+    pending = [item for item in entries if item.get("status") == "pending"]
+    if not pending:
+        return state, dict(context), ()
+    if not state.questions:
+        raise ValueError("active steering requires a planned research question")
+
+    question_id = state.questions[0].id
+    claims = list(state.claims)
+    gaps = list(state.gaps)
+    trace = list(state.trace)
+    claim_ids = {item.id for item in claims}
+    gap_ids = {item.id for item in gaps}
+    next_sequence = max((item.sequence for item in trace), default=0) + 1
+    applied_ids: list[str] = []
+
+    for entry in entries:
+        if entry.get("status") != "pending":
+            continue
+        entry_id = str(entry["id"])
+        claim_id, gap_id = _steering_graph_ids(entry_id)
+        if claim_id not in claim_ids:
+            claims.append(
+                ResearchClaim(
+                    id=claim_id,
+                    question_id=question_id,
+                    text=str(entry.get("content") or "")[:2000],
+                    kind="research_question",
+                    priority="critical",
+                    state="unresolved",
+                    evidence_requirement=EvidenceRequirement(
+                        min_independent_sources=1,
+                        requires_successful_read=True,
+                    ),
+                    created_by="user",
+                    created_reason=f"active_steering:{entry_id}",
+                )
+            )
+            claim_ids.add(claim_id)
+            trace.append(
+                ResearchTraceEvent(
+                    sequence=next_sequence,
+                    timestamp=applied_at,
+                    run_id=run_id,
+                    event_type="claim_created",
+                    reason="active_steering_applied",
+                    claim_id=claim_id,
+                )
+            )
+            next_sequence += 1
+        if gap_id not in gap_ids:
+            gaps.append(
+                EvidenceGap(
+                    id=gap_id,
+                    claim_id=claim_id,
+                    gap_type="user_steering",
+                    priority="critical",
+                    state="open",
+                )
+            )
+            gap_ids.add(gap_id)
+            trace.append(
+                ResearchTraceEvent(
+                    sequence=next_sequence,
+                    timestamp=applied_at,
+                    run_id=run_id,
+                    event_type="gap_created",
+                    reason="active_steering_applied",
+                    claim_id=claim_id,
+                    gap_id=gap_id,
+                )
+            )
+            next_sequence += 1
+        entry.update(
+            {
+                "status": "applied",
+                "applied_wave": wave_index,
+                "applied_at": applied_at,
+                "claim_id": claim_id,
+                "gap_id": gap_id,
+                "late_reason": "",
+            }
+        )
+        applied_ids.append(entry_id)
+
+    updated_state = build_research_state(
+        mode=state.mode,
+        questions=state.questions,
+        claims=claims,
+        evidence=state.evidence,
+        evidence_links=state.evidence_links,
+        source_clusters=state.source_clusters,
+        gaps=gaps,
+        conflict_gaps=state.conflict_gaps,
+        budget=state.budget,
+        trace=trace,
+        brief=None,
+        reference_date=state.reference_date,
+        known_evidence_ids=known_evidence_ids,
+    )
+    updated_context = dict(context)
+    updated_context[ACTIVE_RESEARCH_STEERING_KEY] = entries
+    return updated_state, updated_context, tuple(applied_ids)
+
+
+def _mark_pending_active_steering_late(
+    context: Mapping[str, Any],
+    *,
+    reason: str,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    entries = active_steering_entries(context)
+    late_ids: list[str] = []
+    for entry in entries:
+        if entry.get("status") != "pending":
+            continue
+        entry.update(
+            {
+                "status": "late",
+                "applied_wave": None,
+                "applied_at": None,
+                "claim_id": "",
+                "gap_id": "",
+                "late_reason": reason,
+            }
+        )
+        late_ids.append(str(entry["id"]))
+    updated = dict(context)
+    if entries:
+        updated[ACTIVE_RESEARCH_STEERING_KEY] = entries
+    return updated, tuple(late_ids)
 
 
 def _ordered_claims(state: ResearchState) -> tuple[ResearchClaim, ...]:

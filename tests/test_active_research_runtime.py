@@ -3100,3 +3100,678 @@ def test_covered_clusters_preserved_for_shared_read_claims(
     assert cluster_x in set(
         str(cluster) for cluster in covered_durable.get("claim_b", [])
     )
+
+def test_stop_gate_reconstructs_persisted_decision_from_durable_truth(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 3 acceptance: after a terminal run, re-deriving the settle
+    signals purely from durable truth (persisted cursor + state) and running
+    them through ResearchStopGate yields exactly the persisted stop reason -
+    the same decision a crash/resume settlement would make."""
+    import src.application.active_research_runtime as art_mod
+    from src.application.research_stop_gate import (
+        ResearchStopGate,
+        ResearchStopSignal,
+    )
+    from src.web.research.evidence_gain import SaturationState, saturated_claim_ids
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+    from src.web.research.evidence_gate import evaluate_evidence_gate
+
+    state = _two_gap_state(same_claim_text=True)
+    context = attach_claim_engine_state(
+        _active_context(),
+        state,
+        known_evidence_ids=(),
+    )
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-gate-rebuild.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_gate_rebuild",
+            query="Compare identical research surfaces",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        search_backend=_EmptySearchBackend(),
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_saturated"
+
+    raw_context = completed.research_context
+    cursor = ResearchRuntimeCursor.from_dict(
+        raw_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    raw_state = raw_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt_state = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+
+    open_gap_claims = {
+        gap.claim_id for gap in art_mod._ordered_gaps(rebuilt_state)
+    }
+    extra_batch_claims = {
+        claim.id
+        for claim in rebuilt_state.claims
+        if claim.priority == "critical"
+    } | {conflict.claim_id for conflict in rebuilt_state.conflict_gaps}
+    saturated_claims = set(
+        saturated_claim_ids(
+            SaturationState(
+                no_gain_batches_by_claim=dict(
+                    cursor.no_gain_batches_by_claim
+                )
+            ),
+            extra_batch_eligible_claim_ids=extra_batch_claims,
+        )
+    )
+    gate = evaluate_evidence_gate(rebuilt_state)
+    decision = ResearchStopGate.evaluate(
+        ResearchStopSignal(
+            gate_pass=gate.status == "pass",
+            hard_budget_exhausted=(
+                rebuilt_state.budget.elapsed_seconds
+                >= rebuilt_state.budget.hard_timeout_seconds
+            ),
+            has_actionable_gaps=bool(open_gap_claims),
+            all_actionable_saturated=bool(open_gap_claims)
+            and open_gap_claims <= saturated_claims,
+            wave_limit_reached=cursor.wave_index >= art_mod.MAX_RESEARCH_WAVES,
+            has_evidence=bool(rebuilt_state.evidence),
+        )
+    )
+    assert decision.decision == "partial"
+    assert decision.reason == completed.stop_reason == "evidence_saturated"
+
+def test_pending_steering_forces_next_wave_and_applies_exactly_once(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 3 / steering 1A+2A: a pending user direction arriving after
+    wave 1 must stop the run from finishing on the pre-steering graph and be
+    applied exactly once at the next wave boundary, producing one server-owned
+    user claim and one critical gap."""
+    from src.web.research.steering import active_steering_entries
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+
+    state = _two_gap_state()
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-steering-apply.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_steering_apply",
+            query="Compare releases",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    def _inject(index: int) -> None:
+        if index == 1 and not injected["done"]:
+            injected["done"] = True
+            assert repository.append_steering(
+                run.id,
+                content="Focus on the 2026 release notes",
+            ) is not None
+
+    completed = _service(
+        repository,
+        _StructuredClient(on_call=_inject),
+        search_backend=_SearchBackend(),
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status in {"completed", "partial"}
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "applied"
+    assert entries[0]["applied_wave"] is not None
+    assert entries[0]["applied_wave"] >= 2
+    assert entries[0]["late_reason"] == ""
+    assert entries[0]["claim_id"].startswith("claim_steering_")
+
+    raw_state = completed.research_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+    user_claims = [item for item in rebuilt.claims if item.created_by == "user"]
+    assert len(user_claims) == 1
+    assert user_claims[0].priority == "critical"
+    assert user_claims[0].created_reason == "active_steering:" + entries[0]["id"]
+    assert any(item.gap_type == "user_steering" for item in rebuilt.gaps)
+    assert any(
+        item.id == entries[0]["gap_id"] and item.claim_id == entries[0]["claim_id"]
+        for item in rebuilt.gaps
+    )
+
+
+def test_pending_steering_goes_late_when_hard_budget_exhausted(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 3 / steering 1A: once the 60s hard budget is exhausted a
+    pending steering is marked late/unapplied and the run keeps the honest
+    evidence_budget_exhausted terminal truth - never an implicit extension."""
+    from src.web.research.steering import active_steering_entries
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            return self.value
+
+    clock = _Clock()
+
+    class _DeadlineCrossingSearch(_EmptySearchBackend):
+        def search_exact(
+            self,
+            query: str,
+            *,
+            max_results: int = 5,
+        ) -> dict[str, Any]:
+            result = super().search_exact(query, max_results=max_results)
+            clock.value = 61.0
+            if not injected["done"]:
+                injected["done"] = True
+                assert repository.append_steering(
+                    run.id,
+                    content="Too late to apply",
+                ) is not None
+            return result
+
+    state = _two_gap_state()
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-steering-late.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_steering_late",
+            query="Compare releases",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        search_backend=_DeadlineCrossingSearch(),
+        monotonic=clock,
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_budget_exhausted"
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "late"
+    assert entries[0]["applied_wave"] is None
+    assert entries[0]["claim_id"] == ""
+    assert entries[0]["late_reason"] == "hard_budget_exhausted"
+
+
+def test_apply_pending_steering_is_idempotent_for_same_entry() -> None:
+    """P1-C batch 3 / steering 3A acceptance: a crash/resume that re-runs the
+    apply step must never create a second user claim or gap for one entry."""
+    import src.application.active_research_runtime as art_mod
+    from src.web.research.steering import append_active_steering
+
+    state = _two_gap_state()
+    context = attach_claim_engine_state(_active_context(), state, known_evidence_ids=())
+    context = append_active_steering(
+        context,
+        entry_id="steering_1",
+        content="Focus on the 2026 release notes",
+        received_at="2026-08-31T00:00:00+00:00",
+    )
+    context = append_active_steering(
+        context,
+        entry_id="steering_2",
+        content="Also check the announcement page",
+        received_at="2026-08-31T00:00:01+00:00",
+    )
+    first_state, first_context, first_ids = art_mod._apply_pending_active_steering(
+        state,
+        context,
+        run_id="run_id",
+        wave_index=2,
+        applied_at="2026-08-31T00:00:02+00:00",
+        known_evidence_ids=(),
+    )
+    second_state, second_context, second_ids = art_mod._apply_pending_active_steering(
+        first_state,
+        first_context,
+        run_id="run_id",
+        wave_index=2,
+        applied_at="2026-08-31T00:00:02+00:00",
+        known_evidence_ids=(),
+    )
+    assert first_ids == ("steering_1", "steering_2")
+    assert second_ids == ()
+    assert second_state == first_state
+    assert second_context == first_context
+    user_claims = [item for item in first_state.claims if item.created_by == "user"]
+    assert len(user_claims) == 2
+
+def test_checkpoint_race_merges_concurrent_steering_without_losing_mutation(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 3 / steering 6A: when /steer bumps the version between the
+    runtime read and its CAS checkpoint, the retry must reload the newest
+    durable context, keep both the concurrent steering entry and the runtime
+    mutation, and never raise a conflict."""
+    from src.web.research.steering import active_steering_entries
+
+    repository = WebLookupRepository(RuntimeDatabase(tmp_path / "steering-race.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_steering_race",
+            query="Compare releases",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    run = repository.begin_operation(run.id, operation_id="op_race", stage="searching")
+    stale_context = dict(run.research_context)
+    stale_context["race_mutation"] = {"wave_baseline": True}
+    assert repository.append_steering(run.id, content="concurrent steering") is not None
+    checked = repository.checkpoint(
+        run.id,
+        operation_id="op_race",
+        research_context=stale_context,
+        query_attempts=[],
+        selected_sources=[],
+        rejected_sources=[],
+        items=[],
+        warnings=[],
+        provider_status="",
+        stop_reason="",
+        answer_confidence="",
+    )
+    assert checked.research_context.get("race_mutation") == {"wave_baseline": True}
+    entries = active_steering_entries(checked.research_context)
+    assert len(entries) == 1
+    assert entries[0]["content"] == "concurrent steering"
+    assert entries[0]["status"] == "pending"
+
+
+@pytest.mark.parametrize("crash_mode", ["before", "after"])
+def test_steering_apply_crash_before_and_after_checkpoint_is_exactly_once(
+    tmp_path: Any,
+    crash_mode: str,
+) -> None:
+    """P1-C batch 3 / steering 6A: a crash either before the apply checkpoint
+    (nothing durable) or after it (claim/gap + applied already durable) must
+    resume to exactly one user claim and one user gap for the steering - never
+    a second structural copy and never a silently re-applied entry."""
+    from src.web.research.steering import active_steering_entries
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+
+    class _SimulatedProcessDeath(BaseException):
+        pass
+
+    class _CrashOnApplyCheckpoint(WebLookupRepository):
+        def __init__(self, database: Any) -> None:
+            super().__init__(database)
+            self.armed = True
+
+        def checkpoint(
+            self,
+            run_id: str,
+            *,
+            operation_id: str,
+            research_context: dict[str, Any],
+            **kwargs: Any,
+        ) -> Any:
+            entries = active_steering_entries(research_context)
+            if self.armed and any(
+                item.get("status") == "applied" for item in entries
+            ):
+                self.armed = False
+                if crash_mode == "before":
+                    raise _SimulatedProcessDeath(
+                        "crash before apply checkpoint"
+                    )
+                super().checkpoint(
+                    run_id,
+                    operation_id=operation_id,
+                    research_context=research_context,
+                    **kwargs,
+                )
+                raise _SimulatedProcessDeath("crash after apply checkpoint")
+            return super().checkpoint(
+                run_id,
+                operation_id=operation_id,
+                research_context=research_context,
+                **kwargs,
+            )
+
+    repository = _CrashOnApplyCheckpoint(
+        RuntimeDatabase(tmp_path / f"steering-crash-{crash_mode}.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id=f"run_steering_crash_{crash_mode}",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    def _inject(index: int) -> None:
+        if index == 1 and not injected["done"]:
+            injected["done"] = True
+            assert repository.append_steering(
+                run.id,
+                content="exactly once",
+            ) is not None
+
+    with pytest.raises(_SimulatedProcessDeath):
+        _service(
+            repository,
+            _StructuredClient(on_call=_inject),
+        ).execute(run.id, raise_on_error=True)
+
+    with repository.database.connect() as connection:
+        row = connection.execute(
+            "SELECT research_context FROM web_lookup_runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()
+        assert row is not None
+        stale_context = loads(str(row[0]))
+        stale_context.setdefault("operation", {})["active_operation_started_at"] = (
+            "2000-01-01T00:00:00+00:00"
+        )
+        connection.execute(
+            "UPDATE web_lookup_runs SET research_context = ? WHERE id = ?",
+            (_json_dumps(stale_context), run.id),
+        )
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status in {"completed", "partial"}
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "applied"
+    raw_state = completed.research_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+    user_claims = [item for item in rebuilt.claims if item.created_by == "user"]
+    assert len(user_claims) == 1
+    assert user_claims[0].id == entries[0]["claim_id"]
+    user_gaps = [item for item in rebuilt.gaps if item.gap_type == "user_steering"]
+    assert len(user_gaps) == 1
+    assert user_gaps[0].id == entries[0]["gap_id"]
+
+
+def test_pending_steering_defers_gate_pass_to_next_wave(tmp_path: Any) -> None:
+    """P1-C batch 3 / steering 6A + gate: with budget still available, a
+    pending steering must stop the ResearchStopGate from completing a passed
+    gate and be consumed at the next wave instead."""
+    from src.web.research.steering import active_steering_entries
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+
+    repository = _TrackingRepository(
+        RuntimeDatabase(tmp_path / "steering-gatepass.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id="run_steering_gatepass",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    def _inject() -> None:
+        if not injected["done"]:
+            injected["done"] = True
+            assert repository.append_steering(
+                run.id,
+                content="Also verify the announcement page",
+            ) is not None
+
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        read_gateway=_ReadGateway(on_read=_inject),
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status in {"completed", "partial"}
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "applied"
+    assert entries[0]["applied_wave"] is not None
+    assert entries[0]["applied_wave"] >= 2
+    raw_state = completed.research_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+    assert len([item for item in rebuilt.claims if item.created_by == "user"]) == 1
+    assert any(item.gap_type == "user_steering" for item in rebuilt.gaps)
+
+@pytest.mark.parametrize("terminal", ["hard_budget_exhausted", "wave_limit_reached"])
+def test_late_steering_terminal_crash_recomputes_same_stop_decision(
+    tmp_path: Any,
+    terminal: str,
+) -> None:
+    """P1-C batch 3 round-2 / steering 6A: the suppression of the old graph's
+    gate pass by a late steering must be durable truth, recomputed by the
+    StopGate on resume - never the return value of one mark call.
+
+    Sequence: old graph reaches Gate PASS -> steering arrives -> terminal
+    budget/wave ceiling -> steering marked late -> late checkpoint persisted
+    -> simulated process death -> stale operation -> resume -> the same
+    canonical stop decision must be recomputed (partial, never completed on
+    the old graph), and the durable signal must reproduce it through the
+    gate."""
+    import src.application.active_research_runtime as art_mod
+    from src.application.research_stop_gate import (
+        ResearchStopGate,
+        ResearchStopSignal,
+    )
+    from src.web.research.steering import active_steering_entries
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+    from src.web.research.evidence_gate import evaluate_evidence_gate
+
+    class _SimulatedProcessDeath(BaseException):
+        pass
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            return self.value
+
+    clock = _Clock()
+
+    class _CrashOnLateCheckpoint(WebLookupRepository):
+        def __init__(self, database: Any) -> None:
+            super().__init__(database)
+            self.armed = True
+
+        def checkpoint(
+            self,
+            run_id: str,
+            *,
+            operation_id: str,
+            research_context: dict[str, Any],
+            **kwargs: Any,
+        ) -> Any:
+            result = super().checkpoint(
+                run_id,
+                operation_id=operation_id,
+                research_context=research_context,
+                **kwargs,
+            )
+            entries = active_steering_entries(research_context)
+            if self.armed and any(
+                item.get("status") == "late" for item in entries
+            ):
+                self.armed = False
+                raise _SimulatedProcessDeath("crash after late checkpoint")
+            return result
+
+    repository = _CrashOnLateCheckpoint(
+        RuntimeDatabase(tmp_path / f"late-crash-{terminal}.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id=f"run_late_crash_{terminal}",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    def _inject() -> None:
+        if not injected["done"]:
+            injected["done"] = True
+            if terminal == "hard_budget_exhausted":
+                clock.value = 61.0
+            assert repository.append_steering(
+                run.id,
+                content="Too late to apply",
+            ) is not None
+
+    original_limit = art_mod.MAX_RESEARCH_WAVES
+    configured_limit = 1 if terminal == "wave_limit_reached" else original_limit
+    art_mod.MAX_RESEARCH_WAVES = configured_limit
+    try:
+        with pytest.raises(_SimulatedProcessDeath):
+            _service(
+                repository,
+                _StructuredClient(),
+                read_gateway=_ReadGateway(on_read=_inject),
+                monotonic=clock,
+            ).execute(run.id, raise_on_error=True)
+
+        with repository.database.connect() as connection:
+            row = connection.execute(
+                "SELECT research_context FROM web_lookup_runs WHERE id = ?",
+                (run.id,),
+            ).fetchone()
+            assert row is not None
+            stale_context = loads(str(row[0]))
+            stale_context.setdefault("operation", {})["active_operation_started_at"] = (
+                "2000-01-01T00:00:00+00:00"
+            )
+            connection.execute(
+                "UPDATE web_lookup_runs SET research_context = ? WHERE id = ?",
+                (_json_dumps(stale_context), run.id),
+            )
+
+        completed = _service(
+            repository,
+            _StructuredClient(),
+            monotonic=clock,
+        ).execute(run.id, raise_on_error=True)
+    finally:
+        art_mod.MAX_RESEARCH_WAVES = original_limit
+
+    assert completed.status == "partial"
+    # The late steering is itself an unapplied actionable direction. It blocks
+    # completion on the old graph without being forged into the claim graph,
+    # so the bounded terminal owner remains the exhausted hard/wave budget.
+    expected_reason = (
+        "evidence_budget_exhausted"
+        if terminal == "hard_budget_exhausted"
+        else "wave_limit_exhausted"
+    )
+    assert completed.stop_reason == expected_reason
+    assert completed.stop_reason != "evidence_gate_pass"
+
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "late"
+    assert entries[0]["late_reason"] == terminal
+    assert entries[0]["claim_id"] == ""
+    assert entries[0]["applied_wave"] is None
+
+    raw_state = completed.research_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+    assert not [item for item in rebuilt.claims if item.created_by == "user"]
+
+    # Durable recomputation contract: the same signal rebuilt purely from
+    # durable truth reproduces the persisted canonical stop reason.
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    gate = evaluate_evidence_gate(rebuilt)
+    rebuilt_signal = ResearchStopSignal(
+        gate_pass=gate.status == "pass",
+        hard_budget_exhausted=(
+            clock.value >= rebuilt.budget.hard_timeout_seconds
+        ),
+        has_actionable_gaps=(
+            bool(art_mod._ordered_gaps(rebuilt))
+            or art_mod._unapplied_steering_blocks_completion(
+                completed.research_context
+            )
+        ),
+        all_actionable_saturated=False,
+        wave_limit_reached=cursor.wave_index >= configured_limit,
+        has_evidence=bool(rebuilt.evidence),
+        unapplied_steering_blocks_completion=(
+            art_mod._unapplied_steering_blocks_completion(
+                completed.research_context
+            )
+        ),
+    )
+    assert ResearchStopGate.evaluate(rebuilt_signal).reason == expected_reason
+    assert rebuilt_signal.unapplied_steering_blocks_completion is True
