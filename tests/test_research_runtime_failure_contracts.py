@@ -36,7 +36,10 @@ def _v2_failure() -> RuntimeFailure:
 
 def test_v2_round_trip_preserves_all_fields() -> None:
     failure = _v2_failure()
-    restored = RuntimeFailure.from_dict(failure.to_dict(RESEARCH_RUNTIME_SCHEMA_VERSION_V2))
+    restored = RuntimeFailure.from_dict(
+        failure.to_dict(RESEARCH_RUNTIME_SCHEMA_VERSION_V2),
+        schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V2,
+    )
     assert restored == failure
     assert restored.legacy_input is False
 
@@ -189,11 +192,107 @@ def test_unknown_future_v2_code_is_readable_but_rejected_as_writer() -> None:
         "exception_type": "",
         "attempt_id": "",
     }
-    failure = RuntimeFailure.from_dict(raw)
+    failure = RuntimeFailure.from_dict(
+        raw, schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V2
+    )
     assert failure.code == "read_future_p2_reason"
     assert failure.legacy_input is False
     with pytest.raises(ValueError):
         require_research_failure_code("read_future_p2_reason")
+
+
+def test_v2_cursor_rejects_v1_failure_shape() -> None:
+    import pytest
+
+    raw = {
+        "schema_version": RESEARCH_RUNTIME_SCHEMA_VERSION_V2,
+        "round_index": 0,
+        "phase": "bootstrap",
+        "planned_queries": [],
+        "query_outcomes": [],
+        "candidates": [],
+        "planned_read_ids": [],
+        "read_outcomes": [],
+        "model_calls": [],
+        "inflight_model_call": None,
+        "inflight_external_call": None,
+        "failures": [
+            {"code": "read_failed", "phase": "reading", "item_id": "c_1"}
+        ],
+        "wave_index": 0,
+        "wave_id": "",
+        "active_gap_ids": [],
+        "gain_history": [],
+        "no_gain_batches_by_claim": {},
+        "no_gain_batches_by_gap": {},
+    }
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(raw)
+
+
+def test_v1_cursor_rejects_v2_failure_shape() -> None:
+    import pytest
+
+    raw = {
+        "schema_version": RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+        "round_index": 0,
+        "phase": "bootstrap",
+        "planned_queries": [],
+        "query_outcomes": [],
+        "candidates": [],
+        "planned_read_ids": [],
+        "read_outcomes": [],
+        "model_calls": [],
+        "inflight_model_call": None,
+        "inflight_external_call": None,
+        "failures": [
+            {
+                "failure_id": "failure:abc",
+                "code": "read_failed",
+                "phase": "reading",
+                "item_id": "c_1",
+                "detail": "",
+                "provider_code": "",
+                "exception_type": "",
+                "attempt_id": "",
+            }
+        ],
+        "wave_index": 0,
+        "wave_id": "",
+        "active_gap_ids": [],
+        "gain_history": [],
+        "no_gain_batches_by_claim": {},
+        "no_gain_batches_by_gap": {},
+    }
+    with pytest.raises(ValueError):
+        ResearchRuntimeCursor.from_dict(raw)
+
+
+def test_runtime_failure_serializer_rejects_unknown_schema() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        _v2_failure().to_dict(schema_version="research-runtime-v99")
+    with pytest.raises(ValueError):
+        _v2_failure().to_dict(schema_version="")
+
+
+def test_runtime_failure_reader_rejects_unknown_schema() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        RuntimeFailure.from_dict(
+            {"code": "read_failed", "phase": "reading", "item_id": "c_1"},
+            schema_version="research-runtime-v99",
+        )
+
+
+def test_runtime_cursor_serializer_rejects_unknown_schema() -> None:
+    import pytest
+
+    cursor = ResearchRuntimeCursor(schema_version="research-runtime-v99")
+    with pytest.raises(ValueError):
+        cursor.to_dict()
 
 
 def test_build_failure_rejects_unknown_code() -> None:

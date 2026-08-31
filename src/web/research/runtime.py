@@ -270,6 +270,8 @@ class RuntimeFailure:
     def to_dict(
         self, schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION
     ) -> dict[str, Any]:
+        if schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
         if schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V2:
             return {
                 "failure_id": self.failure_id,
@@ -286,10 +288,21 @@ class RuntimeFailure:
         return {"code": self.code, "phase": self.phase, "item_id": self.item_id}
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "RuntimeFailure":
+    def from_dict(
+        cls,
+        raw: Mapping[str, Any],
+        *,
+        schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION,
+    ) -> "RuntimeFailure":
+        # The version is an explicit contract boundary, never guessed from the
+        # field set: a v1 cursor must only carry 3-field failures and a v2
+        # cursor only 8-field ones (frozen 7A).  Forward compatibility applies
+        # to the code *value*, not to the wire shape.
+        if schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
         if not isinstance(raw, Mapping):
             raise TypeError("runtime failure must be an object")
-        if "failure_id" in raw:
+        if schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V2:
             data = _strict_mapping(
                 raw,
                 {
@@ -489,6 +502,11 @@ class ResearchRuntimeCursor:
         return tuple(dict.fromkeys(item.candidate_id for item in self.read_outcomes))
 
     def to_dict(self) -> dict[str, Any]:
+        # The cursor serializer never fails open on an unknown schema version:
+        # an unsupported top-level version would otherwise emit its own
+        # version next to a v1-shaped failure payload (frozen 7A).
+        if self.schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
         return {
             "schema_version": self.schema_version,
             "round_index": self.round_index,
@@ -579,7 +597,11 @@ class ResearchRuntimeCursor:
             data.get("model_calls"), ResearchModelCallAudit.from_dict, "model_calls"
         )
         failures = _object_tuple(
-            data.get("failures"), RuntimeFailure.from_dict, "failures"
+            data.get("failures"),
+            lambda item: RuntimeFailure.from_dict(
+                item, schema_version=str(data.get("schema_version"))
+            ),
+            "failures",
         )
         inflight_raw = data.get("inflight_model_call")
         inflight = (
