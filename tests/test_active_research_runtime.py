@@ -3100,3 +3100,95 @@ def test_covered_clusters_preserved_for_shared_read_claims(
     assert cluster_x in set(
         str(cluster) for cluster in covered_durable.get("claim_b", [])
     )
+def test_stop_gate_reconstructs_persisted_decision_from_durable_truth(
+    tmp_path: Any,
+) -> None:
+    """P1-C batch 3 acceptance: after a terminal run, re-deriving the settle
+    signals purely from durable truth (persisted cursor + state) and running
+    them through ResearchStopGate yields exactly the persisted stop reason -
+    the same decision a crash/resume settlement would make."""
+    import src.application.active_research_runtime as art_mod
+    from src.application.research_stop_gate import (
+        ResearchStopGate,
+        ResearchStopSignal,
+    )
+    from src.web.research.evidence_gain import SaturationState, saturated_claim_ids
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+    from src.web.research.evidence_gate import evaluate_evidence_gate
+
+    state = _two_gap_state(same_claim_text=True)
+    context = attach_claim_engine_state(
+        _active_context(),
+        state,
+        known_evidence_ids=(),
+    )
+    repository = _TrackingRepository(RuntimeDatabase(tmp_path / "active-gate-rebuild.sqlite"))
+    run = repository.create(
+        WebLookupRun(
+            id="run_active_gate_rebuild",
+            query="Compare identical research surfaces",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    completed = _service(
+        repository,
+        _StructuredClient(),
+        search_backend=_EmptySearchBackend(),
+    ).execute(run.id, raise_on_error=True)
+
+    assert completed.status == "partial"
+    assert completed.stop_reason == "evidence_saturated"
+
+    raw_context = completed.research_context
+    cursor = ResearchRuntimeCursor.from_dict(
+        raw_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    raw_state = raw_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt_state = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+
+    open_gap_claims = {
+        gap.claim_id for gap in art_mod._ordered_gaps(rebuilt_state)
+    }
+    extra_batch_claims = {
+        claim.id
+        for claim in rebuilt_state.claims
+        if claim.priority == "critical"
+    } | {conflict.claim_id for conflict in rebuilt_state.conflict_gaps}
+    saturated_claims = set(
+        saturated_claim_ids(
+            SaturationState(
+                no_gain_batches_by_claim=dict(
+                    cursor.no_gain_batches_by_claim
+                )
+            ),
+            extra_batch_eligible_claim_ids=extra_batch_claims,
+        )
+    )
+    gate = evaluate_evidence_gate(rebuilt_state)
+    decision = ResearchStopGate.evaluate(
+        ResearchStopSignal(
+            gate_pass=gate.status == "pass",
+            hard_budget_exhausted=(
+                rebuilt_state.budget.elapsed_seconds
+                >= rebuilt_state.budget.hard_timeout_seconds
+            ),
+            has_actionable_gaps=bool(open_gap_claims),
+            all_actionable_saturated=bool(open_gap_claims)
+            and open_gap_claims <= saturated_claims,
+            wave_limit_reached=cursor.wave_index >= art_mod.MAX_RESEARCH_WAVES,
+            has_evidence=bool(rebuilt_state.evidence),
+        )
+    )
+    assert decision.decision == "partial"
+    assert decision.reason == completed.stop_reason == "evidence_saturated"

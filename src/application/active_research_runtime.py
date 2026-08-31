@@ -86,6 +86,10 @@ from src.web.research.scheduler import (
 )
 from src.web.research.source_cluster import cluster_candidate_sources
 from src.web.research.state import attach_claim_engine_state
+from src.application.research_stop_gate import (
+    ResearchStopGate,
+    ResearchStopSignal,
+)
 
 ACTIVE_RESEARCH_ASSESSMENTS_KEY = "claim_engine_assessments"
 ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY = "claim_engine_assessment_inputs"
@@ -305,40 +309,25 @@ class ActiveResearchRuntimeExecutor:
                 )
             )
 
-            if gate.status == "pass":
-                final_status = "completed"
-                provider_status = "found"
-                reason = "evidence_gate_pass"
-                confidence = "high"
-            elif elapsed() >= state.budget.hard_timeout_seconds:
-                # A bounded external call may start before the deadline and
-                # return after it. Hard exhaustion is then the terminal truth;
-                # saturation or the implementation wave ceiling must not mask
-                # the exhausted shared budget.
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_budget_exhausted"
-                confidence = "partial"
-            elif not open_gap_claims:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_gap_open"
-                confidence = "partial" if state.evidence else "none"
-            elif open_gap_claims <= saturated_claims:
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "evidence_saturated"
-                confidence = "partial" if state.evidence else "none"
-            elif cursor.wave_index >= MAX_RESEARCH_WAVES:
-                # Implementation safety ceiling only: the run is not
-                # necessarily saturated, so the persisted reason must not
-                # claim evidence saturation. Product semantics for this
-                # terminal stop belong to the ResearchStopGate batch.
-                final_status = "partial"
-                provider_status = "insufficient"
-                reason = "wave_limit_exhausted"
-                confidence = "partial" if state.evidence else "none"
-            else:
+            # P1-C batch 3: the single stop truth lives in ResearchStopGate.
+            # The executor derives durable signals and never decides a stop
+            # reason itself; the frozen priority (gate pass > hard budget >
+            # no actionable gaps > saturation > wave ceiling > continue) is
+            # locked inside the gate.
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=gate.status == "pass",
+                    hard_budget_exhausted=(
+                        elapsed() >= state.budget.hard_timeout_seconds
+                    ),
+                    has_actionable_gaps=bool(open_gap_claims),
+                    all_actionable_saturated=bool(open_gap_claims)
+                    and open_gap_claims <= saturated_claims,
+                    wave_limit_reached=cursor.wave_index >= MAX_RESEARCH_WAVES,
+                    has_evidence=bool(state.evidence),
+                )
+            )
+            if stop.decision == "continue":
                 cursor = replace(
                     cursor,
                     wave_index=cursor.wave_index + 1,
@@ -351,7 +340,7 @@ class ActiveResearchRuntimeExecutor:
 
             cursor = replace(
                 cursor,
-                phase="completed" if gate.status == "pass" else "unavailable",
+                phase="completed" if stop.decision == "success" else "unavailable",
             )
             checkpoint()
             return self.repository.complete(
@@ -364,10 +353,10 @@ class ActiveResearchRuntimeExecutor:
                 query_attempts=query_attempts,
                 selected_sources=selected_sources,
                 rejected_sources=rejected_sources,
-                provider_status=provider_status,
-                stop_reason=reason,
-                answer_confidence=confidence,
-                final_status=final_status,
+                provider_status=stop.provider_status,
+                stop_reason=stop.reason,
+                answer_confidence=stop.answer_confidence,
+                final_status=stop.final_status,
             )
 
         try:
@@ -1036,6 +1025,19 @@ class ActiveResearchRuntimeExecutor:
             brief = _evidence_brief(state, gate, selected_sources)
             context[ACTIVE_RESEARCH_BRIEF_KEY] = brief
             checkpoint()
+            # P1-C batch 3: the stop truth comes from the gate; the frozen
+            # exception-path confidence ("partial" if evidence else "none")
+            # is preserved exactly as in 533b60c7.
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=gate.status == "pass",
+                    hard_budget_exhausted=True,
+                    has_actionable_gaps=True,
+                    all_actionable_saturated=False,
+                    wave_limit_reached=False,
+                    has_evidence=bool(state.evidence),
+                )
+            )
             return self.repository.complete(
                 run_id,
                 operation_id=operation_id,
@@ -1046,10 +1048,12 @@ class ActiveResearchRuntimeExecutor:
                 query_attempts=query_attempts,
                 selected_sources=selected_sources,
                 rejected_sources=rejected_sources,
-                provider_status="insufficient",
-                stop_reason="evidence_budget_exhausted",
-                answer_confidence="partial" if state.evidence else "none",
-                final_status="partial",
+                provider_status=stop.provider_status,
+                stop_reason=stop.reason,
+                answer_confidence=(
+                    "partial" if state.evidence else "none"
+                ),
+                final_status=stop.final_status,
             )
         except Exception as exc:
             latest = self._required(run_id)
@@ -1062,6 +1066,19 @@ class ActiveResearchRuntimeExecutor:
                 checkpoint()
             except Exception:
                 pass
+            # P1-C batch 3: the canonical stop reason comes from the gate;
+            # the frozen evidence-shaped finish (complete vs fail) is kept.
+            stop = ResearchStopGate.evaluate(
+                ResearchStopSignal(
+                    gate_pass=False,
+                    hard_budget_exhausted=False,
+                    has_actionable_gaps=True,
+                    all_actionable_saturated=False,
+                    wave_limit_reached=False,
+                    has_evidence=bool(state.evidence),
+                    unavailable_reason="active_runtime_unavailable",
+                )
+            )
             if state.evidence:
                 result = self.repository.complete(
                     run_id,
@@ -1075,8 +1092,8 @@ class ActiveResearchRuntimeExecutor:
                     query_attempts=query_attempts,
                     selected_sources=selected_sources,
                     rejected_sources=rejected_sources,
-                    provider_status="unavailable",
-                    stop_reason="active_runtime_unavailable",
+                    provider_status=stop.provider_status,
+                    stop_reason=stop.reason,
                     answer_confidence="partial",
                     final_status="partial",
                 )
@@ -1086,8 +1103,8 @@ class ActiveResearchRuntimeExecutor:
                     "active research unavailable",
                     research_context=context,
                     query_attempts=query_attempts,
-                    provider_status="unavailable",
-                    stop_reason="active_runtime_unavailable",
+                    provider_status=stop.provider_status,
+                    stop_reason=stop.reason,
                     operation_id=operation_id,
                 )
             if raise_on_error:
@@ -1116,13 +1133,25 @@ class ActiveResearchRuntimeExecutor:
                 ref.id for ref in _evidence_snapshot(run_id, selected_sources, rejected_sources).refs
             ),
         )
+        # P1-C batch 3: the canonical stop reason flows through the gate.
+        stop = ResearchStopGate.evaluate(
+            ResearchStopSignal(
+                gate_pass=False,
+                hard_budget_exhausted=False,
+                has_actionable_gaps=True,
+                all_actionable_saturated=False,
+                wave_limit_reached=False,
+                has_evidence=bool(state.evidence),
+                unavailable_reason=reason,
+            )
+        )
         return self.repository.fail(
             run_id,
             "active research unavailable",
             research_context=context,
             query_attempts=query_attempts,
-            provider_status="unavailable",
-            stop_reason=reason,
+            provider_status=stop.provider_status,
+            stop_reason=stop.reason,
             operation_id=operation_id,
         )
 
