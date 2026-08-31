@@ -1,7 +1,26 @@
 # Failure-State Writer Inventory (Batch B input)
 
-Static scan of production writers that must be canonicalized in Batch B.
-Batch A only reports; none of these are modified here.
+Static scan captured during Batch A. Batch B was implemented from
+`main@2c1e15c` on `codex/rqce-p1-failure-state-batch-b`.
+
+Batch B scope is intentionally narrower than every textual `type(exc)` match
+below: only Claim Engine `RuntimeFailure` writers and active search/read outcome
+projection are failure-truth owners. Other matches are domain-local diagnostic
+strings and remain unchanged unless their own contract batch names them.
+
+Batch B local closure (implementation commit `7f5eb7d`, pushed; CI pending):
+
+- `src/application/active_research_runtime.py`: all RuntimeFailure producers use
+  the canonical factory, deterministic ID and append-by-ID; policy double-count
+  is removed; search/read outcomes project bounded local codes; hard budget is
+  stop truth only.
+- `src/web/research/runtime.py`: model/search/read interruption recovery emits
+  stage-specific canonical v2 failures with `interrupted_unknown` in detail;
+  new cursors default to v2 while explicitly loaded v1 cursors remain v1.
+- Verification: focused 88/88 + final incremental 7/7; full pytest 1510/1510;
+  Ruff; mypy baseline 122 <= 128; diff-check.
+- Deferred to Batch C: StopGate typing, API/UI mapping and full
+  writer-code-stop-consumer matrix acceptance.
 
 ## src\api\routes\chat_routes.py
 
@@ -14,12 +33,15 @@ Batch A only reports; none of these are modified here.
 
 ## src\application\active_research_runtime.py
 
-- `src\application\active_research_runtime.py:236: stop_reason writer: stop_reason="",`
-- `src\application\active_research_runtime.py:323: RuntimeFailure writer: failures=(*cursor.failures, RuntimeFailure(code=code, phase=phase, item_id=item_id)),`
-- `src\application\active_research_runtime.py:623: error_code writer: error_code=outcome.reason if outcome.status == "unavailable" else "",`
-- `src\application\active_research_runtime.py:883: type(exc).__name__: "error": type(exc).__name__,`
-- `src\application\active_research_runtime.py:903: error_code writer: error_code="" if ok else _bounded_text(raw_read.get("error") or "read_failed", 200),`
-- `src\application\active_research_runtime.py:1160: type(exc).__name__: _append_failure(type(exc).__name__, cursor.phase)`
+- CLOSED in Batch B: `_append_failure` is the single RuntimeFailure writer and
+  always calls `build_runtime_failure` plus `append_runtime_failure`.
+- CLOSED in Batch B: search/read outcome `error_code` is bounded to
+  `search_failed` / `read_failed`; dynamic data is projected to the matching
+  RuntimeFailure fields.
+- CLOSED in Batch B: `type(exc).__name__` is never a top-level failure code;
+  reader/runtime exceptions store it only as `exception_type`.
+- INTENTIONALLY UNCHANGED: checkpoint `stop_reason=""` is non-terminal clearing,
+  not a failure writer.
 
 ## src\application\github_snapshot_service.py
 
@@ -180,11 +202,13 @@ Batch A only reports; none of these are modified here.
 
 ## src\web\research\runtime.py
 
-- `src\web\research\runtime.py:148: error_code writer: error_code=_optional_text(data.get("error_code"), 200),`
-- `src\web\research\runtime.py:249: error_code writer: error_code=_optional_text(data.get("error_code"), 200),`
-- `src\web\research\runtime.py:359: RuntimeFailure writer: return RuntimeFailure(`
-- `src\web\research\runtime.py:732: RuntimeFailure writer: failure = RuntimeFailure(`
-- `src\web\research\runtime.py:770: RuntimeFailure writer: failure = RuntimeFailure(`
+- INTENTIONALLY UNCHANGED: query/read `from_dict` accepts bounded legacy values;
+  reader compatibility does not enforce the new-writer catalog.
+- CLOSED in Batch A: direct `RuntimeFailure(...)` construction remains private
+  to the validated `build_runtime_failure` factory.
+- CLOSED in Batch B: interrupted model/external recovery uses the canonical
+  factory and append-by-ID with stage-specific code plus
+  `detail="interrupted_unknown"`.
 
 ## src\web\tool_gateway.py
 
