@@ -15,6 +15,7 @@ from src.application.research_stop_gate import (
     ResearchStopGate,
     ResearchStopSignal,
 )
+from src.web.research.failure_contracts import RESEARCH_STOP_REASONS
 
 
 def _signal(
@@ -292,3 +293,45 @@ def test_continue_has_no_stop_reason() -> None:
     assert not decision.final_status
     assert not decision.provider_status
     assert not decision.answer_confidence
+
+
+def test_every_stop_gate_reason_is_in_stop_reason_catalog() -> None:
+    # Batch-A contract guard: any reason the gate can emit today must be a
+    # registered production literal; a future reason that forgets catalog
+    # registration turns this test red immediately.
+    emitted: set[str] = set()
+    for gate_pass in (False, True):
+        for budget in (False, True):
+            for gaps in (False, True):
+                for saturated in (False, True):
+                    for wave in (False, True):
+                        for evidence in (False, True):
+                            emitted.add(
+                                ResearchStopGate.evaluate(
+                                    _signal(
+                                        gate_pass=gate_pass,
+                                        hard_budget_exhausted=budget,
+                                        has_actionable_gaps=gaps,
+                                        all_actionable_saturated=saturated,
+                                        wave_limit_reached=wave,
+                                        has_evidence=evidence,
+                                        unavailable_reason="claim_plan_unavailable",
+                                    )
+                                ).reason
+                            )
+                            emitted.add(
+                                ResearchStopGate.evaluate(
+                                    _signal(
+                                        gate_pass=gate_pass,
+                                        hard_budget_exhausted=budget,
+                                        has_actionable_gaps=gaps,
+                                        all_actionable_saturated=saturated,
+                                        wave_limit_reached=wave,
+                                        has_evidence=evidence,
+                                    )
+                                ).reason
+                            )
+    emitted.discard("")
+    assert emitted <= RESEARCH_STOP_REASONS
+    for reason in emitted:
+        assert reason in RESEARCH_STOP_REASONS

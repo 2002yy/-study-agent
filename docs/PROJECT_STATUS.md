@@ -11,11 +11,11 @@
 > 新窗口 / 新 Agent 冷启动时先读本节，再按链接读取本轮所需合同；历史章节保留证据与决策时间语义，不拥有比本节更新的“当前下一步”。
 
 - **Delivery lineage：**B5（PR #132）→ `main@5d620fe0`；B5-Hardening（PR #133）→ `main@fe308718`；P1-C 子批 1（PR #134）→ `main@c2cc60e`；P1-C 子批 2（PR #135，head `acbd330`）→ merge commit `533b60c`。
-- **Remote CI：**PR #135 已合并；merge 后 `main@533b60c` 的 CI [#33327174616](https://github.com/2002yy/study-agent/actions/runs/33327174616) `completed / success`。**B5 + B5-Hardening + P1-C 子批 1/2 = REMOTE GO / DELIVERED。**
-- **Current initiative：**RQCE-P1-C 子批 3 + active structured steering 已进入 PR #136 pre-merge Gate；delivery 分支为 `codex/rqce-p1-c3-stopgate-steering`。本批把 terminal mapping 收敛到纯确定性 `ResearchStopGate`，并在同一 `WebLookupRun` 真值内完成 append-only steering、并发 checkpoint 合并、波次边界 exactly-once 应用及 crash/resume 一致性。
-- **Runtime status：**active multi-wave production executor 已交付：durable wave cursor/ID、gain history、per-gap/per-claim saturation、跨波 cluster truth、bounded model retry、crash recovery、hard-budget/wave-limit 真值均已进入 main。PR #136 的 Commit 1/2 已交付 Stop Gate 与 active steering 主体；当前小增量把“late steering 阻断旧图 gate pass”改为从持久化 context 重算的 StopGate signal，并补 checkpoint 前/后 crash 回归。取消仍由既有 owner-scoped `finish_cancel` 生命周期处理。
-- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + Hardening + P1-C 子批 1/2 = **REMOTE GO / DELIVERED**；P1-C 子批 3 + active steering = **LOCAL PASS / PR #136 PRE-MERGE**（focused 138/138、single full pytest 1475/1475、Ruff、mypy 122≤128 / NEW=0、diff-check）；RQ1 bounded/default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
-- **唯一下一步：**完成 PR #136 小增量 exact-head CI 与复审后合并；随后同一 P1 收口路线只做 failure-state 枚举/映射审计，再一次性运行 bounded 12-case qualification 并进入人工 activation Gate。P1 未通过前不进入 P2。
+- **Remote CI：**PR #136 已按 exact head `d102d84` 合并；merge commit `da0c6ea` 的 main CI [#33386846693](https://github.com/2002yy/study-agent/actions/runs/33386846693) `completed / success`。**B5 + B5-Hardening + P1-C 子批 1/2/3 + active structured steering = REMOTE GO / DELIVERED。**
+- **Current initiative：**RQCE-P1 failure-state 收口；分支 `codex/rqce-p1-failure-state-audit`。本批先把 durable runtime failure、run stop reason、provider/read outcome 和 UI presentation 四层真值分离，再按已冻结合同施工。
+- **Runtime status：**active multi-wave executor、StopGate 与 structured steering 已进入 main。failure-state **Batch A**（版本化 failure/stop 两轴合同、research-runtime-v2 codec + dual reader、确定性 failure_id / append exactly-once primitives）已实现并本地全绿；Batch B/C 将做 writer canonicalization 与 API/UI mapping（writer inventory 见 `docs/failure_state_writer_inventory.md`）。
+- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + Hardening + P1-C 子批 1/2/3 + active steering = **REMOTE GO / DELIVERED**；failure-state 合同 1A–12A = **FROZEN**；failure-state Batch A = **LOCAL PASS / PUSHED（1b789b7）**；RQ1 bounded/default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
+- **唯一下一步：**failure-state Batch A remote review/merge → Batch B writer migration（RuntimeFailure writer 逐点 canonicalize、search/read outcome projection、flip production writer v1→v2）→ Batch C（StopGate reason typing、API canonical output、UI complete mapping + unknown fallback、writer/consumer 矩阵验收）→ bounded 12-case qualification。P1 未通过前不进入 P2。
 - **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0 A0–C5-C（contracts/state/trace/policy/gates/20-case harness/live semantic audit）；P1-A0 Truth Fix（四层 retrieval truth、50 候选独立人工审计、taxonomy 修正、V2 report aggregate 修正）。
 - **P0-C5 当前事实：**已切断 Gold→Shadow 决策输入，Gold 只用于事后评分；freshness 已进入 EvidenceRequirement/Evidence/Gate；primary denominator、Useful Read 与 evidence-linked critical coverage 口径已修正。frozen 10 的新诊断为 false closure 7、gold-blind shadow caught 6、missed 1、overblocked 0；该结果仍是预记录 projection 的组件证据，不是 runtime observer 证据。
 - **Live 10 / 50-candidate Truth Fix：**Provider returned=50；production `worth_reading=true`=50；benchmark surface match=10；manual `ANSWER_RELEVANT`=5、`TOPIC_ONLY`=10、`OFF_TARGET`=35。新 taxonomy：`NO_ANSWER_RELEVANT_CANDIDATE=7`、`BENCHMARK_MATCH_FALSE_NEGATIVE=0`、`CLAIM_PROJECTION_UNAVAILABLE=2`、`COMPLETED_WITH_EVIDENCE=1`；旧 `RELEVANCE_FALSE_NEGATIVE=7` 结论已撤销。
@@ -140,8 +140,26 @@
 | 阶段 | 当前事实 | 尚余工作 |
 | --- | --- | --- |
 | **RQCE-P0** | contracts/state/trace/policy/gates、20-case Shadow/live semantic audit、retrieval taxonomy 已交付 | 无新施工批；继续作为 P1/P2 回归与诊断资产，不能替代 release benchmark |
-| **RQCE-P1** | Gap/CandidatePool、semantic rank/cluster、Scheduler/Extractor、active adapter、multi-wave gain/saturation/resume 已交付；Stop Gate + active structured steering 已在 PR #136 LOCAL PASS | PR #136 远程收口；failure-state 枚举/映射审计；bounded 12-case frozen+small-live qualification；人工 activation GO/NO-GO |
+| **RQCE-P1** | Gap/CandidatePool、semantic rank/cluster、Scheduler/Extractor、active adapter、multi-wave、Stop Gate + active structured steering 均已 REMOTE GO | failure-state 枚举/映射收口；bounded 12-case frozen+small-live qualification；人工 activation GO/NO-GO |
 | **RQCE-P2** | 尚未开始完整产品质量层；现有 reader/brief 只是 P1 最小能力 | Progressive Reader（section/PDF/JS/login/403）+ cache/circuit breaker；完整 ResearchBrief+synthesis；Final Answer Auditor（最多一次 repair）；50–60 frozen/live benchmark 与 release report |
+
+### 0.6 RQCE-P1 failure-state 枚举/映射审计（2026-08-31，IN PROGRESS）
+
+**已验证事实：**
+
+1. **两条语义轴尚未类型化。** `ResearchRuntimeCursor.failures[].code` 表示一次过程失败；`WebLookupRun.stop_reason` 表示整个 run 为什么终止。两者当前均为自由字符串，不能合并为同一个字段或互相覆盖。
+2. **RuntimeFailure 当前生产者不闭合。** 固定 code 至少包括 `blocked_by_policy`、`candidate_assessment_blocked_by_policy`、`candidate_assessment_unavailable`、`extraction_blocked_by_policy`、`extractor_unavailable`、`hard_budget_reached`、`interrupted_unknown`；模型路径还透传 `model_call_attempts_exhausted`，generic exception 直接持久化 `type(exc).__name__`，因此 cursor schema 不能证明 code 有界。
+3. **search/read 失败未进入统一 failure truth。** search 的 `search_exception` 或 provider payload reason 只进入 `RuntimeQueryOutcome.error_code`；read 的原始 reader error 只进入 `RuntimeReadOutcome.error_code`。最终 run 可能以 `evidence_saturated` / `evidence_gap_open` 停止，无法只凭 stop reason 区分 provider、访问或读取失败。
+4. **policy 可能双计数。** `model_allowed()` 已追加通用 `blocked_by_policy`，candidate assessment / extraction 调用点随后又追加阶段专用 code；一次拒绝可能形成两条 failure，影响统计与恢复审计。
+5. **StopGate 边界仍允许任意 reason。** 正常 stop reasons 已收敛为 `evidence_gate_pass`、`evidence_budget_exhausted`、`evidence_gap_open`、`evidence_saturated`、`wave_limit_exhausted`；但 `unavailable_reason` 仍原样成为 terminal reason，planning/model/generic 路径未经过有界映射。
+6. **UI 映射不完整且 unknown 不安全。** `ChatResearchRecovery.stopReasonLabels` 已覆盖 gate pass、gap、budget、active unavailable、planning policy block、cancel；缺 saturation、wave ceiling、model attempts exhausted 等。SSE partial 的 unknown fallback 会直接显示 raw `stop_reason`，而 run detail 的 unknown partial 又只显示通用重试文案，两条入口不一致。
+7. **任务书的完整枚举跨越 P1/P2。** `READ_LOGIN_REQUIRED`、`READ_JS_REQUIRED`、`READ_UNSUPPORTED_FORMAT`、`SYNTHESIS_FAILED`、`AUDIT_FAILED` 等需要 P2 Progressive Reader/Synthesis/Auditor 才能可靠观测。本批可预留枚举，但不得把当前不可区分的 reader error 猜成精确原因。
+
+**审计建议：**保留 failure/stop 两轴；P1 先建立 canonical `ResearchFailureReason` + `ResearchStopReason` 及单向映射，generic 异常收口为 `INTERNAL_ERROR`，模型 per-call `error_type` 继续留在审计而不成为 cursor code；legacy v1 cursor 通过显式 migrator 将未知 code 归入 `LEGACY_UNKNOWN`；P2 原因先声明为 reserved/unreachable；UI 只显示稳定中文标签，unknown 显示安全通用文案并保留后台诊断，不直接展示 raw code。
+
+**1A–12A FROZEN（2026-08-31）：**两条 durable 轴（failure=过程中发生了什么 / stop_reason=为何停止）永久分离（1A）；版本化 canonical string catalog 而非 closed Enum 作为持久化真值（2A）；code 恒 canonical、动态内容进 detail/provider_code/exception_type（3A）；outcome 保留局部事实、跨阶段失败投影 canonical RuntimeFailure（4A）；StopGate unavailable_reason 收敛为合法 stop reason（5A）；P1 不伪造 Reader 精度、P2 append-only 增加 READ_* 原因（6A）；正式升 research-runtime-v2、dual reader（v1 原样读 + 标记 legacy，不猜不改写）、新 writer 只写 v2（7A）；failure_id 按语义操作确定性生成、append by ID exactly-once、legacy 不 dedupe（8A）；P1 一级 code 只取稳定语义层级（9A）；outcome error_code 改 bounded local status + provider detail（10A）；API 暴露 canonical truth、UI 走 display mapping + unknown 安全 fallback（11A）；Batch 完成 Gate = 完整 writer→code→stop→consumer 矩阵 + 四类测试 + 静态审计（12A）。
+
+**Failure-State Batch A（IN PROGRESS）：**v2 合同 + dual reader + v2 codec 已就绪；production 写默认保持 v1（Batch B canonicalize 全部 writer 后才 flip）；无 DB 迁移、不改写历史行。已完成：`src/web/research/failure_contracts.py`（failure-catalog-v1 8 个一级 code + stop-reason-catalog-v1 登记全部 production literal）、`RuntimeFailure` v2 内存结构 + `build_runtime_failure` factory + 确定性 `runtime_failure_id` + `append_runtime_failure` exactly-once、cursor dual-reader（v1→v1 不暗迁移、v2→v2）。Batch B 再做 writer 迁移与 outcome projection；Batch C 再做 StopGate typing、API/UI 映射与矩阵验收。
 
 **部署边界：**默认桌面产品坚持 Zero-Docker；SearXNG 是 optional provider，不是普通用户启动依赖。P2 引入 PDF、rendered browser 或其他重依赖前，必须先说明其桌面打包/降级方式；D1/D2（Zero-Docker runtime + packaged backend）应在 P1 收口后、P2 大规模 Reader/Synthesis 前完成。
 

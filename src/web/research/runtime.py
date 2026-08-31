@@ -8,6 +8,7 @@ responses.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Mapping
 
@@ -16,9 +17,24 @@ from src.web.research.model_gateway import (
     ResearchModelCallAudit,
 )
 from src.web.research.evidence_gain import EvidenceGainResult, SaturationState
+from src.web.research.failure_contracts import (
+    ResearchFailureCode,
+    require_research_failure_code,
+)
 
 CLAIM_ENGINE_RUNTIME_CONTEXT_KEY = "claim_engine_runtime"
-RESEARCH_RUNTIME_SCHEMA_VERSION = "research-runtime-v1"
+RESEARCH_RUNTIME_SCHEMA_VERSION_V1 = "research-runtime-v1"
+RESEARCH_RUNTIME_SCHEMA_VERSION_V2 = "research-runtime-v2"
+SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS = frozenset(
+    {
+        RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+        RESEARCH_RUNTIME_SCHEMA_VERSION_V2,
+    }
+)
+# Batch A: the production write default stays v1 until Batch B canonicalizes
+# every failure writer; the v2 codec and dual reader are already prepared.
+RESEARCH_RUNTIME_SCHEMA_VERSION = RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+LATEST_RESEARCH_RUNTIME_SCHEMA_VERSION = RESEARCH_RUNTIME_SCHEMA_VERSION_V2
 
 RuntimeLoadStatus = Literal["absent", "available", "unavailable"]
 RuntimeExternalPurpose = Literal["search", "read"]
@@ -239,21 +255,169 @@ class RuntimeFailure:
     code: str
     phase: str
     item_id: str = ""
+    # v2 durable fields (frozen 7A): failure_id is the deterministic
+    # exactly-once identity; detail / provider_code / exception_type /
+    # attempt_id carry the dynamic specifics that must never become codes.
+    failure_id: str = ""
+    detail: str = ""
+    provider_code: str = ""
+    exception_type: str = ""
+    attempt_id: str = ""
+    # In-memory marker for values read from legacy cursors; never serialized.
+    # Legacy rows keep their raw code and are never normalized (frozen 7A).
+    legacy_input: bool = False
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(
+        self, schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION
+    ) -> dict[str, Any]:
+        if schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
+        if schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V2:
+            return {
+                "failure_id": self.failure_id,
+                "code": self.code,
+                "phase": self.phase,
+                "item_id": self.item_id,
+                "detail": self.detail,
+                "provider_code": self.provider_code,
+                "exception_type": self.exception_type,
+                "attempt_id": self.attempt_id,
+            }
+        # v1 wire shape stays exactly the original three fields so Batch A can
+        # never silently migrate a durable cursor (frozen 7A).
         return {"code": self.code, "phase": self.phase, "item_id": self.item_id}
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "RuntimeFailure":
+    def from_dict(
+        cls,
+        raw: Mapping[str, Any],
+        *,
+        schema_version: str = RESEARCH_RUNTIME_SCHEMA_VERSION,
+    ) -> "RuntimeFailure":
+        # The version is an explicit contract boundary, never guessed from the
+        # field set: a v1 cursor must only carry 3-field failures and a v2
+        # cursor only 8-field ones (frozen 7A).  Forward compatibility applies
+        # to the code *value*, not to the wire shape.
+        if schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
+        if not isinstance(raw, Mapping):
+            raise TypeError("runtime failure must be an object")
+        if schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V2:
+            data = _strict_mapping(
+                raw,
+                {
+                    "failure_id",
+                    "code",
+                    "phase",
+                    "item_id",
+                    "detail",
+                    "provider_code",
+                    "exception_type",
+                    "attempt_id",
+                },
+                "runtime failure",
+            )
+            phase = _required_text(data.get("phase"), 50, "failure phase")
+            if phase not in _PHASES:
+                raise ValueError("invalid runtime failure phase")
+            # The v2 reader stays forward compatible: unknown future codes are
+            # readable and only the writer-side validator rejects them.
+            return cls(
+                failure_id=_required_text(
+                    data.get("failure_id"), 300, "failure id"
+                ),
+                code=_required_text(data.get("code"), 200, "failure code"),
+                phase=phase,
+                item_id=_optional_text(data.get("item_id"), 300),
+                detail=_optional_text(data.get("detail"), 2000),
+                provider_code=_optional_text(data.get("provider_code"), 200),
+                exception_type=_optional_text(data.get("exception_type"), 200),
+                attempt_id=_optional_text(data.get("attempt_id"), 300),
+                legacy_input=False,
+            )
         data = _strict_mapping(raw, {"code", "phase", "item_id"}, "runtime failure")
         phase = _required_text(data.get("phase"), 50, "failure phase")
         if phase not in _PHASES:
             raise ValueError("invalid runtime failure phase")
+        # v1 rows keep their raw code untouched (frozen 7A): no normalization,
+        # no catalog validation, never merged with other legacy rows.
         return cls(
             code=_required_text(data.get("code"), 200, "failure code"),
             phase=phase,
             item_id=_optional_text(data.get("item_id"), 300),
+            legacy_input=True,
         )
+
+
+def build_runtime_failure(
+    *,
+    failure_id: str,
+    code: ResearchFailureCode,
+    phase: RuntimePhase,
+    item_id: str = "",
+    detail: str = "",
+    provider_code: str = "",
+    exception_type: str = "",
+    attempt_id: str = "",
+) -> RuntimeFailure:
+    """Canonical v2 failure factory for production writers (Batch B onward).
+
+    Validates catalog membership, requires a deterministic failure_id, and
+    bounds every free-text field so dynamic provider/Python specifics never
+    leak into the durable code (frozen 3A/9A).  Never used by readers.
+    """
+    require_research_failure_code(code)
+    if not isinstance(failure_id, str) or not failure_id:
+        raise ValueError("failure id must be non-empty")
+    return RuntimeFailure(
+        failure_id=failure_id,
+        code=code,
+        phase=phase,
+        item_id=_optional_text(item_id, 300),
+        detail=_optional_text(detail, 2000),
+        provider_code=_optional_text(provider_code, 200),
+        exception_type=_optional_text(exception_type, 200),
+        attempt_id=_optional_text(attempt_id, 300),
+        legacy_input=False,
+    )
+
+
+def runtime_failure_id(*, logical_call_id: str, code: str) -> str:
+    """Deterministic exactly-once identity for one logical attempt (8A).
+
+    Same logical call + same canonical code always produce the same id; a new
+    attempt produces a new id.  Random ids are forbidden.
+    """
+    return _failure_id_from_parts(logical_call_id, code)
+
+
+def runtime_failure_id_unattached(
+    *, phase: str, item_id: str, attempt_id: str, code: str
+) -> str:
+    """Fallback identity when no logical call id exists (frozen 8A)."""
+    return _failure_id_from_parts(phase, item_id, attempt_id, code)
+
+
+def _failure_id_from_parts(*parts: str) -> str:
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
+    return f"failure:{digest}"
+
+
+def append_runtime_failure(
+    failures: tuple[RuntimeFailure, ...],
+    failure: RuntimeFailure,
+) -> tuple[RuntimeFailure, ...]:
+    """Append by failure_id; exactly-once for durable ids (frozen 8A).
+
+    Legacy failures (empty failure_id) are never deduplicated: historical
+    rows may represent genuinely different attempts with identical
+    (code, phase, item_id) triples.
+    """
+    if failure.failure_id and any(
+        item.failure_id == failure.failure_id for item in failures
+    ):
+        return failures
+    return (*failures, failure)
 
 
 @dataclass(frozen=True)
@@ -338,6 +502,11 @@ class ResearchRuntimeCursor:
         return tuple(dict.fromkeys(item.candidate_id for item in self.read_outcomes))
 
     def to_dict(self) -> dict[str, Any]:
+        # The cursor serializer never fails open on an unknown schema version:
+        # an unsupported top-level version would otherwise emit its own
+        # version next to a v1-shaped failure payload (frozen 7A).
+        if self.schema_version not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
+            raise ValueError("unsupported research runtime schema")
         return {
             "schema_version": self.schema_version,
             "round_index": self.round_index,
@@ -356,7 +525,9 @@ class ResearchRuntimeCursor:
                 if self.inflight_external_call
                 else None
             ),
-            "failures": [item.to_dict() for item in self.failures],
+            "failures": [
+                item.to_dict(self.schema_version) for item in self.failures
+            ],
             "wave_index": self.wave_index,
             "wave_id": self.wave_id,
             "active_gap_ids": list(self.active_gap_ids),
@@ -405,7 +576,7 @@ class ResearchRuntimeCursor:
             },
             "research runtime cursor",
         )
-        if data.get("schema_version") != RESEARCH_RUNTIME_SCHEMA_VERSION:
+        if data.get("schema_version") not in SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS:
             raise ValueError("unsupported research runtime schema")
         phase = _required_text(data.get("phase"), 50, "runtime phase")
         if phase not in _PHASES:
@@ -426,7 +597,11 @@ class ResearchRuntimeCursor:
             data.get("model_calls"), ResearchModelCallAudit.from_dict, "model_calls"
         )
         failures = _object_tuple(
-            data.get("failures"), RuntimeFailure.from_dict, "failures"
+            data.get("failures"),
+            lambda item: RuntimeFailure.from_dict(
+                item, schema_version=str(data.get("schema_version"))
+            ),
+            "failures",
         )
         inflight_raw = data.get("inflight_model_call")
         inflight = (
@@ -445,6 +620,10 @@ class ResearchRuntimeCursor:
             )
         )
         cursor = cls(
+            # Keep the durable schema version on load so a v2 cursor
+            # reserializes as v2 and a v1 cursor stays v1 (no silent
+            # migration, frozen 7A).
+            schema_version=str(data.get("schema_version")),
             round_index=_bounded_int(data.get("round_index"), 0, 1000, "round_index"),
             phase=phase,  # type: ignore[arg-type]
             planned_queries=planned_queries,
@@ -743,7 +922,11 @@ def _text_tuple(value: Any, max_items: int, item_limit: int) -> tuple[str, ...]:
 
 __all__ = [
     "CLAIM_ENGINE_RUNTIME_CONTEXT_KEY",
+    "LATEST_RESEARCH_RUNTIME_SCHEMA_VERSION",
     "RESEARCH_RUNTIME_SCHEMA_VERSION",
+    "RESEARCH_RUNTIME_SCHEMA_VERSION_V1",
+    "RESEARCH_RUNTIME_SCHEMA_VERSION_V2",
+    "SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS",
     "ResearchRuntimeCursor",
     "RuntimeCandidate",
     "RuntimeCursorLoadResult",
@@ -752,12 +935,16 @@ __all__ = [
     "RuntimePlannedQuery",
     "RuntimeQueryOutcome",
     "RuntimeReadOutcome",
+    "append_runtime_failure",
     "attach_runtime_cursor",
     "begin_model_attempt",
     "begin_external_attempt",
+    "build_runtime_failure",
     "finish_external_attempt",
     "finish_model_attempt",
     "load_runtime_cursor",
     "recover_interrupted_model_attempt",
     "recover_interrupted_external_attempt",
+    "runtime_failure_id",
+    "runtime_failure_id_unattached",
 ]
