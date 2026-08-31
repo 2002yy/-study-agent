@@ -55,8 +55,8 @@ RESEARCH_FAILURE_CODES: Final[frozenset[str]] = frozenset(
 # Stop reasons registered verbatim from current production emitters (frozen
 # 5A: Batch A never renames an existing value).  The active runtime reasons
 # are produced by ResearchStopGate and the executor unavailable paths; the
-# legacy service/repository literals are kept so the catalog covers every
-# durable stop_reason the product can already write today.
+# legacy service/repository/migration literals are kept so the catalog covers
+# every durable stop_reason the product can already write today.
 ResearchStopReason = Literal[
     "evidence_gate_pass",
     "evidence_budget_exhausted",
@@ -76,6 +76,7 @@ ResearchStopReason = Literal[
     "candidates_only",
     "chat_tool_loop_failed",
     "research_stage_failed",
+    "legacy_run_interrupted",
 ]
 
 RESEARCH_STOP_REASONS: Final[frozenset[str]] = frozenset(
@@ -98,6 +99,7 @@ RESEARCH_STOP_REASONS: Final[frozenset[str]] = frozenset(
         "candidates_only",
         "chat_tool_loop_failed",
         "research_stage_failed",
+        "legacy_run_interrupted",
     }
 )
 
