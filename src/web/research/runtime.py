@@ -31,9 +31,10 @@ SUPPORTED_RESEARCH_RUNTIME_SCHEMA_VERSIONS = frozenset(
         RESEARCH_RUNTIME_SCHEMA_VERSION_V2,
     }
 )
-# Batch A: the production write default stays v1 until Batch B canonicalizes
-# every failure writer; the v2 codec and dual reader are already prepared.
-RESEARCH_RUNTIME_SCHEMA_VERSION = RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+# Batch B: new production cursors write v2.  A loaded v1 cursor retains its
+# explicit schema_version and therefore still reserializes byte-shape
+# compatibly; readers never guess or silently migrate its legacy failures.
+RESEARCH_RUNTIME_SCHEMA_VERSION = RESEARCH_RUNTIME_SCHEMA_VERSION_V2
 LATEST_RESEARCH_RUNTIME_SCHEMA_VERSION = RESEARCH_RUNTIME_SCHEMA_VERSION_V2
 
 RuntimeLoadStatus = Literal["absent", "available", "unavailable"]
@@ -751,15 +752,30 @@ def recover_interrupted_model_attempt(
     inflight = cursor.inflight_model_call
     if inflight is None:
         return cursor
-    failure = RuntimeFailure(
-        code="interrupted_unknown",
+    code: ResearchFailureCode
+    if inflight.purpose == "research_claim_planning":
+        code = "claim_planning_failed"
+    elif inflight.purpose == "research_candidate_assessment":
+        code = "assessment_failed"
+    elif inflight.purpose == "research_evidence_extraction":
+        code = "extraction_failed"
+    else:
+        code = "runtime_internal_failed"
+    failure = build_runtime_failure(
+        failure_id=runtime_failure_id(
+            logical_call_id=inflight.call_id,
+            code=code,
+        ),
+        code=code,
         phase=cursor.phase,
         item_id=inflight.call_id,
+        detail="interrupted_unknown",
+        attempt_id=inflight.call_id,
     )
     return replace(
         cursor,
         inflight_model_call=None,
-        failures=(*cursor.failures, failure),
+        failures=append_runtime_failure(cursor.failures, failure),
     )
 
 
@@ -789,15 +805,24 @@ def recover_interrupted_external_attempt(
     inflight = cursor.inflight_external_call
     if inflight is None:
         return cursor
-    failure = RuntimeFailure(
-        code="interrupted_unknown",
+    code: ResearchFailureCode = (
+        "search_failed" if inflight.purpose == "search" else "read_failed"
+    )
+    failure = build_runtime_failure(
+        failure_id=runtime_failure_id(
+            logical_call_id=inflight.call_id,
+            code=code,
+        ),
+        code=code,
         phase=cursor.phase,
         item_id=inflight.call_id,
+        detail="interrupted_unknown",
+        attempt_id=inflight.call_id,
     )
     return replace(
         cursor,
         inflight_external_call=None,
-        failures=(*cursor.failures, failure),
+        failures=append_runtime_failure(cursor.failures, failure),
     )
 
 
