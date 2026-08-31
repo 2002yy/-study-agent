@@ -52,6 +52,7 @@ class ResearchStopSignal:
     wave_limit_reached: bool
     has_evidence: bool
     unavailable_reason: str = ""
+    unapplied_steering_blocks_completion: bool = False
 
 
 class ResearchStopGate:
@@ -61,7 +62,10 @@ class ResearchStopGate:
       1. unavailable   - explicit failure (policy block, plan unavailable,
                          active_runtime_unavailable) - never competes with a
                          normal settlement
-      2. gate pass     - success / evidence_gate_pass
+      2. gate pass     - success / evidence_gate_pass; suppressed when an
+                         unapplied steering (marked late against an exhausted
+                         hard/wave budget) invalidates completion computed
+                         from the pre-steering graph
       3. hard budget   - partial / evidence_budget_exhausted - must not be
                          masked by saturation or the wave ceiling
       4. no actionable - partial / evidence_gap_open
@@ -80,7 +84,11 @@ class ResearchStopGate:
                 final_status="failed",
                 provider_status="unavailable",
             )
-        if signal.gate_pass:
+        effective_gate_pass = (
+            signal.gate_pass
+            and not signal.unapplied_steering_blocks_completion
+        )
+        if effective_gate_pass:
             return ResearchStopDecision(
                 decision="success",
                 reason="evidence_gate_pass",

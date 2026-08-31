@@ -335,9 +335,8 @@ class ActiveResearchRuntimeExecutor:
             pending = _pending_active_steering_ids(context)
             hard_exhausted = elapsed() >= state.budget.hard_timeout_seconds
             wave_exhausted = cursor.wave_index >= MAX_RESEARCH_WAVES
-            late_ids: tuple[str, ...] = ()
             if pending and (hard_exhausted or wave_exhausted):
-                late_ids = mark_pending_steering_late(
+                mark_pending_steering_late(
                     "hard_budget_exhausted"
                     if hard_exhausted
                     else "wave_limit_reached"
@@ -380,10 +379,15 @@ class ActiveResearchRuntimeExecutor:
             # The executor derives durable signals and never decides a stop
             # reason itself; the frozen priority (gate pass > hard budget >
             # no actionable gaps > saturation > wave ceiling > continue) is
-            # locked inside the gate.
+            # locked inside the gate.  Whether a late steering blocks the old
+            # graph's gate pass is recomputed from the merged durable context
+            # (steering status=late is durable truth), never from the return
+            # value of this invocation's mark call - a crash between the late
+            # checkpoint and the terminal complete must resume to the same
+            # decision.
             stop = ResearchStopGate.evaluate(
                 ResearchStopSignal(
-                    gate_pass=gate.status == "pass" and not late_ids,
+                    gate_pass=gate.status == "pass",
                     hard_budget_exhausted=(
                         hard_exhausted
                     ),
@@ -392,6 +396,9 @@ class ActiveResearchRuntimeExecutor:
                     and open_gap_claims <= saturated_claims,
                     wave_limit_reached=wave_exhausted,
                     has_evidence=bool(state.evidence),
+                    unapplied_steering_blocks_completion=(
+                        _unapplied_steering_blocks_completion(context)
+                    ),
                 )
             )
             if stop.decision == "continue":
@@ -1101,7 +1108,7 @@ class ActiveResearchRuntimeExecutor:
             update_budget()
             _append_failure("hard_budget_reached", cursor.phase)
             refresh_steering()
-            late_ids = mark_pending_steering_late("hard_budget_exhausted")
+            mark_pending_steering_late("hard_budget_exhausted")
             checkpoint()
             gate = evaluate_evidence_gate(state)
             brief = _evidence_brief(state, gate, selected_sources)
@@ -1109,15 +1116,21 @@ class ActiveResearchRuntimeExecutor:
             checkpoint()
             # P1-C batch 3: the stop truth comes from the gate; the frozen
             # exception-path confidence ("partial" if evidence else "none")
-            # is preserved exactly as in 533b60c7.
+            # is preserved exactly as in 533b60c7. The late steering blocks
+            # the old graph's gate pass via the durable recomputed signal,
+            # so a crash after the late checkpoint resumes to the same
+            # evidence_budget_exhausted decision.
             stop = ResearchStopGate.evaluate(
                 ResearchStopSignal(
-                    gate_pass=gate.status == "pass" and not late_ids,
+                    gate_pass=gate.status == "pass",
                     hard_budget_exhausted=True,
                     has_actionable_gaps=True,
                     all_actionable_saturated=False,
                     wave_limit_reached=False,
                     has_evidence=bool(state.evidence),
+                    unapplied_steering_blocks_completion=(
+                        _unapplied_steering_blocks_completion(context)
+                    ),
                 )
             )
             return self.repository.complete(
@@ -1259,6 +1272,23 @@ def _pending_active_steering_ids(context: Mapping[str, Any]) -> tuple[str, ...]:
         str(item["id"])
         for item in active_steering_entries(context)
         if item.get("status") == "pending"
+    )
+
+
+def _unapplied_steering_blocks_completion(context: Mapping[str, Any]) -> bool:
+    """Durable signal: a steering marked late against the exhausted hard or
+    wave budget invalidates completion computed from the pre-steering graph.
+
+    Recomputed from the merged durable context on every settlement (including
+    a crash/resume), never taken from this invocation's mark return value.
+    User-cancelled late entries stay owned by the cancellation lifecycle and
+    do not participate in StopGate truth.
+    """
+
+    return any(
+        item.get("status") == "late"
+        and item.get("late_reason") in {"hard_budget_exhausted", "wave_limit_reached"}
+        for item in active_steering_entries(context)
     )
 
 

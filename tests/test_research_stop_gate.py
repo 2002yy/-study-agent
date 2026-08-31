@@ -26,6 +26,7 @@ def _signal(
     wave_limit_reached: bool = False,
     has_evidence: bool = False,
     unavailable_reason: str = "",
+    unapplied_steering_blocks_completion: bool = False,
 ) -> ResearchStopSignal:
     return ResearchStopSignal(
         gate_pass=gate_pass,
@@ -35,6 +36,9 @@ def _signal(
         wave_limit_reached=wave_limit_reached,
         has_evidence=has_evidence,
         unavailable_reason=unavailable_reason,
+        unapplied_steering_blocks_completion=(
+            unapplied_steering_blocks_completion
+        ),
     )
 
 
@@ -172,6 +176,69 @@ def test_unavailable_without_reason_is_not_invented() -> None:
     assert ResearchStopGate.evaluate(
         _signal(unavailable_reason="")
     ) == _expect("continue", "")
+
+
+def test_late_steering_suppresses_gate_pass() -> None:
+    # A late steering against the exhausted budget must invalidate the old
+    # graph's gate pass (steering 1A/6A), and the suppression is a durable
+    # signal - it holds on any re-evaluation of the same durable state.
+    # With no terminal truth besides the suppressed pass, the decision falls
+    # through to continue: the run must not complete on the old graph.
+    assert ResearchStopGate.evaluate(
+        _signal(gate_pass=True, unapplied_steering_blocks_completion=True)
+    ) == _expect("continue", "")
+
+
+def test_late_steering_hard_budget_keeps_budget_terminal_truth() -> None:
+    assert ResearchStopGate.evaluate(
+        _signal(
+            gate_pass=True,
+            hard_budget_exhausted=True,
+            unapplied_steering_blocks_completion=True,
+        )
+    ) == _expect(
+        "partial", "evidence_budget_exhausted",
+        final_status="partial", provider_status="insufficient",
+        answer_confidence="partial",
+    )
+
+
+def test_late_steering_wave_ceiling_keeps_wave_terminal_truth() -> None:
+    assert ResearchStopGate.evaluate(
+        _signal(
+            gate_pass=True,
+            wave_limit_reached=True,
+            unapplied_steering_blocks_completion=True,
+        )
+    ) == _expect(
+        "partial", "wave_limit_exhausted",
+        final_status="partial", provider_status="insufficient",
+        answer_confidence="none",
+    )
+
+
+def test_late_steering_never_overrides_unavailable() -> None:
+    assert ResearchStopGate.evaluate(
+        _signal(
+            gate_pass=True,
+            hard_budget_exhausted=True,
+            unapplied_steering_blocks_completion=True,
+            unavailable_reason="claim_plan_unavailable",
+        )
+    ) == _expect(
+        "unavailable", "claim_plan_unavailable",
+        final_status="failed", provider_status="unavailable",
+    )
+
+
+def test_gate_pass_without_late_steering_stays_success() -> None:
+    assert ResearchStopGate.evaluate(
+        _signal(gate_pass=True)
+    ) == _expect(
+        "success", "evidence_gate_pass",
+        final_status="completed", provider_status="found",
+        answer_confidence="high",
+    )
 
 
 def test_stop_gate_is_deterministic_for_durable_truth() -> None:

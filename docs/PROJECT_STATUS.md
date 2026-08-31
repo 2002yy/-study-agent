@@ -12,10 +12,10 @@
 
 - **Delivery lineage：**B5（PR #132）→ `main@5d620fe0`；B5-Hardening（PR #133）→ `main@fe308718`；P1-C 子批 1（PR #134）→ `main@c2cc60e`；P1-C 子批 2（PR #135，head `acbd330`）→ merge commit `533b60c`。
 - **Remote CI：**PR #135 已合并；merge 后 `main@533b60c` 的 CI [#33327174616](https://github.com/2002yy/study-agent/actions/runs/33327174616) `completed / success`。**B5 + B5-Hardening + P1-C 子批 1/2 = REMOTE GO / DELIVERED。**
-- **Current initiative：**RQCE-P1-C 子批 3 + active structured steering：先把散落在 active executor 的 terminal mapping 收敛到纯确定性 `ResearchStopGate`，再在同一 `WebLookupRun` 真值内完成 append-only steering、并发 checkpoint 合并和波次边界 exactly-once 应用。当前本地分支 `codex/rqce-p1-c3-stop-gate`，尚未提交/推送。
-- **Runtime status：**active multi-wave production executor 已交付：durable wave cursor/ID、gain history、per-gap/per-claim saturation、跨波 cluster truth、bounded model retry、crash recovery、hard-budget/wave-limit 真值均已进入 main。子批 3 本地已新增 Stop Gate decision table并迁移正常 settlement、hard-budget、planning/policy unavailable 与 generic runtime unavailable；取消仍由既有 owner-scoped `finish_cancel` 生命周期处理。2026-08-31 Grill 进一步冻结 active steering 的结构化持久化与停止优先级，当前正在本地施工。
-- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + Hardening + P1-C 子批 1/2 = **REMOTE GO / DELIVERED**；P1-C 子批 3 = **LOCAL IMPLEMENTATION COMPLETE / REVIEW PENDING**（focused 51/51、full pytest 1451/1451、Ruff、mypy 122≤128、diff-check）；RQ1 bounded/default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
-- **唯一下一步：**完成 Stop Gate + active structured steering 的本地实现与全门禁复审；随后同一大批继续 failure-state 收口，再统一提交远程 exact-head CI。确定性闭环完成后才运行一次 bounded 12-case qualification并进入人工 activation Gate；P1 未通过前不进入 P2。
+- **Current initiative：**RQCE-P1-C 子批 3 + active structured steering 已进入 PR #136 pre-merge Gate；delivery 分支为 `codex/rqce-p1-c3-stopgate-steering`。本批把 terminal mapping 收敛到纯确定性 `ResearchStopGate`，并在同一 `WebLookupRun` 真值内完成 append-only steering、并发 checkpoint 合并、波次边界 exactly-once 应用及 crash/resume 一致性。
+- **Runtime status：**active multi-wave production executor 已交付：durable wave cursor/ID、gain history、per-gap/per-claim saturation、跨波 cluster truth、bounded model retry、crash recovery、hard-budget/wave-limit 真值均已进入 main。PR #136 的 Commit 1/2 已交付 Stop Gate 与 active steering 主体；当前小增量把“late steering 阻断旧图 gate pass”改为从持久化 context 重算的 StopGate signal，并补 checkpoint 前/后 crash 回归。取消仍由既有 owner-scoped `finish_cancel` 生命周期处理。
+- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + Hardening + P1-C 子批 1/2 = **REMOTE GO / DELIVERED**；P1-C 子批 3 + active steering = **LOCAL PASS / PR #136 PRE-MERGE**（focused 138/138、single full pytest 1475/1475、Ruff、mypy 122≤128 / NEW=0、diff-check）；RQ1 bounded/default activation = **NO-GO**；RQCE-P2 = **NOT STARTED**。
+- **唯一下一步：**完成 PR #136 小增量 exact-head CI 与复审后合并；随后同一 P1 收口路线只做 failure-state 枚举/映射审计，再一次性运行 bounded 12-case qualification 并进入人工 activation Gate。P1 未通过前不进入 P2。
 - **Delivered foundation：**Pre-RQCE RQ1-A truth stabilization；docs 路线统一；RQCE-P0 A0–C5-C（contracts/state/trace/policy/gates/20-case harness/live semantic audit）；P1-A0 Truth Fix（四层 retrieval truth、50 候选独立人工审计、taxonomy 修正、V2 report aggregate 修正）。
 - **P0-C5 当前事实：**已切断 Gold→Shadow 决策输入，Gold 只用于事后评分；freshness 已进入 EvidenceRequirement/Evidence/Gate；primary denominator、Useful Read 与 evidence-linked critical coverage 口径已修正。frozen 10 的新诊断为 false closure 7、gold-blind shadow caught 6、missed 1、overblocked 0；该结果仍是预记录 projection 的组件证据，不是 runtime observer 证据。
 - **Live 10 / 50-candidate Truth Fix：**Provider returned=50；production `worth_reading=true`=50；benchmark surface match=10；manual `ANSWER_RELEVANT`=5、`TOPIC_ONLY`=10、`OFF_TARGET`=35。新 taxonomy：`NO_ANSWER_RELEVANT_CANDIDATE=7`、`BENCHMARK_MATCH_FALSE_NEGATIVE=0`、`CLAIM_PROJECTION_UNAVAILABLE=2`、`COMPLETED_WITH_EVIDENCE=1`；旧 `RELEVANCE_FALSE_NEGATIVE=7` 结论已撤销。
@@ -124,6 +124,7 @@
 - **子批 2 已交付。** PR #135 经多轮 review 修复 multi-wave query identity、gain exactly-once、跨波/跨 claim cluster 覆盖、conflict reserve、major backfill、assessment/extraction attempt exhaustion、deferred context saturation 与 hard-budget precedence；最终 head `acbd330`，merge `533b60c`，exact-main CI #33327174616 success。
 - **子批 3 当前改动。** 新增 `src/application/research_stop_gate.py` 与 characterization table；`active_research_runtime.py` 的正常 settlement、hard-budget、planning/policy unavailable、generic runtime unavailable 均从 gate 取得 canonical reason/mapping。新增 durable-state 重建验收，证明持久化 state + cursor 重算得到的 reason 与 run 上的 `evidence_saturated` 一致。
 - **子批 3 明确边界。** 本批是 stop truth centralization，不宣称已经完成 active steering、全部结构化 `ResearchFailureReason`、bounded 12-case qualification 或 production activation；现有 legacy deep steering 不自动等于 Claim Engine active steering。
+- **PR #136 round-2 小增量（LOCAL PASS）：**late steering 不再依赖当前调用栈的临时 `late_ids` 返回值，而由 `ResearchStopSignal.unapplied_steering_blocks_completion` 从 merged durable context 重算；因此 checkpoint 后 process death/resume 仍会抑制旧 graph 的 gate pass，并保留 canonical hard-budget/wave-limit terminal reason。focused 138/138、单次全仓 1475/1475、Ruff、mypy `122≤128 / NEW=0`、diff-check 均通过；远程状态必须以该增量 push 后的 exact-head CI 为准。
 
 **Active structured steering Grill 1A–5A（2026-08-31，FROZEN）：**
 
@@ -139,7 +140,7 @@
 | 阶段 | 当前事实 | 尚余工作 |
 | --- | --- | --- |
 | **RQCE-P0** | contracts/state/trace/policy/gates、20-case Shadow/live semantic audit、retrieval taxonomy 已交付 | 无新施工批；继续作为 P1/P2 回归与诊断资产，不能替代 release benchmark |
-| **RQCE-P1** | Gap/CandidatePool、semantic rank/cluster、Scheduler/Extractor、active adapter、multi-wave gain/saturation/resume 已交付；Stop Gate 本地完成待远程 | Stop Gate 远程收口；active structured steering；failure-state 枚举/映射审计；bounded 12-case frozen+small-live qualification；人工 activation GO/NO-GO |
+| **RQCE-P1** | Gap/CandidatePool、semantic rank/cluster、Scheduler/Extractor、active adapter、multi-wave gain/saturation/resume 已交付；Stop Gate + active structured steering 已在 PR #136 LOCAL PASS | PR #136 远程收口；failure-state 枚举/映射审计；bounded 12-case frozen+small-live qualification；人工 activation GO/NO-GO |
 | **RQCE-P2** | 尚未开始完整产品质量层；现有 reader/brief 只是 P1 最小能力 | Progressive Reader（section/PDF/JS/login/403）+ cache/circuit breaker；完整 ResearchBrief+synthesis；Final Answer Auditor（最多一次 repair）；50–60 frozen/live benchmark 与 release report |
 
 **部署边界：**默认桌面产品坚持 Zero-Docker；SearXNG 是 optional provider，不是普通用户启动依赖。P2 引入 PDF、rendered browser 或其他重依赖前，必须先说明其桌面打包/降级方式；D1/D2（Zero-Docker runtime + packaged backend）应在 P1 收口后、P2 大规模 Reader/Synthesis 前完成。

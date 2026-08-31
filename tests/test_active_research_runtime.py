@@ -3592,3 +3592,187 @@ def test_pending_steering_defers_gate_pass_to_next_wave(tmp_path: Any) -> None:
     )
     assert len([item for item in rebuilt.claims if item.created_by == "user"]) == 1
     assert any(item.gap_type == "user_steering" for item in rebuilt.gaps)
+
+@pytest.mark.parametrize("terminal", ["hard_budget_exhausted", "wave_limit_reached"])
+def test_late_steering_terminal_crash_recomputes_same_stop_decision(
+    tmp_path: Any,
+    terminal: str,
+) -> None:
+    """P1-C batch 3 round-2 / steering 6A: the suppression of the old graph's
+    gate pass by a late steering must be durable truth, recomputed by the
+    StopGate on resume - never the return value of one mark call.
+
+    Sequence: old graph reaches Gate PASS -> steering arrives -> terminal
+    budget/wave ceiling -> steering marked late -> late checkpoint persisted
+    -> simulated process death -> stale operation -> resume -> the same
+    canonical stop decision must be recomputed (partial, never completed on
+    the old graph), and the durable signal must reproduce it through the
+    gate."""
+    import src.application.active_research_runtime as art_mod
+    from src.application.research_stop_gate import (
+        ResearchStopGate,
+        ResearchStopSignal,
+    )
+    from src.web.research.steering import active_steering_entries
+    from src.web.research.state import CLAIM_ENGINE_CONTEXT_KEY
+    from src.web.research.evidence_gate import evaluate_evidence_gate
+
+    class _SimulatedProcessDeath(BaseException):
+        pass
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            return self.value
+
+    clock = _Clock()
+
+    class _CrashOnLateCheckpoint(WebLookupRepository):
+        def __init__(self, database: Any) -> None:
+            super().__init__(database)
+            self.armed = True
+
+        def checkpoint(
+            self,
+            run_id: str,
+            *,
+            operation_id: str,
+            research_context: dict[str, Any],
+            **kwargs: Any,
+        ) -> Any:
+            result = super().checkpoint(
+                run_id,
+                operation_id=operation_id,
+                research_context=research_context,
+                **kwargs,
+            )
+            entries = active_steering_entries(research_context)
+            if self.armed and any(
+                item.get("status") == "late" for item in entries
+            ):
+                self.armed = False
+                raise _SimulatedProcessDeath("crash after late checkpoint")
+            return result
+
+    repository = _CrashOnLateCheckpoint(
+        RuntimeDatabase(tmp_path / f"late-crash-{terminal}.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id=f"run_late_crash_{terminal}",
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=_active_context(),
+            max_items=5,
+        )
+    )
+    injected = {"done": False}
+
+    def _inject() -> None:
+        if not injected["done"]:
+            injected["done"] = True
+            if terminal == "hard_budget_exhausted":
+                clock.value = 61.0
+            assert repository.append_steering(
+                run.id,
+                content="Too late to apply",
+            ) is not None
+
+    original_limit = art_mod.MAX_RESEARCH_WAVES
+    if terminal == "wave_limit_reached":
+        art_mod.MAX_RESEARCH_WAVES = 1
+    try:
+        with pytest.raises(_SimulatedProcessDeath):
+            _service(
+                repository,
+                _StructuredClient(),
+                read_gateway=_ReadGateway(on_read=_inject),
+                monotonic=clock,
+            ).execute(run.id, raise_on_error=True)
+
+        with repository.database.connect() as connection:
+            row = connection.execute(
+                "SELECT research_context FROM web_lookup_runs WHERE id = ?",
+                (run.id,),
+            ).fetchone()
+            assert row is not None
+            stale_context = loads(str(row[0]))
+            stale_context.setdefault("operation", {})["active_operation_started_at"] = (
+                "2000-01-01T00:00:00+00:00"
+            )
+            connection.execute(
+                "UPDATE web_lookup_runs SET research_context = ? WHERE id = ?",
+                (_json_dumps(stale_context), run.id),
+            )
+
+        completed = _service(
+            repository,
+            _StructuredClient(),
+            monotonic=clock,
+        ).execute(run.id, raise_on_error=True)
+    finally:
+        art_mod.MAX_RESEARCH_WAVES = original_limit
+
+    assert completed.status == "partial"
+    # Frozen priority (batch 2 settle chain): gate pass closes the gaps
+    # (_state_after_gate) and no-actionable-gaps ranks above the wave ceiling.
+    # So once the late steering suppresses the old graph's pass, the truthful
+    # terminal reason of the wave-ceiling case is evidence_gap_open, while the
+    # hard-budget case keeps its own higher-priority reason. The wave->wave_limit
+    # mapping without a closing gap is locked at the component level
+    # (test_late_steering_wave_ceiling_keeps_wave_terminal_truth).
+    expected_reason = (
+        "evidence_budget_exhausted"
+        if terminal == "hard_budget_exhausted"
+        else "evidence_gap_open"
+    )
+    assert completed.stop_reason == expected_reason
+    assert completed.stop_reason != "evidence_gate_pass"
+
+    entries = active_steering_entries(completed.research_context)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "late"
+    assert entries[0]["late_reason"] == terminal
+    assert entries[0]["claim_id"] == ""
+    assert entries[0]["applied_wave"] is None
+
+    raw_state = completed.research_context[CLAIM_ENGINE_CONTEXT_KEY]
+    rebuilt = ResearchState.from_dict(
+        raw_state,
+        known_evidence_ids=tuple(
+            item["evidence_id"]
+            for item in raw_state.get("evidence", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("evidence_id"), str)
+        ),
+    )
+    assert not [item for item in rebuilt.claims if item.created_by == "user"]
+
+    # Durable recomputation contract: the same signal rebuilt purely from
+    # durable truth reproduces the persisted canonical stop reason.
+    cursor = ResearchRuntimeCursor.from_dict(
+        completed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    gate = evaluate_evidence_gate(rebuilt)
+    rebuilt_signal = ResearchStopSignal(
+        gate_pass=gate.status == "pass",
+        hard_budget_exhausted=(
+            clock.value >= rebuilt.budget.hard_timeout_seconds
+        ),
+        has_actionable_gaps=bool(
+            art_mod._ordered_gaps(rebuilt)
+        ),
+        all_actionable_saturated=False,
+        wave_limit_reached=cursor.wave_index >= art_mod.MAX_RESEARCH_WAVES,
+        has_evidence=bool(rebuilt.evidence),
+        unapplied_steering_blocks_completion=(
+            art_mod._unapplied_steering_blocks_completion(
+                completed.research_context
+            )
+        ),
+    )
+    assert ResearchStopGate.evaluate(rebuilt_signal).reason == expected_reason
+    assert rebuilt_signal.unapplied_steering_blocks_completion is True
