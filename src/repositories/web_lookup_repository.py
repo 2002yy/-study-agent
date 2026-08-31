@@ -8,8 +8,13 @@ from datetime import datetime, timedelta, timezone
 import json
 from typing import Any
 
-from src.domain.runtime_entities import WebLookupRun, utc_now
+from src.domain.runtime_entities import WebLookupRun, new_id, utc_now
 from src.infrastructure.sqlite.database import RuntimeDatabase
+from src.web.research.steering import (
+    append_active_steering,
+    is_active_claim_engine_context,
+    merge_active_steering_context,
+)
 from src.web.source_assessment import assess_sources
 
 
@@ -496,41 +501,54 @@ class WebLookupRepository:
         normalized = " ".join((content or "").strip().split())
         if not normalized:
             raise ValueError("Steering content is required")
-        run = self._required(run_id)
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM web_lookup_runs WHERE id = ?", (run_id,)
-            ).fetchone()
-            # Steering is valid while queued (pending) as well as running:
-            # the user may refine direction before the worker starts.
-            if row is None or row["status"] not in {"running", "pending"}:
-                return None
-            current = _from_row(row)
-            context = dict(current.research_context)
-            deep = dict(context.get("deep") or {})
-            steering = [
-                dict(item) for item in deep.get("steering", []) if isinstance(item, dict)
-            ]
-            steering.append(
-                {
-                    "content": normalized[:2000],
-                    "received_at": utc_now(),
-                    "incorporated_in_round": None,
-                }
-            )
-            deep["steering"] = steering
-            context["deep"] = deep
-            cursor = connection.execute(
-                """
-                UPDATE web_lookup_runs
-                SET research_context = ?, updated_at = ?, version = version + 1
-                WHERE id = ? AND status IN ('running', 'pending') AND version = ?
-                """,
-                (_dump(context), utc_now(), run_id, run.version),
-            )
-        if cursor.rowcount != 1:
-            return None
-        return self._required(run_id)
+        entry_id = new_id("steering")
+        received_at = utc_now()
+        for _attempt in range(4):
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM web_lookup_runs WHERE id = ?", (run_id,)
+                ).fetchone()
+                # Steering is valid while queued (pending) as well as running:
+                # the user may refine direction before the worker starts.
+                if row is None or row["status"] not in {"running", "pending"}:
+                    return None
+                current = _from_row(row)
+                context = dict(current.research_context)
+                if is_active_claim_engine_context(context):
+                    context = append_active_steering(
+                        context,
+                        entry_id=entry_id,
+                        content=normalized[:2000],
+                        received_at=received_at,
+                    )
+                else:
+                    # Preserve the delivered legacy deep-research envelope.
+                    deep = dict(context.get("deep") or {})
+                    steering = [
+                        dict(item)
+                        for item in deep.get("steering", [])
+                        if isinstance(item, dict)
+                    ]
+                    steering.append(
+                        {
+                            "content": normalized[:2000],
+                            "received_at": received_at,
+                            "incorporated_in_round": None,
+                        }
+                    )
+                    deep["steering"] = steering
+                    context["deep"] = deep
+                cursor = connection.execute(
+                    """
+                    UPDATE web_lookup_runs
+                    SET research_context = ?, updated_at = ?, version = version + 1
+                    WHERE id = ? AND status IN ('running', 'pending') AND version = ?
+                    """,
+                    (_dump(context), utc_now(), run_id, current.version),
+                )
+            if cursor.rowcount == 1:
+                return self._required(run_id)
+        return None
 
     def checkpoint(
         self,
@@ -547,15 +565,21 @@ class WebLookupRepository:
         stop_reason: str = "",
         answer_confidence: str = "",
     ) -> WebLookupRun:
-        run = self._required(run_id)
-        self._assert_running_owner(run, operation_id)
-        context = _with_operation(
-            research_context,
-            **_operation_state(run.research_context),
-        )
-        now = utc_now()
-        with self.database.connect() as connection:
-            cursor = connection.execute(
+        checkpoint_context = dict(research_context)
+        for _attempt in range(4):
+            run = self._required(run_id)
+            self._assert_running_owner(run, operation_id)
+            checkpoint_context = merge_active_steering_context(
+                checkpoint_context,
+                run.research_context,
+            )
+            context = _with_operation(
+                checkpoint_context,
+                **_operation_state(run.research_context),
+            )
+            now = utc_now()
+            with self.database.connect() as connection:
+                cursor = connection.execute(
                 """
                 UPDATE web_lookup_runs
                 SET research_context = ?, query_attempts = ?,
@@ -578,10 +602,11 @@ class WebLookupRepository:
                     run_id,
                     run.version,
                 ),
-            )
-        if cursor.rowcount != 1:
-            raise ValueError(f"WebLookupRun checkpoint conflicted: {run_id}")
-        return self._required(run_id)
+                )
+            if cursor.rowcount == 1:
+                return self._required(run_id)
+            checkpoint_context = context
+        raise ValueError(f"WebLookupRun checkpoint conflicted: {run_id}")
 
     def request_cancel(self, run_id: str) -> WebLookupRun:
         run = self._required(run_id)
