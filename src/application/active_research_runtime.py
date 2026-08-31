@@ -385,20 +385,21 @@ class ActiveResearchRuntimeExecutor:
             # value of this invocation's mark call - a crash between the late
             # checkpoint and the terminal complete must resume to the same
             # decision.
+            unapplied_steering = _unapplied_steering_blocks_completion(context)
             stop = ResearchStopGate.evaluate(
                 ResearchStopSignal(
                     gate_pass=gate.status == "pass",
                     hard_budget_exhausted=(
                         hard_exhausted
                     ),
-                    has_actionable_gaps=bool(open_gap_claims),
+                    has_actionable_gaps=(
+                        bool(open_gap_claims) or unapplied_steering
+                    ),
                     all_actionable_saturated=bool(open_gap_claims)
                     and open_gap_claims <= saturated_claims,
                     wave_limit_reached=wave_exhausted,
                     has_evidence=bool(state.evidence),
-                    unapplied_steering_blocks_completion=(
-                        _unapplied_steering_blocks_completion(context)
-                    ),
+                    unapplied_steering_blocks_completion=unapplied_steering,
                 )
             )
             if stop.decision == "continue":

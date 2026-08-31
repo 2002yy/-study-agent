@@ -3682,8 +3682,8 @@ def test_late_steering_terminal_crash_recomputes_same_stop_decision(
             ) is not None
 
     original_limit = art_mod.MAX_RESEARCH_WAVES
-    if terminal == "wave_limit_reached":
-        art_mod.MAX_RESEARCH_WAVES = 1
+    configured_limit = 1 if terminal == "wave_limit_reached" else original_limit
+    art_mod.MAX_RESEARCH_WAVES = configured_limit
     try:
         with pytest.raises(_SimulatedProcessDeath):
             _service(
@@ -3717,17 +3717,13 @@ def test_late_steering_terminal_crash_recomputes_same_stop_decision(
         art_mod.MAX_RESEARCH_WAVES = original_limit
 
     assert completed.status == "partial"
-    # Frozen priority (batch 2 settle chain): gate pass closes the gaps
-    # (_state_after_gate) and no-actionable-gaps ranks above the wave ceiling.
-    # So once the late steering suppresses the old graph's pass, the truthful
-    # terminal reason of the wave-ceiling case is evidence_gap_open, while the
-    # hard-budget case keeps its own higher-priority reason. The wave->wave_limit
-    # mapping without a closing gap is locked at the component level
-    # (test_late_steering_wave_ceiling_keeps_wave_terminal_truth).
+    # The late steering is itself an unapplied actionable direction. It blocks
+    # completion on the old graph without being forged into the claim graph,
+    # so the bounded terminal owner remains the exhausted hard/wave budget.
     expected_reason = (
         "evidence_budget_exhausted"
         if terminal == "hard_budget_exhausted"
-        else "evidence_gap_open"
+        else "wave_limit_exhausted"
     )
     assert completed.stop_reason == expected_reason
     assert completed.stop_reason != "evidence_gate_pass"
@@ -3762,11 +3758,14 @@ def test_late_steering_terminal_crash_recomputes_same_stop_decision(
         hard_budget_exhausted=(
             clock.value >= rebuilt.budget.hard_timeout_seconds
         ),
-        has_actionable_gaps=bool(
-            art_mod._ordered_gaps(rebuilt)
+        has_actionable_gaps=(
+            bool(art_mod._ordered_gaps(rebuilt))
+            or art_mod._unapplied_steering_blocks_completion(
+                completed.research_context
+            )
         ),
         all_actionable_saturated=False,
-        wave_limit_reached=cursor.wave_index >= art_mod.MAX_RESEARCH_WAVES,
+        wave_limit_reached=cursor.wave_index >= configured_limit,
         has_evidence=bool(rebuilt.evidence),
         unapplied_steering_blocks_completion=(
             art_mod._unapplied_steering_blocks_completion(
