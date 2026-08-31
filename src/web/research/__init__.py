@@ -98,6 +98,14 @@ from src.web.research.scheduler import (
     ReadWaveStatus,
     plan_read_wave,
 )
+from src.web.research.failure_contracts import (
+    RESEARCH_FAILURE_CATALOG_VERSION,
+    RESEARCH_FAILURE_CODES,
+    RESEARCH_STOP_REASON_CATALOG_VERSION,
+    RESEARCH_STOP_REASONS,
+    ResearchFailureCode,
+    ResearchStopReason,
+)
 
 __all__ = [
     "RESEARCH_STATE_SCHEMA_VERSION",
@@ -170,4 +178,10 @@ __all__ = [
     "ReadWavePlan",
     "ReadWaveStatus",
     "plan_read_wave",
+    "RESEARCH_FAILURE_CATALOG_VERSION",
+    "RESEARCH_FAILURE_CODES",
+    "RESEARCH_STOP_REASON_CATALOG_VERSION",
+    "RESEARCH_STOP_REASONS",
+    "ResearchFailureCode",
+    "ResearchStopReason",
 ]
