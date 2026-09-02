@@ -36,14 +36,14 @@ function runDetail(run: ResearchLookupResponse): string {
   if (run.status === "failed") {
     return `${run.error || researchStopReasonDisplay(run.stop_reason, "本次研究未完成")}；重试会从已保存的进度继续`;
   }
-  if (run.stop_reason) {
-    return researchStopReasonDisplay(
-      run.stop_reason,
-      run.status === "partial" ? "部分结果不会自动用于下一轮聊天；你可以重试以补全研究" : "联网研究已结束",
-    );
-  }
   if (run.status === "partial") {
-    return "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
+    const safetyCopy = "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
+    if (!run.stop_reason) return safetyCopy;
+    const reasonDetail = researchStopReasonDisplay(run.stop_reason, "");
+    return reasonDetail ? `${reasonDetail} ${safetyCopy}` : safetyCopy;
+  }
+  if (run.stop_reason) {
+    return researchStopReasonDisplay(run.stop_reason, "联网研究已结束");
   }
   if (run.status === "cancelled") {
     return "已停止本次研究；需要时可从已保存的进度重试";
