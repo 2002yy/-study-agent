@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Trace WebLookupRun stop-reason producer values
+      - name: Resolve remaining WebLookupRun producer values
         run: |
           python - <<'PY'
           from __future__ import annotations
@@ -18,54 +18,37 @@ jobs:
           import ast
           from pathlib import Path
 
-          path = Path('src/application/web_lookup_service.py')
-          text = path.read_text(encoding='utf-8')
-          tree = ast.parse(text)
+          service_path = Path('src/application/web_lookup_service.py')
+          service_text = service_path.read_text(encoding='utf-8')
+          service_tree = ast.parse(service_text)
 
-          print('=== WEB LOOKUP SERVICE reason ASSIGNMENTS ===')
-          for node in ast.walk(tree):
-              if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                  targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                  value = node.value
-                  if value is None:
-                      continue
-                  for target in targets:
-                      if isinstance(target, ast.Name) and target.id == 'reason':
-                          print(f'{node.lineno}\t{ast.unparse(value)}')
-              if isinstance(node, ast.IfExp):
-                  # Surface literal leaves of conditional stop_reason expressions.
-                  pass
+          print('=== stop_reason_from_payloads ===')
+          for node in service_tree.body:
+              if isinstance(node, ast.FunctionDef) and node.name == 'stop_reason_from_payloads':
+                  print(ast.unparse(node))
 
-          print('=== WEB LOOKUP SERVICE stop_reason KW EXPRESSIONS ===')
-          for node in ast.walk(tree):
-              if not isinstance(node, ast.Call):
-                  continue
-              func = node.func.attr if isinstance(node.func, ast.Attribute) else (
-                  node.func.id if isinstance(node.func, ast.Name) else ''
-              )
-              if func not in {'complete', 'fail', 'checkpoint'}:
-                  continue
-              for kw in node.keywords:
-                  if kw.arg == 'stop_reason':
-                      print(f'{node.lineno}\t{func}\t{ast.unparse(kw.value)}')
-
-          print('=== ACTIVE STOP GATE / RUNTIME TERMINAL REASONS ===')
+          print('=== exact suspect-string occurrences in ResearchRun writer modules ===')
+          suspects = {
+              'empty',
+              'candidates_only',
+              'active_runtime_unavailable',
+              'providers_failed',
+              'no_tool_calls',
+              'insufficient_valid_sources',
+              'sources_read',
+              'sources_partially_read',
+              'source_reading_failed',
+          }
           for filename in [
-              'src/application/research_stop_gate.py',
+              'src/application/web_lookup_service.py',
               'src/application/active_research_runtime.py',
+              'src/application/research_stop_gate.py',
+              'src/repositories/web_lookup_repository.py',
+              'src/infrastructure/sqlite/database.py',
           ]:
-              source = Path(filename).read_text(encoding='utf-8')
-              module = ast.parse(source)
-              for node in ast.walk(module):
-                  if not isinstance(node, ast.Call):
-                      continue
-                  func = node.func.attr if isinstance(node.func, ast.Attribute) else (
-                      node.func.id if isinstance(node.func, ast.Name) else ''
-                  )
-                  if func not in {'ResearchStopDecision', '_terminal_unavailable'}:
-                      continue
-                  for kw in node.keywords:
-                      if kw.arg != 'reason':
-                          continue
-                      print(f'{filename}:{node.lineno}\t{func}\t{ast.unparse(kw.value)}')
+              text = Path(filename).read_text(encoding='utf-8')
+              for index, line in enumerate(text.splitlines(), 1):
+                  matched = sorted(value for value in suspects if value in line)
+                  if matched:
+                      print(f'{filename}:{index}\t{",".join(matched)}\t{line.strip()}')
           PY
