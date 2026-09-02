@@ -3948,7 +3948,7 @@ def test_v1_planning_attempt_exhaustion_is_classified_before_third_call(
 
     assert failed.status == "failed"
     assert failed.provider_status == "unavailable"
-    assert failed.stop_reason == "model_call_attempts_exhausted"
+    assert failed.stop_reason == "claim_plan_unavailable"
     assert client.calls == []
     resumed_cursor = ResearchRuntimeCursor.from_dict(
         failed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]

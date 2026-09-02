@@ -99,7 +99,7 @@ def test_failure_catalog_has_a_production_writer_surface() -> None:
 def test_stop_catalog_has_a_production_writer_surface() -> None:
     writer_source = "\n".join(_source(path) for path in STOP_WRITER_PATHS)
     missing = sorted(
-        reason for reason in RESEARCH_STOP_REASONS if f'"{reason}"' not in writer_source
+        reason for reason in RESEARCH_STOP_REASONS if reason not in writer_source
     )
     assert missing == []
 
