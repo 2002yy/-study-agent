@@ -10,6 +10,7 @@ from typing import Any
 
 from src.domain.runtime_entities import WebLookupRun, new_id, utc_now
 from src.infrastructure.sqlite.database import RuntimeDatabase
+from src.web.research.failure_contracts import require_research_stop_reason
 from src.web.research.steering import (
     append_active_steering,
     is_active_claim_engine_context,
@@ -20,6 +21,12 @@ from src.web.source_assessment import assess_sources
 
 def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _validated_stop_reason(value: str) -> str:
+    if not value:
+        return ""
+    return require_research_stop_reason(value)
 
 
 def _is_assessed_source(value: Any) -> bool:
@@ -69,6 +76,7 @@ class WebLookupRepository:
         self.database.initialize()
 
     def create(self, run: WebLookupRun) -> WebLookupRun:
+        stop_reason = _validated_stop_reason(run.stop_reason)
         run = replace(run, root_run_id=run.root_run_id or run.id)
         context = _with_operation(
             run.research_context,
@@ -100,7 +108,7 @@ class WebLookupRepository:
                     _dump(run.selected_sources),
                     _dump(run.rejected_sources),
                     run.provider_status,
-                    run.stop_reason,
+                    stop_reason,
                     run.answer_confidence,
                     _dump(run.items),
                     run.source_block,
@@ -134,6 +142,7 @@ class WebLookupRepository:
             raise ValueError(
                 "Follow-up child requires create_request_id, parent_run_id and owner_thread_id"
             )
+        stop_reason = _validated_stop_reason(run.stop_reason)
         context = _with_operation(
             run.research_context,
             max_items=max(1, min(int(run.max_items), 20)),
@@ -229,7 +238,7 @@ class WebLookupRepository:
                         _dump(child.selected_sources),
                         _dump(child.rejected_sources),
                         child.provider_status,
-                        child.stop_reason,
+                        stop_reason,
                         child.answer_confidence,
                         _dump(child.items),
                         child.source_block,
@@ -565,6 +574,7 @@ class WebLookupRepository:
         stop_reason: str = "",
         answer_confidence: str = "",
     ) -> WebLookupRun:
+        stop_reason = _validated_stop_reason(stop_reason)
         checkpoint_context = dict(research_context)
         for _attempt in range(4):
             run = self._required(run_id)
@@ -694,6 +704,7 @@ class WebLookupRepository:
         operation_id: str | None = None,
         final_status: str | None = None,
     ) -> WebLookupRun:
+        stop_reason = _validated_stop_reason(stop_reason)
         run = self._required(run_id)
         if operation_id is not None:
             self._assert_running_owner(run, operation_id)
@@ -784,6 +795,7 @@ class WebLookupRepository:
         stop_reason: str = "providers_failed",
         operation_id: str | None = None,
     ) -> WebLookupRun:
+        stop_reason = _validated_stop_reason(stop_reason)
         run = self._required(run_id)
         if operation_id is not None:
             self._assert_running_owner(run, operation_id)
