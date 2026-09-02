@@ -167,10 +167,11 @@ test("failed web research recovers in chat and grounds the next answer", async (
   await seedWorkspaceOnce(page, { webLookupRunId: RESEARCH_RUN_ID });
   await page.goto("/");
 
-  await expect(page.getByText("研究失败", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("联网研究工具链未完成；未把未经校验的结果当成结论。", { exact: true }),
-  ).toBeVisible();
+  const failedStatus = page.getByRole("status").filter({ hasText: "研究失败" });
+  await expect(failedStatus).toBeVisible();
+  await expect(failedStatus).toContainText(
+    "联网研究工具链未完成；未把未经校验的结果当成结论。",
+  );
   await expect(page.getByText(/provider timeout/)).toHaveCount(0);
   const retry = page.getByRole("button", { name: "重试研究" });
   await expect(retry).toBeVisible();
