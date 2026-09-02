@@ -26,15 +26,14 @@ function progressMetrics(progress: ChatResearchProgress): string {
 
 function terminalProgressDetail(progress: ChatResearchProgress): string {
   if (progress.status === "failed") {
-    const fallback = progress.error || "联网研究不可用";
-    return `${researchStopReasonDisplay(progress.stop_reason, fallback)} 本回答未使用联网来源中的未经校验内容。`;
+    return `${researchStopReasonDisplay(progress.stop_reason, "联网研究不可用")} 本回答未使用联网来源中的未经校验内容。`;
   }
   return researchStopReasonDisplay(progress.stop_reason, "联网研究已结束");
 }
 
 function runDetail(run: ResearchLookupResponse): string {
   if (run.status === "failed") {
-    return `${run.error || researchStopReasonDisplay(run.stop_reason, "本次研究未完成")}；重试会从已保存的进度继续`;
+    return `${researchStopReasonDisplay(run.stop_reason, "本次研究未完成")}；重试会从已保存的进度继续`;
   }
   if (run.status === "partial") {
     const safetyCopy = "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
