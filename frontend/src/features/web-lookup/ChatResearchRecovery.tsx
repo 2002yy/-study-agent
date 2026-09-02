@@ -1,6 +1,7 @@
 import { Loader2, RotateCcw } from "lucide-react";
 import type { ChatResearchProgress } from "../../types";
 import type { ResearchLookupResponse } from "./researchApi";
+import { researchStopReasonDisplay } from "./researchStopReason";
 
 const stageLabels: Record<string, string> = {
   planned: "正在规划研究",
@@ -14,15 +15,6 @@ const stageLabels: Record<string, string> = {
   cancelled: "研究已停止",
 };
 
-const stopReasonLabels: Record<string, string> = {
-  evidence_gate_pass: "Evidence Gate 已通过；本轮结论只使用通过校验的证据。",
-  evidence_gap_open: "Evidence Gate 未通过；仍有关键证据缺口，结论保持为部分结果。",
-  evidence_budget_exhausted: "研究预算已用尽；仍有关键证据缺口，结论保持为部分结果。",
-  active_runtime_unavailable: "主动研究链不可用；未把未经校验的结果当成结论。",
-  claim_planning_blocked_by_policy: "外部数据策略未授权研究规划；本轮未继续调用外部模型。",
-  user_cancelled: "已停止本次研究；已保存可确认的进度。",
-};
-
 function progressMetrics(progress: ChatResearchProgress): string {
   return [
     `候选 ${progress.candidate_count ?? 0}`,
@@ -34,25 +26,28 @@ function progressMetrics(progress: ChatResearchProgress): string {
 
 function terminalProgressDetail(progress: ChatResearchProgress): string {
   if (progress.status === "failed") {
-    return `${stopReasonLabels[progress.stop_reason] || progress.error || "联网研究不可用"} 本回答未使用联网来源中的未经校验内容。`;
+    return `${researchStopReasonDisplay(progress.stop_reason, "联网研究不可用")} 本回答未使用联网来源中的未经校验内容。`;
   }
-  return stopReasonLabels[progress.stop_reason] ?? progress.stop_reason ?? "联网研究已结束";
+  return researchStopReasonDisplay(progress.stop_reason, "联网研究已结束");
 }
 
 function runDetail(run: ResearchLookupResponse): string {
-  if (stopReasonLabels[run.stop_reason]) {
-    return stopReasonLabels[run.stop_reason];
+  if (run.status === "failed") {
+    return `${researchStopReasonDisplay(run.stop_reason, "本次研究未完成")}；重试会从已保存的进度继续`;
   }
   if (run.status === "partial") {
-    return "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
+    const safetyCopy = "部分结果不会自动用于下一轮聊天；你可以重试以补全研究";
+    if (!run.stop_reason) return safetyCopy;
+    const reasonDetail = researchStopReasonDisplay(run.stop_reason, "");
+    return reasonDetail ? `${reasonDetail} ${safetyCopy}` : safetyCopy;
   }
-  if (run.status === "failed") {
-    return `${run.error || "本次研究未完成"}；重试会从已保存的进度继续`;
+  if (run.stop_reason) {
+    return researchStopReasonDisplay(run.stop_reason, "联网研究已结束");
   }
   if (run.status === "cancelled") {
     return "已停止本次研究；需要时可从已保存的进度重试";
   }
-  return run.stop_reason || stageLabels[run.stage] || run.stage;
+  return stageLabels[run.stage] || "联网研究已结束";
 }
 
 function lineageDetails(run: ResearchLookupResponse) {

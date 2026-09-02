@@ -11,6 +11,15 @@ crash/resume re-evaluates the same decision.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+from src.web.research.failure_contracts import (
+    ResearchStopReason,
+    require_research_stop_reason,
+)
+
+ResearchStopDecisionKind = Literal["continue", "success", "partial", "unavailable"]
+ResearchStopReasonOrEmpty = ResearchStopReason | Literal[""]
 
 
 @dataclass(frozen=True)
@@ -29,8 +38,8 @@ class ResearchStopDecision:
     reason still comes only from this gate.
     """
 
-    decision: str
-    reason: str
+    decision: ResearchStopDecisionKind
+    reason: ResearchStopReasonOrEmpty
     final_status: str = ""
     provider_status: str = ""
     answer_confidence: str = ""
@@ -42,7 +51,10 @@ class ResearchStopSignal:
 
     The executor derives each signal from durable truth only (the checkpointed
     cursor, the persisted research state and the shared elapsed clock), so a
-    resumed run re-evaluates the same decision after a crash.
+    resumed run re-evaluates the same decision after a crash.  The unavailable
+    input intentionally remains ``str`` because callers may load compatibility
+    state; ``evaluate`` is the writer boundary that validates any non-empty
+    value before it can become a new durable stop reason.
     """
 
     gate_pass: bool
@@ -78,9 +90,12 @@ class ResearchStopGate:
     @staticmethod
     def evaluate(signal: ResearchStopSignal) -> ResearchStopDecision:
         if signal.unavailable_reason:
+            unavailable_reason = require_research_stop_reason(
+                signal.unavailable_reason
+            )
             return ResearchStopDecision(
                 decision="unavailable",
-                reason=signal.unavailable_reason,
+                reason=unavailable_reason,
                 final_status="failed",
                 provider_status="unavailable",
             )
@@ -133,3 +148,12 @@ class ResearchStopGate:
                 answer_confidence=partial_confidence,
             )
         return ResearchStopDecision(decision="continue", reason="")
+
+
+__all__ = [
+    "ResearchStopDecision",
+    "ResearchStopDecisionKind",
+    "ResearchStopGate",
+    "ResearchStopReasonOrEmpty",
+    "ResearchStopSignal",
+]

@@ -10,13 +10,13 @@ Two durable axes stay separate and never merge:
 The catalogs here are stable, versioned string contracts for **new writers**.
 They are deliberately not a closed validation gate for **readers**: legacy and
 future unknown values must stay readable (frozen 3A/7A/9A), so deserializers
-never validate against these catalogs.  ``require_research_failure_code`` is
-the writer-side guard; legacy readers use no catalog at all.
+never validate against these catalogs. Writer-side code uses the ``require_*``
+guards; legacy/future readers use no catalog validation at all.
 """
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 RESEARCH_FAILURE_CATALOG_VERSION: Final = "research-failure-catalog-v1"
 RESEARCH_STOP_REASON_CATALOG_VERSION: Final = "research-stop-reason-catalog-v1"
@@ -72,8 +72,11 @@ ResearchStopReason = Literal[
     "direct_results_found",
     "read_backed_tool_evidence_found",
     "search_candidates_only",
-    "empty",
-    "candidates_only",
+    "no_tool_calls",
+    "insufficient_valid_sources",
+    "sources_read",
+    "sources_partially_read",
+    "source_reading_failed",
     "chat_tool_loop_failed",
     "research_stage_failed",
     "legacy_run_interrupted",
@@ -95,8 +98,11 @@ RESEARCH_STOP_REASONS: Final[frozenset[str]] = frozenset(
         "direct_results_found",
         "read_backed_tool_evidence_found",
         "search_candidates_only",
-        "empty",
-        "candidates_only",
+        "no_tool_calls",
+        "insufficient_valid_sources",
+        "sources_read",
+        "sources_partially_read",
+        "source_reading_failed",
         "chat_tool_loop_failed",
         "research_stage_failed",
         "legacy_run_interrupted",
@@ -114,6 +120,18 @@ def require_research_failure_code(value: str) -> str:
     return value
 
 
+def is_research_stop_reason(value: str) -> bool:
+    return value in RESEARCH_STOP_REASONS
+
+
+def require_research_stop_reason(value: str) -> ResearchStopReason:
+    """Validate a new writer value without constraining legacy/future readers."""
+
+    if not isinstance(value, str) or value not in RESEARCH_STOP_REASONS:
+        raise ValueError(f"unknown research stop reason: {value!r}")
+    return cast(ResearchStopReason, value)
+
+
 __all__ = [
     "RESEARCH_FAILURE_CATALOG_VERSION",
     "RESEARCH_STOP_REASON_CATALOG_VERSION",
@@ -122,5 +140,7 @@ __all__ = [
     "ResearchFailureCode",
     "ResearchStopReason",
     "is_research_failure_code",
+    "is_research_stop_reason",
     "require_research_failure_code",
+    "require_research_stop_reason",
 ]

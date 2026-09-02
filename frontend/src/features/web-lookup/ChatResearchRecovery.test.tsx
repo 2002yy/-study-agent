@@ -150,7 +150,8 @@ describe("ChatResearchRecovery", () => {
 
     fireEvent.click(screen.getByRole("button"));
 
-    expect(container.textContent ?? "").toContain("provider timeout");
+    expect(container).toHaveTextContent("联网研究工具链未完成");
+    expect(container).not.toHaveTextContent("provider timeout");
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
