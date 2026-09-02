@@ -52,7 +52,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npx vitest run src/features/web-lookup/ChatResearchRecovery.test.tsx
+          npx vitest run src/features/web-lookup/ChatResearchRecovery.test.tsx src/features/web-lookup/researchStopReason.test.ts
           npm run build
 
       - name: Commit validated repair only
@@ -64,6 +64,7 @@ jobs:
             src/repositories/web_lookup_repository.py \
             tests/test_research_failure_state_matrix.py \
             frontend/src/features/web-lookup/researchStopReason.ts \
+            frontend/src/features/web-lookup/researchStopReason.test.ts \
             frontend/src/features/web-lookup/ChatResearchRecovery.tsx \
             frontend/src/features/web-lookup/ChatResearchRecovery.test.tsx
           git diff --cached --check
