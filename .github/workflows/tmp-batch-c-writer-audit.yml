@@ -10,66 +10,62 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enumerate actual stop-reason writers
+      - name: Trace WebLookupRun stop-reason producer values
         run: |
           python - <<'PY'
           from __future__ import annotations
 
           import ast
           from pathlib import Path
-          import re
 
-          root = Path('src')
-          hits: list[tuple[str, int, str, str]] = []
-          dynamic: list[tuple[str, int, str, str]] = []
+          path = Path('src/application/web_lookup_service.py')
+          text = path.read_text(encoding='utf-8')
+          tree = ast.parse(text)
 
-          for path in root.rglob('*.py'):
-              text = path.read_text(encoding='utf-8')
-              try:
-                  tree = ast.parse(text)
-              except SyntaxError:
+          print('=== WEB LOOKUP SERVICE reason ASSIGNMENTS ===')
+          for node in ast.walk(tree):
+              if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                  targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                  value = node.value
+                  if value is None:
+                      continue
+                  for target in targets:
+                      if isinstance(target, ast.Name) and target.id == 'reason':
+                          print(f'{node.lineno}\t{ast.unparse(value)}')
+              if isinstance(node, ast.IfExp):
+                  # Surface literal leaves of conditional stop_reason expressions.
+                  pass
+
+          print('=== WEB LOOKUP SERVICE stop_reason KW EXPRESSIONS ===')
+          for node in ast.walk(tree):
+              if not isinstance(node, ast.Call):
                   continue
-              for node in ast.walk(tree):
-                  if isinstance(node, ast.Call):
-                      func_name = ''
-                      if isinstance(node.func, ast.Name):
-                          func_name = node.func.id
-                      elif isinstance(node.func, ast.Attribute):
-                          func_name = node.func.attr
-                      for kw in node.keywords:
-                          if kw.arg == 'stop_reason':
-                              if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                                  hits.append((str(path), node.lineno, 'stop_reason kw', kw.value.value))
-                              else:
-                                  dynamic.append((str(path), node.lineno, 'stop_reason kw', ast.unparse(kw.value)))
-                          if kw.arg == 'reason' and func_name in {
-                              'ResearchStopDecision',
-                              '_terminal_unavailable',
-                              '_terminal_from_stop_decision',
-                          }:
-                              if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                                  hits.append((str(path), node.lineno, f'{func_name} reason kw', kw.value.value))
-                              else:
-                                  dynamic.append((str(path), node.lineno, f'{func_name} reason kw', ast.unparse(kw.value)))
-                  if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                      targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                      value = node.value
-                      if value is None:
-                          continue
-                      for target in targets:
-                          if isinstance(target, ast.Name) and target.id == 'stop_reason':
-                              if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                                  hits.append((str(path), node.lineno, 'stop_reason assign', value.value))
-                              else:
-                                  dynamic.append((str(path), node.lineno, 'stop_reason assign', ast.unparse(value)))
-              for match in re.finditer(r"stop_reason\s*=\s*'([a-z0-9_]+)'", text):
-                  line = text.count('\n', 0, match.start()) + 1
-                  hits.append((str(path), line, 'SQL stop_reason literal', match.group(1)))
+              func = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                  node.func.id if isinstance(node.func, ast.Name) else ''
+              )
+              if func not in {'complete', 'fail', 'checkpoint'}:
+                  continue
+              for kw in node.keywords:
+                  if kw.arg == 'stop_reason':
+                      print(f'{node.lineno}\t{func}\t{ast.unparse(kw.value)}')
 
-          print('=== LITERAL TERMINAL WRITERS ===')
-          for row in sorted(set(hits)):
-              print('\t'.join(map(str, row)))
-          print('=== DYNAMIC TERMINAL WRITERS ===')
-          for row in sorted(set(dynamic)):
-              print('\t'.join(map(str, row)))
+          print('=== ACTIVE STOP GATE / RUNTIME TERMINAL REASONS ===')
+          for filename in [
+              'src/application/research_stop_gate.py',
+              'src/application/active_research_runtime.py',
+          ]:
+              source = Path(filename).read_text(encoding='utf-8')
+              module = ast.parse(source)
+              for node in ast.walk(module):
+                  if not isinstance(node, ast.Call):
+                      continue
+                  func = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                      node.func.id if isinstance(node.func, ast.Name) else ''
+                  )
+                  if func not in {'ResearchStopDecision', '_terminal_unavailable'}:
+                      continue
+                  for kw in node.keywords:
+                      if kw.arg != 'reason':
+                          continue
+                      print(f'{filename}:{node.lineno}\t{func}\t{ast.unparse(kw.value)}')
           PY
