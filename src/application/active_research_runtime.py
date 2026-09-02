@@ -525,7 +525,7 @@ class ActiveResearchRuntimeExecutor:
                         selected_sources=selected_sources,
                         rejected_sources=rejected_sources,
                         warnings=warnings,
-                        reason="model_call_attempts_exhausted",
+                        reason="claim_plan_unavailable",
                     )
                 bootstrap = self.claim_planner.plan(
                     run_id=run_id,
@@ -563,7 +563,7 @@ class ActiveResearchRuntimeExecutor:
                         selected_sources=selected_sources,
                         rejected_sources=rejected_sources,
                         warnings=warnings,
-                        reason=bootstrap.reason or "claim_plan_unavailable",
+                        reason="claim_plan_unavailable",
                     )
                 state = bootstrap.state
                 # B5-H1: persist the completed model audit together with the
