@@ -56,8 +56,9 @@ jobs:
           )
           replace_once(
               "tests/test_research_failure_state_matrix.py",
-              '''    missing = sorted(\n        reason for reason in RESEARCH_STOP_REASONS if f'"{reason}"' not in writer_source\n    )''',
-              '''    missing = sorted(\n        reason\n        for reason in RESEARCH_STOP_REASONS\n        if re.search(rf'''["']{re.escape(reason)}["']''', writer_source) is None\n    )''',
+              '''        reason for reason in RESEARCH_STOP_REASONS if f'"{reason}"' not in writer_source''',
+              '''        reason for reason in RESEARCH_STOP_REASONS
+        if not any(f"{quote}{reason}{quote}" in writer_source for quote in ('"', "'"))''',
           )
           PY
       - name: Run focused contract tests
