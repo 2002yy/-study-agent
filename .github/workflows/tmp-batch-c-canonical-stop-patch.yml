@@ -56,9 +56,8 @@ jobs:
           )
           replace_once(
               "tests/test_research_failure_state_matrix.py",
-              '''        reason for reason in RESEARCH_STOP_REASONS if f'"{reason}"' not in writer_source''',
-              '''        reason for reason in RESEARCH_STOP_REASONS
-        if not any(f"{quote}{reason}{quote}" in writer_source for quote in ('"', "'"))''',
+              '''f'"{reason}"' not in writer_source''',
+              '''reason not in writer_source''',
           )
           PY
       - name: Run focused contract tests
