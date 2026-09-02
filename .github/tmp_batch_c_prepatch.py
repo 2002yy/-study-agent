@@ -44,3 +44,24 @@ source, count = pattern.subn("", source, count=1)
 if count != 1:
     raise SystemExit(f"expected one ambiguous repair-script block, found {count}")
 script.write_text(source, encoding="utf-8")
+
+ui_test = Path("frontend/src/features/web-lookup/researchStopReason.test.ts")
+text = ui_test.read_text(encoding="utf-8")
+old = (
+    '  "search_candidates_only",\n'
+    '  "empty",\n'
+    '  "candidates_only",\n'
+    '  "chat_tool_loop_failed",'
+)
+new = (
+    '  "search_candidates_only",\n'
+    '  "no_tool_calls",\n'
+    '  "insufficient_valid_sources",\n'
+    '  "sources_read",\n'
+    '  "sources_partially_read",\n'
+    '  "source_reading_failed",\n'
+    '  "chat_tool_loop_failed",'
+)
+if text.count(old) != 1:
+    raise SystemExit(f"expected one frontend canonical test block, found {text.count(old)}")
+ui_test.write_text(text.replace(old, new, 1), encoding="utf-8")
