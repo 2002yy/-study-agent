@@ -752,6 +752,20 @@ def recover_interrupted_model_attempt(
     inflight = cursor.inflight_model_call
     if inflight is None:
         return cursor
+    if cursor.schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V1:
+        # A v1 cursor can persist only (code, phase, item_id).  Preserve the
+        # legacy interruption code so a recovery checkpoint followed by
+        # another process death still advances the bounded attempt counter.
+        failure = RuntimeFailure(
+            code="interrupted_unknown",
+            phase=cursor.phase,
+            item_id=inflight.call_id,
+        )
+        return replace(
+            cursor,
+            inflight_model_call=None,
+            failures=append_runtime_failure(cursor.failures, failure),
+        )
     code: ResearchFailureCode
     if inflight.purpose == "research_claim_planning":
         code = "claim_planning_failed"
@@ -805,6 +819,17 @@ def recover_interrupted_external_attempt(
     inflight = cursor.inflight_external_call
     if inflight is None:
         return cursor
+    if cursor.schema_version == RESEARCH_RUNTIME_SCHEMA_VERSION_V1:
+        failure = RuntimeFailure(
+            code="interrupted_unknown",
+            phase=cursor.phase,
+            item_id=inflight.call_id,
+        )
+        return replace(
+            cursor,
+            inflight_external_call=None,
+            failures=append_runtime_failure(cursor.failures, failure),
+        )
     code: ResearchFailureCode = (
         "search_failed" if inflight.purpose == "search" else "read_failed"
     )
