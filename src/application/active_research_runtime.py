@@ -500,6 +500,33 @@ class ActiveResearchRuntimeExecutor:
                         warnings=warnings,
                         reason="claim_planning_blocked_by_policy",
                     )
+                planning_logical_call_id = f"research_claim_plan:{run.id}:1"
+                try:
+                    planning_attempt_start = _model_attempt_start(
+                        cursor,
+                        planning_logical_call_id,
+                    )
+                except _ModelAttemptBudgetExhausted:
+                    _append_failure(
+                        "model_attempts_exhausted",
+                        "planning",
+                        logical_call_id=planning_logical_call_id,
+                        item_id="research_claim_planning",
+                        detail="model_call_attempts_exhausted",
+                    )
+                    checkpoint()
+                    return self._terminal_unavailable(
+                        run_id,
+                        operation_id=operation_id,
+                        context=context,
+                        cursor=cursor,
+                        state=state,
+                        query_attempts=query_attempts,
+                        selected_sources=selected_sources,
+                        rejected_sources=rejected_sources,
+                        warnings=warnings,
+                        reason="model_call_attempts_exhausted",
+                    )
                 bootstrap = self.claim_planner.plan(
                     run_id=run_id,
                     question=run.query,
@@ -509,10 +536,7 @@ class ActiveResearchRuntimeExecutor:
                     timeout_seconds=remaining_timeout(),
                     on_attempt_started=on_model_started,
                     on_attempt_finished=on_model_finished,
-                    attempt_start=_model_attempt_start(
-                        cursor,
-                        f"research_claim_plan:{run.id}:1",
-                    ),
+                    attempt_start=planning_attempt_start,
                 )
                 ensure_active()
                 if not bootstrap.completed or bootstrap.state is None:
