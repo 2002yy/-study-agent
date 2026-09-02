@@ -179,6 +179,30 @@ jobs:
           tail -240 frontend.log
           exit 1
 
+      - name: Install Playwright browsers
+        id: playwright_install
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npx playwright install --with-deps chromium firefox webkit > ../playwright-install.log 2>&1
+
+      - name: Upload Playwright install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-install-log
+          path: playwright-install.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce Playwright browser install
+        if: steps.playwright_install.outcome == 'failure'
+        run: |
+          tail -300 playwright-install.log
+          exit 1
+
       - name: Run browser Golden Journeys
         id: browser_e2e
         continue-on-error: true
@@ -186,11 +210,7 @@ jobs:
         working-directory: frontend
         run: |
           set -o pipefail
-          {
-            npm install --no-save --package-lock=false @playwright/test@1.55.0
-            npx playwright install --with-deps chromium firefox webkit
-            npm run test:e2e
-          } > ../browser-e2e.log 2>&1
+          npm run test:e2e > ../browser-e2e.log 2>&1
 
       - name: Upload browser Golden Journey diagnostics
         if: always()
