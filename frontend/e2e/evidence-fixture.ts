@@ -379,7 +379,7 @@ function failedResearchRun() {
     selected_sources: [],
     rejected_sources: [],
     provider_status: "provider_failed",
-    stop_reason: "provider_timeout",
+    stop_reason: "chat_tool_loop_failed",
     answer_confidence: "",
     items: [],
     source_block: "",

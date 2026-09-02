@@ -420,7 +420,7 @@ class WebLookupRepository:
                 """
                 UPDATE web_lookup_runs
                 SET stage = ?, status = 'running', research_context = ?,
-                    error = '', completed_at = NULL, updated_at = ?,
+                    stop_reason = '', error = '', completed_at = NULL, updated_at = ?,
                     version = version + 1
                 WHERE id = ? AND version = ?
                 """,
