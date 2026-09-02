@@ -6,7 +6,11 @@ from typing import Any
 
 import pytest
 
-from src.application.active_research_runtime import _model_attempt_start
+from src.application.active_research_runtime import (
+    _ExternalAttemptBudgetExhausted,
+    _attempt_number,
+    _model_attempt_start,
+)
 from src.web.research.claim_planner import (
     RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
     RuntimeClaimPlanner,
@@ -23,7 +27,9 @@ from src.web.research.runtime import (
     RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
     ResearchRuntimeCursor,
     RuntimeCandidate,
+    RuntimeExternalPurpose,
     RuntimeExternalAttemptStart,
+    RuntimePhase,
     RuntimePlannedQuery,
     RuntimeQueryOutcome,
     attach_runtime_cursor,
@@ -508,6 +514,112 @@ def test_inflight_external_call_recovers_as_interrupted_unknown() -> None:
     assert failure.detail == "interrupted_unknown"
     assert failure.attempt_id == marker.call_id
     assert failure.failure_id
+
+
+def test_v1_model_recovery_checkpoint_preserves_attempt_two_marker() -> None:
+    cursor = ResearchRuntimeCursor(
+        phase="planning", schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    )
+    recovered = recover_interrupted_model_attempt(
+        begin_model_attempt(cursor, _attempt_marker())
+    )
+
+    checkpointed = ResearchRuntimeCursor.from_dict(recovered.to_dict())
+
+    assert checkpointed.failures[-1].code == "interrupted_unknown"
+    assert checkpointed.failures[-1].legacy_input is True
+    assert _model_attempt_start(checkpointed, "logical") == 2
+
+
+@pytest.mark.parametrize("purpose,phase", [("read", "reading"), ("search", "searching")])
+def test_v1_external_recovery_checkpoint_preserves_attempt_two_marker(
+    purpose: RuntimeExternalPurpose,
+    phase: RuntimePhase,
+) -> None:
+    item_id = f"{purpose}-item"
+    marker = RuntimeExternalAttemptStart(
+        call_id=f"research_{purpose}:run-1:{item_id}:attempt:1",
+        purpose=purpose,
+        item_id=item_id,
+        attempt=1,
+        started_at="2026-09-01T00:00:00+00:00",
+    )
+    cursor = ResearchRuntimeCursor(
+        phase=phase,
+        schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+    )
+    recovered = recover_interrupted_external_attempt(
+        begin_external_attempt(cursor, marker)
+    )
+
+    checkpointed = ResearchRuntimeCursor.from_dict(recovered.to_dict())
+
+    assert checkpointed.failures[-1].code == "interrupted_unknown"
+    assert _attempt_number(checkpointed, item_id) == 2
+
+
+def test_v1_second_model_interruption_never_allows_attempt_three() -> None:
+    cursor = ResearchRuntimeCursor(
+        phase="planning", schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1
+    )
+    first = ResearchRuntimeCursor.from_dict(
+        recover_interrupted_model_attempt(
+            begin_model_attempt(cursor, _attempt_marker())
+        ).to_dict()
+    )
+    second = ResearchRuntimeCursor.from_dict(
+        recover_interrupted_model_attempt(
+            begin_model_attempt(
+                first,
+                _attempt_marker("logical:attempt:2", attempt=2),
+            )
+        ).to_dict()
+    )
+
+    with pytest.raises(RuntimeError, match="model attempts exhausted"):
+        _model_attempt_start(second, "logical")
+
+
+@pytest.mark.parametrize("purpose,phase", [("read", "reading"), ("search", "searching")])
+def test_v1_second_external_interruption_never_reuses_consumed_call(
+    purpose: RuntimeExternalPurpose,
+    phase: RuntimePhase,
+) -> None:
+    item_id = f"{purpose}-item"
+    cursor = ResearchRuntimeCursor(
+        phase=phase,
+        schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+    )
+    first_marker = RuntimeExternalAttemptStart(
+        call_id=f"research_{purpose}:run-1:{item_id}:attempt:1",
+        purpose=purpose,
+        item_id=item_id,
+        attempt=1,
+        started_at="2026-09-01T00:00:00+00:00",
+    )
+    first = ResearchRuntimeCursor.from_dict(
+        recover_interrupted_external_attempt(
+            begin_external_attempt(cursor, first_marker)
+        ).to_dict()
+    )
+    second_marker = RuntimeExternalAttemptStart(
+        call_id=f"research_{purpose}:run-1:{item_id}:attempt:2",
+        purpose=purpose,
+        item_id=item_id,
+        attempt=2,
+        started_at="2026-09-01T00:00:01+00:00",
+    )
+    second = ResearchRuntimeCursor.from_dict(
+        recover_interrupted_external_attempt(
+            begin_external_attempt(first, second_marker)
+        ).to_dict()
+    )
+
+    with pytest.raises(
+        _ExternalAttemptBudgetExhausted,
+        match="external attempts exhausted",
+    ):
+        _attempt_number(second, item_id)
 
 
 def test_pre_b5_v1_cursor_loads_with_no_external_call_inflight() -> None:

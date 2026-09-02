@@ -22,6 +22,17 @@ Batch B local closure (implementation commit `7f5eb7d`, pushed; CI pending):
 - Deferred to Batch C: StopGate typing, API/UI mapping and full
   writer-code-stop-consumer matrix acceptance.
 
+Post-merge P2 finding and hotfix (2026-09-02):
+
+- PR #139 merged before the delayed review thread identified that canonical v2
+  interruption metadata is not representable in the v1 three-field wire shape.
+- Hotfix rule: v1 recovery alone preserves `code="interrupted_unknown"`; v2
+  recovery remains stage-specific canonical code with interruption detail and
+  attempt identity.
+- Two interrupted external attempts are terminally projected as bounded
+  `search_failed` / `read_failed`; attempt 2 is never physically repeated.
+- Batch C stays blocked until hotfix exact-head and exact-main CI are green.
+
 ## src\api\routes\chat_routes.py
 
 - `src\api\routes\chat_routes.py:165: type(exc).__name__: {"message": str(exc), "error_type": type(exc).__name__},`

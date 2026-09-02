@@ -123,6 +123,10 @@ class _ModelAttemptBudgetExhausted(RuntimeError):
     pass
 
 
+class _ExternalAttemptBudgetExhausted(RuntimeError):
+    pass
+
+
 class ActiveResearchRuntimeExecutor:
     """Execute one active run under the durable WebLookupRun owner."""
 
@@ -496,6 +500,33 @@ class ActiveResearchRuntimeExecutor:
                         warnings=warnings,
                         reason="claim_planning_blocked_by_policy",
                     )
+                planning_logical_call_id = f"research_claim_plan:{run.id}:1"
+                try:
+                    planning_attempt_start = _model_attempt_start(
+                        cursor,
+                        planning_logical_call_id,
+                    )
+                except _ModelAttemptBudgetExhausted:
+                    _append_failure(
+                        "model_attempts_exhausted",
+                        "planning",
+                        logical_call_id=planning_logical_call_id,
+                        item_id="research_claim_planning",
+                        detail="model_call_attempts_exhausted",
+                    )
+                    checkpoint()
+                    return self._terminal_unavailable(
+                        run_id,
+                        operation_id=operation_id,
+                        context=context,
+                        cursor=cursor,
+                        state=state,
+                        query_attempts=query_attempts,
+                        selected_sources=selected_sources,
+                        rejected_sources=rejected_sources,
+                        warnings=warnings,
+                        reason="model_call_attempts_exhausted",
+                    )
                 bootstrap = self.claim_planner.plan(
                     run_id=run_id,
                     question=run.query,
@@ -505,10 +536,7 @@ class ActiveResearchRuntimeExecutor:
                     timeout_seconds=remaining_timeout(),
                     on_attempt_started=on_model_started,
                     on_attempt_finished=on_model_finished,
-                    attempt_start=_model_attempt_start(
-                        cursor,
-                        f"research_claim_plan:{run.id}:1",
-                    ),
+                    attempt_start=planning_attempt_start,
                 )
                 ensure_active()
                 if not bootstrap.completed or bootstrap.state is None:
@@ -624,7 +652,52 @@ class ActiveResearchRuntimeExecutor:
                     # be dropped by the pool cap, so stop before any external call.
                     if len(cursor.candidates) >= state.budget.max_candidates:
                         break
-                    attempt = _attempt_number(cursor, planned.id)
+                    try:
+                        attempt = _attempt_number(cursor, planned.id)
+                    except _ExternalAttemptBudgetExhausted:
+                        _append_failure(
+                            "search_failed",
+                            "searching",
+                            logical_call_id=(
+                                f"research_search:{run_id}:{planned.id}:attempts_exhausted"
+                            ),
+                            item_id=planned.id,
+                            detail="external_attempts_exhausted",
+                        )
+                        cursor = replace(
+                            cursor,
+                            query_outcomes=(
+                                *cursor.query_outcomes,
+                                RuntimeQueryOutcome(
+                                    query_id=planned.id,
+                                    status="unavailable",
+                                    result_count=0,
+                                    error_code="search_failed",
+                                ),
+                            ),
+                        )
+                        query_attempts.append(
+                            {
+                                "query": planned.query,
+                                "query_id": planned.id,
+                                "intent": planned.intent,
+                                "status": "unavailable",
+                                "reason": "external_attempts_exhausted",
+                                "result_count": 0,
+                                "providers_attempted": [],
+                                "provider_errors": [],
+                                "run_attempt": context["run_attempt"],
+                                "operation_id": operation_id,
+                                "influenced_by_steering": bool(
+                                    _steering_ids_for_claim(context, planned.claim_id)
+                                ),
+                                "steering_ids": list(
+                                    _steering_ids_for_claim(context, planned.claim_id)
+                                ),
+                            }
+                        )
+                        checkpoint()
+                        continue
                     marker = RuntimeExternalAttemptStart(
                         call_id=f"research_search:{run_id}:{planned.id}:attempt:{attempt}",
                         purpose="search",
@@ -951,7 +1024,46 @@ class ActiveResearchRuntimeExecutor:
                     ensure_budget()
                     candidate = _candidate_by_id(cursor, candidate_id)
                     source_limit = min(6000, state.budget.max_total_chars - used_chars)
-                    attempt = _attempt_number(cursor, candidate_id)
+                    try:
+                        attempt = _attempt_number(cursor, candidate_id)
+                    except _ExternalAttemptBudgetExhausted:
+                        _append_failure(
+                            "read_failed",
+                            "reading",
+                            logical_call_id=(
+                                f"research_read:{run_id}:{candidate_id}:attempts_exhausted"
+                            ),
+                            item_id=candidate_id,
+                            detail="external_attempts_exhausted",
+                        )
+                        cursor = replace(
+                            cursor,
+                            read_outcomes=(
+                                *cursor.read_outcomes,
+                                RuntimeReadOutcome(
+                                    candidate_id=candidate_id,
+                                    status="failed",
+                                    error_code="read_failed",
+                                ),
+                            ),
+                        )
+                        record = _source_record(
+                            candidate,
+                            plan_item,
+                            raw_read={
+                                "ok": False,
+                                "status": "failed",
+                                "url": candidate.url,
+                                "error": "external_attempts_exhausted",
+                                "content": "",
+                            },
+                        )
+                        _upsert_source(selected_sources, record)
+                        context.setdefault(ACTIVE_RESEARCH_METRICS_KEY, {})["reads"] = [
+                            outcome.to_dict() for outcome in cursor.read_outcomes
+                        ]
+                        checkpoint()
+                        continue
                     marker = RuntimeExternalAttemptStart(
                         call_id=f"research_read:{run_id}:{candidate_id}:attempt:{attempt}",
                         purpose="read",
@@ -2440,7 +2552,11 @@ def _attempt_number(cursor: ResearchRuntimeCursor, item_id: str) -> int:
         _is_interrupted_failure(failure) and item_id in failure.item_id
         for failure in cursor.failures
     )
-    return min(2, 1 + interrupted)
+    if interrupted >= 2:
+        raise _ExternalAttemptBudgetExhausted(
+            f"external attempts exhausted for item: {item_id}"
+        )
+    return 1 + interrupted
 
 
 def _model_attempt_start(

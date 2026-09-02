@@ -3887,3 +3887,85 @@ def test_late_steering_terminal_crash_recomputes_same_stop_decision(
     )
     assert ResearchStopGate.evaluate(rebuilt_signal).reason == expected_reason
     assert rebuilt_signal.unapplied_steering_blocks_completion is True
+
+def test_v1_planning_attempt_exhaustion_is_classified_before_third_call(
+    tmp_path: Any,
+) -> None:
+    from src.web.research.claim_planner import RUNTIME_CLAIM_PLAN_SCHEMA_VERSION
+    from src.web.research.model_gateway import ResearchModelAttemptStart
+    from src.web.research.runtime import (
+        RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+        attach_runtime_cursor,
+        begin_model_attempt,
+        recover_interrupted_model_attempt,
+    )
+
+    run_id = "run_active_v1_planning_exhaustion"
+    logical_call_id = f"research_claim_plan:{run_id}:1"
+    cursor = ResearchRuntimeCursor(
+        phase="planning",
+        schema_version=RESEARCH_RUNTIME_SCHEMA_VERSION_V1,
+    )
+    for attempt in (1, 2):
+        marker = ResearchModelAttemptStart(
+            call_id=f"{logical_call_id}:attempt:{attempt}",
+            logical_call_id=logical_call_id,
+            purpose="research_claim_planning",
+            provider_profile="openai",
+            model_profile="flash",
+            model_name="test-model",
+            attempt=attempt,
+            started_at=f"2026-09-02T11:0{attempt}:00+00:00",
+            response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+            input_sha256="a" * 64,
+            input_chars=12,
+            data_categories=("user_question",),
+            data_counts=(("user_question", 1),),
+        )
+        cursor = ResearchRuntimeCursor.from_dict(
+            recover_interrupted_model_attempt(
+                begin_model_attempt(cursor, marker)
+            ).to_dict()
+        )
+
+    context = attach_runtime_cursor(_active_context(), cursor)
+    repository = _TrackingRepository(
+        RuntimeDatabase(tmp_path / "active-v1-planning-exhaustion.sqlite")
+    )
+    run = repository.create(
+        WebLookupRun(
+            id=run_id,
+            query="What is the verified current release date?",
+            stage="planned",
+            status="pending",
+            research_context=context,
+            max_items=5,
+        )
+    )
+    client = _StructuredClient()
+
+    failed = _service(repository, client).execute(run.id, raise_on_error=True)
+
+    assert failed.status == "failed"
+    assert failed.provider_status == "unavailable"
+    assert failed.stop_reason == "model_call_attempts_exhausted"
+    assert client.calls == []
+    resumed_cursor = ResearchRuntimeCursor.from_dict(
+        failed.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
+    )
+    planning_failures = [
+        failure
+        for failure in resumed_cursor.failures
+        if failure.code == "model_attempts_exhausted"
+        and failure.phase == "planning"
+    ]
+    assert len(planning_failures) == 1
+    assert planning_failures[0].item_id == "research_claim_planning"
+    assert not any(
+        failure.code == "runtime_internal_failed"
+        for failure in resumed_cursor.failures
+    )
+    assert not any(
+        failure.item_id.startswith(f"{logical_call_id}:attempt:3")
+        for failure in resumed_cursor.failures
+    )
