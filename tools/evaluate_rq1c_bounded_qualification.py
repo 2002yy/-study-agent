@@ -1,0 +1,251 @@
+"""Evaluate an RQ1-C bounded qualification artifact after independent review.
+
+This evaluator is deliberately separate from the live runner. The live runner never
+loads this rubric or the manual review file. A final GO requires all 12 truthfulness
+reviews, at least 10 quality passes, zero hard failures, zero runtime budget
+violations, and all deterministic protocol probes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RUBRIC_SCHEMA_VERSION = "rq1c-bounded-holdout-rubric-v1"
+RUNTIME_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
+REVIEW_SCHEMA_VERSION = "rq1c-bounded-independent-review-v1"
+PROTOCOL_SCHEMA_VERSION = "rq1c-bounded-protocol-probes-v1"
+REPORT_SCHEMA_VERSION = "rq1c-bounded-qualification-report-v1"
+DEFAULT_RUBRIC = (
+    REPO_ROOT
+    / "tests"
+    / "fixtures"
+    / "research_quality"
+    / "rq1c_bounded_holdout_rubric.json"
+)
+DEFAULT_OUTPUT = (
+    REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_REPORT.json"
+)
+_REQUIRED_PROBES = {
+    "provider_timeout_retry",
+    "user_cancellation",
+    "provider_http_429",
+    "provider_http_503",
+    "unreadable_page",
+    "duplicate_republication",
+}
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"expected object: {path}")
+    return value
+
+
+def _case_ids(records: Any, *, key: str = "case_id") -> list[str]:
+    if not isinstance(records, list):
+        raise ValueError("cases must be a list")
+    ids: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("case must be an object")
+        case_id = str(record.get(key) or "")
+        if not case_id or case_id in ids:
+            raise ValueError("invalid or duplicate case id")
+        ids.append(case_id)
+    return ids
+
+
+def _validate_rubric(rubric: dict[str, Any]) -> tuple[set[str], dict[str, int]]:
+    if rubric.get("schema_version") != RUBRIC_SCHEMA_VERSION:
+        raise ValueError("unsupported RQ1-C rubric schema")
+    ids = set(_case_ids(rubric.get("cases"), key="id"))
+    if len(ids) != 12:
+        raise ValueError("RQ1-C rubric must define exactly 12 cases")
+    gate = rubric.get("gate")
+    if not isinstance(gate, dict):
+        raise ValueError("RQ1-C rubric gate missing")
+    frozen = {
+        "truthfulness_required": 12,
+        "quality_required": 10,
+        "hard_failures_allowed": 0,
+        "max_candidates": 20,
+        "max_reads": 8,
+        "max_model_calls": 6,
+        "soft_timeout_seconds": 45,
+        "hard_timeout_seconds": 60,
+    }
+    for key, expected in frozen.items():
+        if int(gate.get(key, -1)) != expected:
+            raise ValueError(f"RQ1-C rubric changed frozen gate: {key}")
+    return ids, frozen
+
+
+def _validate_runtime(runtime: dict[str, Any], rubric_ids: set[str]) -> tuple[int, int]:
+    if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
+        raise ValueError("unsupported RQ1-C runtime artifact schema")
+    leakage = runtime.get("leakage_contract")
+    if not isinstance(leakage, dict):
+        raise ValueError("runtime artifact missing leakage contract")
+    if leakage.get("rubric_loaded_by_runner") is not False:
+        raise ValueError("runtime runner loaded evaluation rubric")
+    if leakage.get("stores_research_query_text") is not False:
+        raise ValueError("runtime artifact may not store research query text")
+    records = runtime.get("cases")
+    runtime_ids = set(_case_ids(records))
+    if runtime_ids != rubric_ids:
+        raise ValueError("runtime/rubric case ids differ")
+    runner_errors = 0
+    budget_violations = 0
+    for record in records:
+        if record.get("runner_error_type"):
+            runner_errors += 1
+        violations = record.get("budget_contract_violations")
+        if isinstance(violations, list) and violations:
+            budget_violations += 1
+        for audit in ((record.get("search") or {}).get("audits") or []):
+            if not isinstance(audit, dict):
+                continue
+            if "query" in audit or "query_text" in audit:
+                raise ValueError("runtime artifact leaked generated research query text")
+            digest = str(audit.get("query_sha256") or "")
+            if digest and (
+                len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+            ):
+                raise ValueError("invalid research query sha256")
+    return runner_errors, budget_violations
+
+
+def _validate_review(
+    review: dict[str, Any], runtime_path: Path, ids: set[str]
+) -> tuple[int, int, int]:
+    if review.get("schema_version") != REVIEW_SCHEMA_VERSION:
+        raise ValueError("unsupported RQ1-C independent review schema")
+    expected_sha = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    if review.get("runtime_artifact_sha256") != expected_sha:
+        raise ValueError("independent review is not bound to this runtime artifact")
+    records = review.get("cases")
+    review_ids = set(_case_ids(records))
+    if review_ids != ids:
+        raise ValueError("review/runtime case ids differ")
+    truthful = 0
+    quality = 0
+    hard_failures = 0
+    for record in records:
+        truth = record.get("truthfulness")
+        quality_value = record.get("quality")
+        failures = record.get("hard_failures")
+        if truth not in {"pass", "fail"} or quality_value not in {"pass", "fail"}:
+            raise ValueError("review verdicts must be pass/fail")
+        if not isinstance(failures, list):
+            raise ValueError("review hard_failures must be a list")
+        truthful += int(truth == "pass")
+        quality += int(quality_value == "pass")
+        hard_failures += len(failures)
+    return truthful, quality, hard_failures
+
+
+def _validate_protocol(protocol: dict[str, Any]) -> tuple[int, list[str]]:
+    if protocol.get("schema_version") != PROTOCOL_SCHEMA_VERSION:
+        raise ValueError("unsupported RQ1-C protocol probe schema")
+    records = protocol.get("probes")
+    if not isinstance(records, list):
+        raise ValueError("protocol probes must be a list")
+    seen: set[str] = set()
+    failed: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("protocol probe must be an object")
+        probe_id = str(record.get("id") or "")
+        if probe_id in seen or probe_id not in _REQUIRED_PROBES:
+            raise ValueError(f"invalid or duplicate protocol probe: {probe_id}")
+        seen.add(probe_id)
+        if record.get("status") != "pass":
+            failed.append(probe_id)
+    missing = sorted(_REQUIRED_PROBES - seen)
+    if missing:
+        raise ValueError(f"missing protocol probes: {missing}")
+    return len(seen), failed
+
+
+def evaluate(
+    *,
+    runtime_path: Path,
+    rubric_path: Path,
+    review_path: Path,
+    protocol_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    runtime = _load_json(runtime_path)
+    rubric = _load_json(rubric_path)
+    review = _load_json(review_path)
+    protocol = _load_json(protocol_path)
+    ids, gate = _validate_rubric(rubric)
+    runner_errors, budget_violations = _validate_runtime(runtime, ids)
+    truthful, quality, hard_failures = _validate_review(review, runtime_path, ids)
+    probe_count, failed_probes = _validate_protocol(protocol)
+    checks = {
+        "truthfulness": truthful == gate["truthfulness_required"],
+        "quality": quality >= gate["quality_required"],
+        "hard_failures": hard_failures == gate["hard_failures_allowed"],
+        "runner_errors": runner_errors == 0,
+        "runtime_budget": budget_violations == 0,
+        "protocol_probes": not failed_probes and probe_count == len(_REQUIRED_PROBES),
+    }
+    report = {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "inputs": {
+            "runtime_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+            "rubric_sha256": hashlib.sha256(rubric_path.read_bytes()).hexdigest(),
+            "review_sha256": hashlib.sha256(review_path.read_bytes()).hexdigest(),
+            "protocol_sha256": hashlib.sha256(protocol_path.read_bytes()).hexdigest(),
+        },
+        "scores": {
+            "truthfulness": f"{truthful}/12",
+            "quality": f"{quality}/12",
+            "hard_failures": hard_failures,
+            "runner_error_cases": runner_errors,
+            "budget_violation_cases": budget_violations,
+            "failed_protocol_probes": failed_probes,
+        },
+        "checks": checks,
+        "decision": "GO" if all(checks.values()) else "NO-GO",
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return report
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument("--rubric", type=Path, default=DEFAULT_RUBRIC)
+    parser.add_argument("--review", type=Path, required=True)
+    parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    report = evaluate(
+        runtime_path=args.runtime.resolve(),
+        rubric_path=args.rubric.resolve(),
+        review_path=args.review.resolve(),
+        protocol_path=args.protocol.resolve(),
+        output_path=args.output.resolve(),
+    )
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0 if report["decision"] == "GO" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
