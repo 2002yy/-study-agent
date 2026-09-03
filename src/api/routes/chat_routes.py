@@ -18,7 +18,11 @@ from src.api.models.chat import (
     CommitTurnResponse,
     TurnStatusResponse,
 )
-from src.application.chat_service import ChatService, TurnCancelled
+from src.application.chat_service import (
+    ChatService,
+    TurnCancelled,
+    answer_validation_active,
+)
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
 from src.application.research_evidence import (
@@ -194,8 +198,10 @@ async def chat_stream_endpoint(
             # RQ1-C answer batch: research-backed turns buffer the whole
             # candidate until the publication gate passes; nothing is flushed
             # before complete_turn returns the verified text.  Binding failure
-            # therefore emits zero candidate tokens.
-            buffered_validation = prepared.answer_validation is not None
+            # therefore emits zero candidate tokens.  The predicate is the
+            # same one the gate itself uses, so policy-denied turns stream
+            # token-by-token like ordinary chat.
+            buffered_validation = answer_validation_active(prepared)
             web_tools = prepared.rag.get("web_tools")
             if (
                 isinstance(web_tools, dict)

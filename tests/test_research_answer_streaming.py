@@ -47,10 +47,17 @@ def _row(evidence_id: str = EVIDENCE_ID) -> dict[str, Any]:
     }
 
 
-def _payload(claims: list[dict[str, Any]], links: list[dict[str, Any]]) -> str:
+def _payload(
+    support: tuple[str, ...] = (EVIDENCE_ID,), *, refused: bool = False
+) -> str:
+    segment = {
+        "segment_ref": "s1",
+        "kind": "factual",
+        "status": "asserted",
+        "evidence_support": list(support),
+    }
     return json.dumps(
-        {"refused": False, "claims": claims, "claim_links": links},
-        ensure_ascii=False,
+        {"refused": refused, "segments": [segment]}, ensure_ascii=False
     )
 
 
@@ -70,6 +77,7 @@ def _service(
     refuse_binding: bool = False,
     plan: dict[str, Any] | None = None,
     user_input: str = "该版本发布了吗？",
+    deny_web_policy: bool = False,
 ) -> ChatService:
     async def async_tokens(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
         for token in tokens:
@@ -80,9 +88,7 @@ def _service(
     def sync_chat(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "answer_claim_binding":
             if refuse_binding:
-                return json.dumps(
-                    {"refused": True, "claims": [], "claim_links": []}
-                )
+                return json.dumps({"refused": True, "segments": []})
             return effective_plan["binding_json"]
         return "".join(tokens)
 
@@ -105,6 +111,10 @@ def _service(
 
     def gated_start_turn(command: Any) -> Any:
         prepared = original_start_turn(command)
+        route = prepared.route
+        if deny_web_policy:
+            route = {**route, "external_data_policy": {"web_allowed": False}}
+        prepared = replace(prepared, route=route)
         return replace(
             prepared,
             answer_validation={
@@ -145,10 +155,7 @@ def test_research_stream_passes_binding_and_flushes_once(runtime_test_context) -
     service = _service(
         runtime_test_context,
         tokens=("该版本已正式", "发布。"),
-        binding_json=_payload(
-            [{"id": "c1", "text": candidate, "kind": "factual", "status": "asserted", "source": "provider_structured"}],
-            [{"claim_id": "c1", "evidence_id": EVIDENCE_ID, "support_type": "direct_support", "confidence": 0.9}],
-        ),
+        binding_json=_payload(),
     )
     body = asyncio.run(
         _consume(
@@ -214,6 +221,35 @@ def test_plain_stream_keeps_emitting_tokens_immediately(runtime_test_context) ->
     assert 'event: token' in body
     assert "part" in body and " two" in body
     assert 'event: done' in body
+
+
+def test_policy_denied_turn_streams_tokens_immediately(runtime_test_context) -> None:
+    """P1: buffering predicate matches the gate's own activation predicate.
+
+    A web-policy-denied research turn keeps ordinary streaming semantics:
+    tokens arrive as they are generated (no single late flush) and no binder
+    provider call happens.
+    """
+    candidate = "该版本已正式发布。"
+    service = _service(
+        runtime_test_context,
+        tokens=("该版本已正式", "发布。"),
+        binding_json="",
+        deny_web_policy=True,
+    )
+    body = asyncio.run(
+        _consume(
+            service,
+            runtime_test_context.web_lookup_service,
+            runtime_test_context.session_service,
+            "policy-denied-stream-session",
+        )
+    )
+    # Two separate token events (per generated chunk), not one buffered flush.
+    assert body.count("event: token") >= 2
+    assert candidate in body
+    assert 'event: done' in body
+    assert RESEARCH_ANSWER_BLOCKED_COPY not in body
 
 
 async def _async_iter(values: tuple[str, ...]) -> AsyncIterator[str]:

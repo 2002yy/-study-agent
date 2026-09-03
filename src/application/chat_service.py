@@ -51,6 +51,27 @@ RESEARCH_ANSWER_BLOCKED_COPY = (
 )
 
 
+def _configured_llm_provider() -> str:
+    import os
+
+    return os.getenv("LLM_PROVIDER_PROFILE", "openai").strip().lower() or "openai"
+
+
+def answer_validation_active(prepared: PreparedChatTurn) -> bool:
+    """True when the publication gate actually runs for this turn.
+
+    Both the buffering decision (streaming) and the gate itself must use the
+    same predicate: a plan exists AND the G16 outbound decision did not deny
+    web research (denied turns run with ordinary non-research semantics).
+    """
+    if prepared.answer_validation is None:
+        return False
+    policy = prepared.route.get("external_data_policy")
+    if isinstance(policy, dict) and policy.get("web_allowed") is False:
+        return False
+    return True
+
+
 class TurnCancelled(Exception):
     """Raised at a cooperative checkpoint when a turn cancellation was accepted.
 
@@ -575,17 +596,46 @@ class ChatService:
         ):
             yield token
 
-    def _research_outbound_allowed(self, prepared: PreparedChatTurn) -> bool | None:
-        """Outbound policy grant for a research turn.
+    def _record_claim_binding_call(
+        self, prepared: PreparedChatTurn, *, outcome: str
+    ) -> None:
+        """G16 outbound audit for the binder provider call (P0-C).
 
-        ``None`` when no policy marker exists (plain ChatService callers);
-        ``False`` means the G16 decision denied web outbound, so the turn runs
-        with ordinary non-research semantics and no binder provider call.
+        The G16 policy layer must know that a real outbound happened beyond
+        answer generation.  Recorded only when a policy marker exists and a
+        physical provider call occurred; raw evidence/provider errors are never
+        stored here (the validation audit keeps canonical reasons only).
         """
         policy = prepared.route.get("external_data_policy")
         if not isinstance(policy, dict):
-            return None
-        return bool(policy.get("web_allowed"))
+            return
+        plan = prepared.answer_validation or {}
+        raw_rows = plan.get("evidence_rows") or ()
+        row_count = sum(1 for row in raw_rows if isinstance(row, dict))
+        calls = [
+            dict(item)
+            for item in policy.get("external_calls", [])
+            if isinstance(item, dict)
+            and item.get("purpose") != "answer_claim_binding"
+        ]
+        status = "completed" if outcome == "validated" else "rejected"
+        calls.append(
+            {
+                "call_id": "answer_claim_binding:1",
+                "purpose": "answer_claim_binding",
+                "provider": _configured_llm_provider(),
+                "data_categories": ["current_question", "web_results"],
+                "data_counts": {
+                    "current_question": 1,
+                    "web_results": row_count,
+                },
+                "status": status,
+                "result": status,
+            }
+        )
+        refreshed = {**policy, "external_calls": calls}
+        prepared.route["external_data_policy"] = refreshed
+        prepared.rag["external_data_policy"] = refreshed
 
     def _gate_research_answer(
         self,
@@ -691,6 +741,8 @@ class ChatService:
             "error_type": "",
         }
         snapshot = bound.snapshot
+        if bound.attempt_count > 0:
+            self._record_claim_binding_call(prepared, outcome=snapshot.status)
         if snapshot.status == "validated" and factual_claims_fully_bound(snapshot):
             binding_phase["outcome"] = PHASE_OUTCOME_PASSED
             return (
@@ -745,10 +797,7 @@ class ChatService:
     def complete_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
         gate_blocked_pedagogy = False
-        if (
-            prepared.answer_validation is not None
-            and self._research_outbound_allowed(prepared) is not False
-        ):
+        if answer_validation_active(prepared):
             reply, claims_snapshot, audit_phases, gate_blocked_pedagogy = (
                 self._gate_research_answer(prepared, reply)
             )

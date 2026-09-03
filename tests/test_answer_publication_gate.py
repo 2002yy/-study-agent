@@ -9,7 +9,7 @@ copy while the rejected audit truth is persisted in the same commit.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from src.application.chat_service import (
     RESEARCH_ANSWER_BLOCKED_COPY,
@@ -63,32 +63,51 @@ def _row(evidence_id: str = EVIDENCE_ID) -> dict[str, Any]:
     }
 
 
+def _segment_entry(
+    ref: str,
+    *,
+    kind: str = "factual",
+    status: str = "asserted",
+    support: Sequence[str] = (),
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {"segment_ref": ref, "kind": kind, "evidence_support": list(support)}
+    if status:
+        entry["status"] = status
+    return entry
+
+
 def _binding_payload(
-    claims: list[dict[str, Any]], links: list[dict[str, Any]]
+    segments: Sequence[dict[str, Any]],
+    *,
+    refused: bool = False,
+    segment_count: int = 1,
 ) -> str:
+    """Build a v2 payload covering exactly ``segment_count`` server segments.
+
+    Unlisted remaining segments (all factual by default) stay supported by the
+    first provided entry's evidence ids unless per-ref entries are given.
+    """
+    provided = {str(entry.get("segment_ref")) for entry in segments if isinstance(entry, dict)}
+    entries = [dict(entry) for entry in segments if isinstance(entry, dict)]
+    default_support: list[str] = []
+    for entry in entries:
+        if entry.get("segment_ref") == "s1":
+            default_support = list(entry.get("evidence_support") or [])
+            break
+    for index in range(1, segment_count + 1):
+        ref = f"s{index}"
+        if ref not in provided:
+            entries.append(
+                {
+                    "segment_ref": ref,
+                    "kind": "factual",
+                    "status": "asserted",
+                    "evidence_support": list(default_support),
+                }
+            )
     return json.dumps(
-        {"refused": False, "claims": claims, "claim_links": links},
-        ensure_ascii=False,
+        {"refused": refused, "segments": entries}, ensure_ascii=False
     )
-
-
-def _claim_payload(text: str, *, ref: str = "c1") -> dict[str, Any]:
-    return {
-        "id": ref,
-        "text": text,
-        "kind": "factual",
-        "status": "asserted",
-        "source": "provider_structured",
-    }
-
-
-def _link(claim_id: str, evidence_id: str) -> dict[str, Any]:
-    return {
-        "claim_id": claim_id,
-        "evidence_id": evidence_id,
-        "support_type": "direct_support",
-        "confidence": 0.9,
-    }
 
 
 def _command(
@@ -175,7 +194,7 @@ def _run_turn(
 
 def test_passed_binding_publishes_candidate_with_full_audit(tmp_path) -> None:
     """Answer generation and a passed binding are both authoritative-audited."""
-    calls = [_binding_payload([_claim_payload(CLAIM_TEXT)], [_link("c1", EVIDENCE_ID)])]
+    calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
     log = {"calls": 0, "tasks": []}
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
@@ -259,9 +278,7 @@ def test_retry_counts_every_physical_binder_call(tmp_path) -> None:
             calls["binding"] += 1
             if calls["binding"] == 1:
                 raise TimeoutError("transient timeout")
-            return _binding_payload(
-                [_claim_payload(ANSWER)], [_link("c1", EVIDENCE_ID)]
-            )
+            return _binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])
         return ANSWER
 
     service, repository = _service(tmp_path, chat_fn)
@@ -355,7 +372,7 @@ def test_client_forged_audit_is_replaced_on_load(tmp_path) -> None:
     store is rebuilt on load: bounded counts, canonical error tokens, and the
     learner hash is always recomputed from the assistant message that was kept.
     """
-    calls = [_binding_payload([_claim_payload(CLAIM_TEXT)], [_link("c1", EVIDENCE_ID)])]
+    calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         return calls.pop(0) if kwargs.get("task_name") == "answer_claim_binding" else CANDIDATE
@@ -434,8 +451,7 @@ def test_unknown_evidence_id_is_never_published(tmp_path) -> None:
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "answer_claim_binding":
             return _binding_payload(
-                [_claim_payload(CLAIM_TEXT)],
-                [_link("c1", "evidence_not_in_rows")],
+                [_segment_entry("s1", support=("evidence_not_in_rows",))]
             )
         return ANSWER
 
@@ -452,7 +468,10 @@ def test_strong_factual_claim_without_eligible_binding_is_not_published(
     """A strong factual claim with zero eligible evidence binding is blocked."""
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "answer_claim_binding":
-            return _binding_payload([_claim_payload(CLAIM_TEXT)], [])
+            # The only factual segment stays unbound: must fail closed.
+            return _binding_payload(
+                [_segment_entry("s1", support=())], segment_count=1
+            )
         return ANSWER
 
     service, repository = _service(tmp_path, chat_fn)
@@ -526,6 +545,13 @@ def test_web_policy_denied_never_calls_the_binder(tmp_path) -> None:
     assert calls["generation"] == 1
     turn = _turn(repository, prepared.turn.id)
     assert (turn.rag_snapshot or {}).get("answer_validation_audit") is None
+    policy = (turn.route_snapshot or {}).get("external_data_policy")
+    recorded = [
+        item
+        for item in (policy or {}).get("external_calls", [])
+        if isinstance(item, dict) and item.get("purpose") == "answer_claim_binding"
+    ]
+    assert recorded == []  # no outbound, no G16 binding record
 
 
 def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> None:
@@ -541,7 +567,7 @@ def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> 
         def evaluate(self, **kwargs: Any) -> SemanticEvaluation:
             raise AssertionError("semantic evaluation must not run in this test")
 
-    calls = [_binding_payload([_claim_payload(ANSWER)], [_link("c1", EVIDENCE_ID)])]
+    calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         return (
@@ -578,3 +604,121 @@ def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> 
     assert reply == ANSWER
     audit = _audit(turn)
     assert audit["phases"]["answer_claim_binding"]["outcome"] == "passed"
+
+
+def test_g16_audit_records_binding_outbound_on_passed_policy_turn(tmp_path) -> None:
+    """P0-C: G16 sees the binder outbound beyond answer generation."""
+    from src.pedagogy.evaluation import SemanticEvaluation
+    from src.task_contract import (
+        TaskAwarePedagogyEngine,
+        TaskAwarePedagogyEvaluationService,
+        route_request_with_task_contract,
+    )
+
+    class _FailingSemanticEvaluator:
+        def evaluate(self, **kwargs: Any) -> SemanticEvaluation:
+            raise AssertionError("semantic evaluation must not run in this test")
+
+    calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        return (
+            calls.pop(0)
+            if kwargs.get("task_name") == "answer_claim_binding"
+            else ANSWER
+        )
+
+    def retrieve(_query: str, **kwargs: Any) -> Any:
+        return _FakeRagResult()
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    dependencies = ChatDependencies(
+        route_request=route_request_with_task_contract,
+        read_memory_bundle=lambda _mode: {},
+        retrieve_local_knowledge=retrieve,
+        resolve_web_tools=lambda *args, **kwargs: WebToolTrace(enabled=False),
+        build_messages=lambda **kwargs: [
+            {"role": "system", "content": kwargs.get("rag_context", "")},
+            {"role": "user", "content": kwargs["user_input"]},
+        ],
+        pedagogy_engine=TaskAwarePedagogyEngine(),
+        pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
+            _FailingSemanticEvaluator()
+        ),
+        build_role_prompt=lambda *_args, **_kwargs: "ROLE",
+        chat=chat_fn,
+        chat_max_tokens=lambda performance_mode: 1000,
+    )
+    service = ExternalDataPolicyChatService(repository, dependencies)
+    reply, turn = _run_turn(
+        service, repository, _command(rows=[_row()], policy_service=True)
+    )
+    assert reply == ANSWER
+    policy = (turn.route_snapshot or {}).get("external_data_policy")
+    assert isinstance(policy, dict)
+    calls_recorded = [
+        item
+        for item in policy.get("external_calls", [])
+        if isinstance(item, dict)
+    ]
+    purposes = [item.get("purpose") for item in calls_recorded]
+    assert "answer_claim_binding" in purposes
+    binding = next(item for item in calls_recorded if item.get("purpose") == "answer_claim_binding")
+    assert binding["status"] == "completed"
+    assert binding["provider"]
+    assert binding["data_categories"] == ["current_question", "web_results"]
+    assert binding["data_counts"]["web_results"] == 1
+
+
+def test_g16_audit_records_rejected_binding_outcome(tmp_path) -> None:
+    """P0-C: a rejected binding is visible to G16 as rejected, no raw error."""
+    from src.pedagogy.evaluation import SemanticEvaluation
+    from src.task_contract import (
+        TaskAwarePedagogyEngine,
+        TaskAwarePedagogyEvaluationService,
+        route_request_with_task_contract,
+    )
+
+    class _FailingSemanticEvaluator:
+        def evaluate(self, **kwargs: Any) -> SemanticEvaluation:
+            raise AssertionError("semantic evaluation must not run in this test")
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        if kwargs.get("task_name") == "answer_claim_binding":
+            return json.dumps({"refused": True, "segments": []})
+        return ANSWER
+
+    def retrieve(_query: str, **kwargs: Any) -> Any:
+        return _FakeRagResult()
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    dependencies = ChatDependencies(
+        route_request=route_request_with_task_contract,
+        read_memory_bundle=lambda _mode: {},
+        retrieve_local_knowledge=retrieve,
+        resolve_web_tools=lambda *args, **kwargs: WebToolTrace(enabled=False),
+        build_messages=lambda **kwargs: [
+            {"role": "system", "content": kwargs.get("rag_context", "")},
+            {"role": "user", "content": kwargs["user_input"]},
+        ],
+        pedagogy_engine=TaskAwarePedagogyEngine(),
+        pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
+            _FailingSemanticEvaluator()
+        ),
+        build_role_prompt=lambda *_args, **_kwargs: "ROLE",
+        chat=chat_fn,
+        chat_max_tokens=lambda performance_mode: 1000,
+    )
+    service = ExternalDataPolicyChatService(repository, dependencies)
+    reply, turn = _run_turn(
+        service, repository, _command(rows=[_row()], policy_service=True)
+    )
+    assert reply == RESEARCH_ANSWER_BLOCKED_COPY
+    policy = (turn.route_snapshot or {}).get("external_data_policy")
+    binding = next(
+        item
+        for item in (policy or {}).get("external_calls", [])
+        if isinstance(item, dict) and item.get("purpose") == "answer_claim_binding"
+    )
+    assert binding["status"] == "rejected"
+    assert "producer_refused" not in json.dumps(binding)
