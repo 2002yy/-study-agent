@@ -23,6 +23,7 @@ from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
 from src.application.research_evidence import (
     research_binding_rows,
+    research_run_provenance,
     research_sources_snapshot,
 )
 from src.application.runtime_repository import (
@@ -602,12 +603,16 @@ def _chat_command(
         web_context = run.source_block
         web_context_run_id = run.id
         research_sources = research_sources_snapshot(run)
-        binding_rows = research_binding_rows(run)
-        answer_validation = (
-            {"evidence_rows": binding_rows, "allowed_attempts": 1}
-            if binding_rows
-            else None
-        )
+        # The validation plan is constructed only from the server-resolved
+        # ResearchRun object.  Provenance requires the claim-engine runtime
+        # traces on that object; rows may legitimately be empty (old or
+        # gated-out runs), in which case the gate fails closed instead of
+        # treating the turn as non-research.
+        if research_run_provenance(run):
+            answer_validation = {
+                "evidence_rows": research_binding_rows(run),
+                "allowed_attempts": 1,
+            }
     return PolicyChatCommand(
         user_input=request.user_input,
         selected_role=request.selected_role,

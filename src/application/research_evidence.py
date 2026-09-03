@@ -145,6 +145,32 @@ _MAX_BINDING_SEQUENCE_ITEMS = 6
 _MAX_BINDING_ITEM_CHARS = 300
 _BINDING_CONTEXT_KEY = "claim_engine_evidence_brief"
 _BINDING_EVIDENCE_KEY = "eligible_evidence"
+# Any of these durable research-runtime traces marks the run as a
+# claim-engine ResearchRun (provenance == research_run) even when the current
+# Evidence Brief carries zero eligible rows (old runs, gated-out runs).  Plain
+# search/tool-loop runs never contain them.
+_RESEARCH_PROVENANCE_KEYS = (
+    "claim_engine_evidence_brief",
+    "claim_engine_runtime",
+    "claim_engine_metrics",
+    "claim_engine_assessments",
+    "claim_engine_evidence",
+    "deep",
+)
+
+
+def research_run_provenance(run: Any) -> bool:
+    """True when the server-side run object is a claim-engine ResearchRun.
+
+    This is the only provenance gate for answer-validation plans: the caller
+    must already hold a real run resolved from the repository; a matching
+    context key on that object is required so look-alike fields can never be
+    mistaken for a ResearchRun.
+    """
+    context = getattr(run, "research_context", None)
+    if not isinstance(context, dict):
+        return False
+    return any(key in context for key in _RESEARCH_PROVENANCE_KEYS)
 
 
 def research_binding_rows(run: Any) -> list[dict[str, Any]]:
