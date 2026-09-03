@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ _REQUIRED_PROBES = {
     "duplicate_republication",
 }
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -89,9 +91,30 @@ def _validate_rubric(rubric: dict[str, Any]) -> tuple[set[str], dict[str, int]]:
     return ids, frozen
 
 
+def _answer_surface_is_reviewable(record: Mapping[str, Any]) -> bool:
+    answer = record.get("answer")
+    if not isinstance(answer, Mapping):
+        return False
+    status = str(answer.get("status") or "").strip()
+    if status != "available":
+        return False
+    if str(answer.get("source") or "").strip() != "production_chat":
+        return False
+    text = str(answer.get("text") or "")
+    if not text.strip():
+        return False
+    supplied_hash = str(answer.get("content_sha256") or "").strip().lower()
+    if not _HEX64.fullmatch(supplied_hash):
+        raise ValueError("reviewable final answer must include exact content sha256")
+    expected_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if supplied_hash != expected_hash:
+        raise ValueError("reviewable final answer content sha256 mismatch")
+    return True
+
+
 def _validate_runtime(
     runtime: dict[str, Any], rubric_ids: set[str]
-) -> tuple[int, int, str]:
+) -> tuple[int, int, int, str]:
     if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
         raise ValueError("unsupported RQ1-C runtime artifact schema")
     git_sha = _require_git_sha(runtime.get("git_sha"), "runtime artifact git_sha")
@@ -108,24 +131,23 @@ def _validate_runtime(
         raise ValueError("runtime/rubric case ids differ")
     runner_errors = 0
     budget_violations = 0
+    reviewable_answers = 0
     for record in records:
         if record.get("runner_error_type"):
             runner_errors += 1
         violations = record.get("budget_contract_violations")
         if isinstance(violations, list) and violations:
             budget_violations += 1
+        reviewable_answers += int(_answer_surface_is_reviewable(record))
         for audit in ((record.get("search") or {}).get("audits") or []):
             if not isinstance(audit, dict):
                 continue
             if "query" in audit or "query_text" in audit:
                 raise ValueError("runtime artifact leaked generated research query text")
             digest = str(audit.get("query_sha256") or "")
-            if digest and (
-                len(digest) != 64
-                or any(c not in "0123456789abcdef" for c in digest)
-            ):
+            if digest and not _HEX64.fullmatch(digest):
                 raise ValueError("invalid research query sha256")
-    return runner_errors, budget_violations, git_sha
+    return runner_errors, budget_violations, reviewable_answers, git_sha
 
 
 def _validate_review(
@@ -215,12 +237,18 @@ def evaluate(
     review = _load_json(review_path)
     protocol = _load_json(protocol_path)
     ids, gate = _validate_rubric(rubric)
-    runner_errors, budget_violations, runtime_git_sha = _validate_runtime(runtime, ids)
+    (
+        runner_errors,
+        budget_violations,
+        reviewable_answers,
+        runtime_git_sha,
+    ) = _validate_runtime(runtime, ids)
     truthful, quality, hard_failures = _validate_review(review, runtime_path, ids)
     probe_count, failed_probes = _validate_protocol(
         protocol, runtime_path, runtime_git_sha
     )
     checks = {
+        "answer_surface": reviewable_answers == len(ids),
         "truthfulness": truthful == gate["truthfulness_required"],
         "quality": quality >= gate["quality_required"],
         "hard_failures": hard_failures == gate["hard_failures_allowed"],
@@ -238,6 +266,7 @@ def evaluate(
             "protocol_sha256": hashlib.sha256(protocol_path.read_bytes()).hexdigest(),
         },
         "scores": {
+            "reviewable_answer_cases": f"{reviewable_answers}/12",
             "truthfulness": f"{truthful}/12",
             "quality": f"{quality}/12",
             "hard_failures": hard_failures,

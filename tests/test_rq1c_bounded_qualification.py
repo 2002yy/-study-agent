@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from tools.evaluate_rq1c_bounded_qualification import evaluate
-from tools.run_rq1c_bounded_qualification import _load_manifest
+from tools.run_rq1c_bounded_qualification import (
+    _evidence_rows,
+    _load_manifest,
+    _observed_read_count,
+    _provider_audit,
+    _source_rows,
+    _unavailable_answer_surface,
+)
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "research_quality"
 MANIFEST = FIXTURE_DIR / "rq1c_bounded_holdout_manifest.json"
@@ -33,6 +40,17 @@ def _rubric() -> dict[str, object]:
     return json.loads(RUBRIC.read_text(encoding="utf-8"))
 
 
+def _reviewable_answer(case_id: str) -> dict[str, str]:
+    text = f"synthetic production answer for evaluator contract: {case_id}"
+    return {
+        "status": "available",
+        "source": "production_chat",
+        "text": text,
+        "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "reason": "",
+    }
+
+
 def _runtime(case_ids: list[str]) -> dict[str, object]:
     return {
         "schema_version": "rq1c-bounded-qualification-runtime-v1",
@@ -48,6 +66,7 @@ def _runtime(case_ids: list[str]) -> dict[str, object]:
                 "case_id": case_id,
                 "runner_error_type": "",
                 "budget_contract_violations": [],
+                "answer": _reviewable_answer(case_id),
                 "search": {"audits": [{"query_sha256": "a" * 64}]},
             }
             for case_id in case_ids
@@ -140,14 +159,182 @@ def test_runtime_manifest_rejects_evaluation_fields(tmp_path: Path) -> None:
         _load_manifest(path)
 
 
+def test_provider_audit_projects_reason_and_attempts_without_raw_error_type() -> None:
+    rows = _provider_audit(
+        [
+            {
+                "query": "private generated query",
+                "providers_attempted": ["legacy-fallback"],
+                "provider_audit": {
+                    "providers_attempted": ["primary"],
+                    "provider_outcomes": [
+                        {
+                            "provider": "primary",
+                            "status": "unavailable",
+                            "reason": "http_503",
+                            "attempts": 2,
+                            "result_count": 0,
+                            "error_type": "must-not-project",
+                        }
+                    ],
+                },
+            }
+        ]
+    )
+
+    assert rows[0]["providers_attempted"] == ["primary"]
+    assert rows[0]["query_sha256"] == hashlib.sha256(
+        b"private generated query"
+    ).hexdigest()
+    assert rows[0]["provider_outcomes"] == [
+        {
+            "provider": "primary",
+            "status": "unavailable",
+            "reason": "http_503",
+            "attempts": 2,
+            "result_count": 0,
+        }
+    ]
+
+
+def test_source_projection_reads_nested_production_item_and_assessment() -> None:
+    rows = _source_rows(
+        [
+            {
+                "candidate_id": "candidate-1",
+                "item": {
+                    "title": "Primary source",
+                    "url": "https://example.test/source",
+                    "source": "example",
+                    "published_at": "2026-09-03",
+                },
+                "assessment": {
+                    "source_role": "primary",
+                    "source_cluster_id": "cluster-a",
+                },
+                "read_status": "read",
+                "extractions": {
+                    "claim-a": {"status": "eligible"},
+                    "claim-b": {"status": "rejected"},
+                },
+            }
+        ]
+    )
+
+    assert rows == [
+        {
+            "candidate_id": "candidate-1",
+            "title": "Primary source",
+            "url": "https://example.test/source",
+            "source": "example",
+            "published_at": "2026-09-03",
+            "read_status": "read",
+            "source_role": "primary",
+            "cluster_id": "cluster-a",
+            "extraction_statuses": ["eligible", "rejected"],
+        }
+    ]
+
+
+def test_evidence_projection_uses_actual_brief_fields_not_summary_or_excerpt() -> None:
+    rows = _evidence_rows(
+        {
+            "eligible_evidence": [
+                {
+                    "evidence_id": "e-1",
+                    "claim_id": "c-1",
+                    "relation": "direct_support",
+                    "strength": 0.9,
+                    "source_role": "primary",
+                    "source_cluster_id": "cluster-a",
+                    "title": "Primary source",
+                    "url": "https://example.test/source",
+                    "published_at": "2026-09-03",
+                    "locator": "section 2",
+                    "anchored_spans": ["bounded anchor"],
+                    "caveats": ["current as of date"],
+                    "excerpt": "legacy field must not be projected",
+                }
+            ]
+        }
+    )
+
+    assert rows[0]["source_cluster_id"] == "cluster-a"
+    assert rows[0]["locator"] == "section 2"
+    assert rows[0]["anchored_spans"] == ["bounded anchor"]
+    assert rows[0]["caveats"] == ["current as of date"]
+    assert "excerpt" not in rows[0]
+
+
+def test_read_budget_projection_prefers_production_success_metric() -> None:
+    runtime = {
+        "read_outcomes": [
+            {"status": "success"},
+            {"status": "failed"},
+            {"status": "failed"},
+        ]
+    }
+
+    assert _observed_read_count({"read_count": 1}, runtime) == 1
+    assert _observed_read_count({}, runtime) == 1
+
+
+def test_runner_marks_answer_surface_unavailable_until_production_capture() -> None:
+    assert _unavailable_answer_surface() == {
+        "status": "unavailable",
+        "source": "none",
+        "text": "",
+        "content_sha256": "",
+        "reason": "production_final_answer_not_captured",
+    }
+
+
 def test_independent_evaluator_can_reach_go_only_after_all_gates(tmp_path: Path) -> None:
     report = _evaluate_fixture_set(tmp_path)
 
     assert report["decision"] == "GO"
     assert report["inputs"]["git_sha"] == TEST_GIT_SHA  # type: ignore[index]
+    assert report["scores"]["reviewable_answer_cases"] == "12/12"  # type: ignore[index]
     assert report["scores"]["truthfulness"] == "12/12"  # type: ignore[index]
     assert report["scores"]["quality"] == "10/12"  # type: ignore[index]
     assert all(report["checks"].values())  # type: ignore[union-attr]
+
+
+def test_unavailable_final_answer_surface_forces_no_go(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["cases"][0]["answer"] = _unavailable_answer_surface()  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "NO-GO"
+    assert report["scores"]["reviewable_answer_cases"] == "11/12"  # type: ignore[index]
+    assert report["checks"]["answer_surface"] is False  # type: ignore[index]
+
+
+def test_missing_or_nonproduction_answer_surface_forces_no_go(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    del runtime["cases"][0]["answer"]  # type: ignore[index]
+    runtime["cases"][1]["answer"]["source"] = "qualification_side_generator"  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "NO-GO"
+    assert report["scores"]["reviewable_answer_cases"] == "10/12"  # type: ignore[index]
+    assert report["checks"]["answer_surface"] is False  # type: ignore[index]
+
+
+def test_reviewable_answer_hash_must_bind_exact_answer_text(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["cases"][0]["answer"]["content_sha256"] = "0" * 64  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="content sha256 mismatch"):
+        _evaluate_fixture_set(tmp_path, runtime=runtime)
 
 
 def test_review_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:

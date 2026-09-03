@@ -5,6 +5,11 @@ Evaluation rubric/gold is a separate file and is never imported or accepted as a
 runner argument. Each case drives the production active Claim Engine through a
 throwaway SQLite database. The artifact stores bounded public metadata, hashes
 research queries, and never stores page bodies or credentials.
+
+The current production research run is evidence-only. Until a production chat
+synthesis surface is captured, every case records an explicit unavailable answer
+surface; the independent evaluator must therefore fail closed rather than grade
+an Evidence Brief as though it were a learner-facing final answer.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -148,6 +153,23 @@ def _bounded(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
+def _bounded_sequence(value: Any, *, item_limit: int, max_items: int) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [
+        text
+        for item in value[:max_items]
+        if (text := _bounded(item, item_limit))
+    ]
+
+
+def _bounded_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _provider_audit(query_attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for attempt in query_attempts:
@@ -162,17 +184,24 @@ def _provider_audit(query_attempts: list[dict[str, Any]]) -> list[dict[str, Any]
                     {
                         "provider": _bounded(outcome.get("provider"), 80),
                         "status": _bounded(outcome.get("status"), 80),
-                        "result_count": int(outcome.get("result_count") or 0),
-                        "error_type": _bounded(outcome.get("error_type"), 120),
+                        "reason": _bounded(outcome.get("reason"), 160),
+                        "attempts": _bounded_int(outcome.get("attempts")),
+                        "result_count": _bounded_int(outcome.get("result_count")),
                     }
                 )
+        provider_source = (
+            audit.get("providers_attempted")
+            if isinstance(audit, Mapping)
+            else attempt.get("providers_attempted")
+        )
         rows.append(
             {
                 "query_sha256": _sha256_text(query) if query else "",
-                "providers_attempted": [
-                    _bounded(value, 80)
-                    for value in (attempt.get("providers_attempted") or [])
-                ],
+                "providers_attempted": _bounded_sequence(
+                    provider_source,
+                    item_limit=80,
+                    max_items=12,
+                ),
                 "provider_outcomes": outcomes,
             }
         )
@@ -184,16 +213,37 @@ def _source_rows(selected_sources: list[dict[str, Any]]) -> list[dict[str, Any]]
     for source in selected_sources:
         if not isinstance(source, Mapping):
             continue
+        item = source.get("item")
+        if not isinstance(item, Mapping):
+            item = {}
+        assessment = source.get("assessment")
+        if not isinstance(assessment, Mapping):
+            assessment = {}
+        statuses: set[str] = set()
         extraction = source.get("extraction")
-        if not isinstance(extraction, Mapping):
-            extraction = {}
+        if isinstance(extraction, Mapping):
+            if status := _bounded(extraction.get("status"), 80):
+                statuses.add(status)
+        extractions = source.get("extractions")
+        if isinstance(extractions, Mapping):
+            for detail in extractions.values():
+                if isinstance(detail, Mapping):
+                    if status := _bounded(detail.get("status"), 80):
+                        statuses.add(status)
         rows.append(
             {
-                "title": _bounded(source.get("title") or source.get("name"), 300),
-                "url": _bounded(source.get("url"), 1600),
-                "source": _bounded(source.get("source"), 160),
+                "candidate_id": _bounded(source.get("candidate_id"), 160),
+                "title": _bounded(item.get("title"), 300),
+                "url": _bounded(item.get("url"), 1600),
+                "source": _bounded(item.get("source"), 160),
+                "published_at": _bounded(item.get("published_at"), 80),
                 "read_status": _bounded(source.get("read_status"), 80),
-                "extraction_status": _bounded(extraction.get("status"), 80),
+                "source_role": _bounded(assessment.get("source_role"), 80),
+                "cluster_id": _bounded(
+                    assessment.get("source_cluster_id") or assessment.get("cluster_id"),
+                    160,
+                ),
+                "extraction_statuses": sorted(statuses),
             }
         )
     return rows
@@ -207,20 +257,95 @@ def _evidence_rows(brief: Mapping[str, Any]) -> list[dict[str, Any]]:
     for evidence in raw:
         if not isinstance(evidence, Mapping):
             continue
+        strength = evidence.get("strength")
+        if not isinstance(strength, (int, float)):
+            strength = None
         rows.append(
             {
-                "evidence_id": _bounded(evidence.get("evidence_id") or evidence.get("id"), 160),
+                "evidence_id": _bounded(
+                    evidence.get("evidence_id") or evidence.get("id"), 160
+                ),
                 "claim_id": _bounded(evidence.get("claim_id"), 160),
                 "relation": _bounded(evidence.get("relation"), 80),
+                "strength": strength,
                 "source_role": _bounded(evidence.get("source_role"), 80),
-                "cluster_id": _bounded(evidence.get("cluster_id"), 160),
-                "url": _bounded(evidence.get("url") or evidence.get("source_url"), 1600),
-                "title": _bounded(evidence.get("title") or evidence.get("source_title"), 300),
+                "source_cluster_id": _bounded(
+                    evidence.get("source_cluster_id") or evidence.get("cluster_id"),
+                    160,
+                ),
+                "url": _bounded(
+                    evidence.get("url") or evidence.get("source_url"), 1600
+                ),
+                "title": _bounded(
+                    evidence.get("title") or evidence.get("source_title"), 300
+                ),
                 "published_at": _bounded(evidence.get("published_at"), 80),
-                "excerpt": _bounded(evidence.get("excerpt"), 1200),
+                "locator": _bounded(evidence.get("locator"), 1000),
+                "anchored_spans": _bounded_sequence(
+                    evidence.get("anchored_spans"), item_limit=600, max_items=8
+                ),
+                "caveats": _bounded_sequence(
+                    evidence.get("caveats"), item_limit=300, max_items=8
+                ),
             }
         )
     return rows
+
+
+def _brief_projection(brief: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": _bounded(brief.get("schema_version"), 100),
+        "gate_reasons": _bounded_sequence(
+            brief.get("gate_reasons"), item_limit=300, max_items=20
+        ),
+        "eligible_evidence": _evidence_rows(brief),
+        "open_gap_ids": _bounded_sequence(
+            brief.get("open_gap_ids"), item_limit=160, max_items=50
+        ),
+        "unresolved_conflict_count": (
+            len(brief.get("unresolved_conflicts"))
+            if isinstance(brief.get("unresolved_conflicts"), list)
+            else 0
+        ),
+    }
+
+
+def _observed_read_count(
+    metrics: Mapping[str, Any], runtime: Mapping[str, Any]
+) -> int:
+    if "read_count" in metrics:
+        return _bounded_int(metrics.get("read_count"))
+    read_outcomes = runtime.get("read_outcomes")
+    if not isinstance(read_outcomes, list):
+        return 0
+    return sum(
+        isinstance(item, Mapping) and item.get("status") == "success"
+        for item in read_outcomes
+    )
+
+
+def _cluster_ids(
+    source_rows: list[dict[str, Any]], evidence_rows: list[dict[str, Any]]
+) -> list[str]:
+    values = {
+        str(value)
+        for value in (
+            *[row.get("cluster_id") for row in source_rows],
+            *[row.get("source_cluster_id") for row in evidence_rows],
+        )
+        if value
+    }
+    return sorted(values)
+
+
+def _unavailable_answer_surface() -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "source": "none",
+        "text": "",
+        "content_sha256": "",
+        "reason": "production_final_answer_not_captured",
+    }
 
 
 def _run_case(
@@ -252,6 +377,8 @@ def _run_case(
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "runner_error_type": type(exc).__name__,
             "run": None,
+            "answer": _unavailable_answer_surface(),
+            "budget_contract_violations": [],
         }
 
     elapsed = round(time.monotonic() - started, 3)
@@ -269,21 +396,20 @@ def _run_case(
     candidate_count = len(candidates) if isinstance(candidates, list) else 0
     model_calls = runtime.get("model_calls")
     model_call_count = len(model_calls) if isinstance(model_calls, list) else 0
+    read_outcomes = runtime.get("read_outcomes")
+    read_attempt_count = len(read_outcomes) if isinstance(read_outcomes, list) else 0
+    read_count = _observed_read_count(metrics, runtime)
     selected_sources = [
         item for item in completed.selected_sources if isinstance(item, dict)
     ]
     source_rows = _source_rows(selected_sources)
-    cluster_ids = sorted(
-        {
-            str(item.get("cluster_id") or "")
-            for item in (candidates if isinstance(candidates, list) else [])
-            if isinstance(item, Mapping) and item.get("cluster_id")
-        }
-    )
+    brief_projection = _brief_projection(brief)
+    evidence_rows = brief_projection["eligible_evidence"]
+    cluster_ids = _cluster_ids(source_rows, evidence_rows)
     violations: list[str] = []
     if candidate_count > 20:
         violations.append("candidate_budget_exceeded")
-    if len(selected_sources) > 8:
+    if read_count > 8:
         violations.append("read_budget_exceeded")
     if model_call_count > 6:
         violations.append("model_call_budget_exceeded")
@@ -303,13 +429,15 @@ def _run_case(
             "stop_reason": completed.stop_reason,
             "stage": completed.stage,
         },
+        "answer": _unavailable_answer_surface(),
         "search": {
             "attempt_count": len(completed.query_attempts),
             "audits": _provider_audit(completed.query_attempts),
         },
         "budget_observed": {
             "candidate_count": candidate_count,
-            "read_count": len(selected_sources),
+            "read_count": read_count,
+            "read_attempt_count": read_attempt_count,
             "model_call_count": model_call_count,
             "elapsed_seconds": elapsed,
         },
@@ -318,13 +446,14 @@ def _run_case(
         "cluster_ids": cluster_ids,
         "gate": {
             "status": _bounded(brief.get("gate_status"), 80),
-            "open_critical_claim_ids": brief.get("open_critical_claim_ids") or [],
-            "conditional_wording_required": brief.get("conditional_wording_required"),
+            "open_critical_claim_ids": _bounded_sequence(
+                brief.get("open_critical_claim_ids"), item_limit=160, max_items=50
+            ),
+            "conditional_wording_required": brief.get(
+                "conditional_wording_required"
+            ),
         },
-        "brief": {
-            "summary": _bounded(brief.get("summary"), 3000),
-            "eligible_evidence": _evidence_rows(brief),
-        },
+        "brief": brief_projection,
         "metrics": dict(metrics),
     }
 
@@ -352,6 +481,7 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
             "rubric_loaded_by_runner": False,
             "stores_page_bodies": False,
             "stores_research_query_text": False,
+            "captures_production_final_answer": False,
         },
         "configured_budget": {
             "max_candidates": 20,
@@ -397,6 +527,12 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
         "runner_error_cases": sum(1 for item in records if item["runner_error_type"]),
         "budget_violation_cases": sum(
             1 for item in records if item.get("budget_contract_violations")
+        ),
+        "reviewable_answer_cases": sum(
+            1
+            for item in records
+            if isinstance(item.get("answer"), Mapping)
+            and item["answer"].get("status") == "available"
         ),
         "completed_runs": sum(
             1 for item in records if (item.get("run") or {}).get("status") == "completed"
