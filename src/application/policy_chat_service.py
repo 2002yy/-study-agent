@@ -735,6 +735,7 @@ class ExternalDataPolicyChatService(ChatService):
             pedagogy_plan=pedagogy_plan,
             learning_state=next_learning_state,
             learning_state_before=learning_state,
+            answer_validation=command.answer_validation,
             disclosure_policy=disclosed.policy,
             learner_evaluation=learner_evaluation,
         )

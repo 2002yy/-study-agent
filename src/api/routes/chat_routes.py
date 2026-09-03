@@ -21,7 +21,10 @@ from src.api.models.chat import (
 from src.application.chat_service import ChatService, TurnCancelled
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
-from src.application.research_evidence import research_sources_snapshot
+from src.application.research_evidence import (
+    research_binding_rows,
+    research_sources_snapshot,
+)
 from src.application.runtime_repository import (
     get_chat_service,
     get_session_service,
@@ -187,6 +190,11 @@ async def chat_stream_endpoint(
             )
             yield sse_event("route", prepared.route)
             yield sse_event("rag", prepared.rag)
+            # RQ1-C answer batch: research-backed turns buffer the whole
+            # candidate until the publication gate passes; nothing is flushed
+            # before complete_turn returns the verified text.  Binding failure
+            # therefore emits zero candidate tokens.
+            buffered_validation = prepared.answer_validation is not None
             web_tools = prepared.rag.get("web_tools")
             if (
                 isinstance(web_tools, dict)
@@ -199,12 +207,14 @@ async def chat_stream_endpoint(
                     else "联网搜索失败，本回答未使用联网来源。\n\n"
                 )
                 reply_parts.append(notice)
-                yield sse_event("token", {"text": notice})
+                if not buffered_validation:
+                    yield sse_event("token", {"text": notice})
             elif isinstance(web_tools, dict) and web_tools.get("used") is True:
                 preview = _web_source_preview(web_tools)
                 if preview:
                     reply_parts.append(preview)
-                    yield sse_event("token", {"text": preview})
+                    if not buffered_validation:
+                        yield sse_event("token", {"text": preview})
             async for token in _tokens_until_disconnected(
                 stream,
                 http_request,
@@ -215,9 +225,12 @@ async def chat_stream_endpoint(
                 ),
             ):
                 reply_parts.append(token)
-                yield sse_event("token", {"text": token})
+                if not buffered_validation:
+                    yield sse_event("token", {"text": token})
             suffix = "".join(reply_parts)
             completed = service.complete_turn(prepared, suffix)
+            if buffered_validation:
+                yield sse_event("token", {"text": completed.assistant_message})
             yield sse_event("usage", stream_usage_payload(completed.assistant_message))
             yield sse_event(
                 "done",
@@ -577,6 +590,7 @@ def _chat_command(
     web_context = request.web_context
     web_context_run_id = request.web_context_run_id
     research_sources: dict[str, Any] | None = None
+    answer_validation: dict[str, Any] | None = None
     if web_context_run_id:
         if research_service is None:
             raise ValueError("ResearchRun validation service is required")
@@ -588,6 +602,12 @@ def _chat_command(
         web_context = run.source_block
         web_context_run_id = run.id
         research_sources = research_sources_snapshot(run)
+        binding_rows = research_binding_rows(run)
+        answer_validation = (
+            {"evidence_rows": binding_rows, "allowed_attempts": 1}
+            if binding_rows
+            else None
+        )
     return PolicyChatCommand(
         user_input=request.user_input,
         selected_role=request.selected_role,
@@ -615,6 +635,7 @@ def _chat_command(
         cloud_context_policy=request.cloud_context_policy,
         task_intent=request.task_intent,
         research_sources=research_sources,
+        answer_validation=answer_validation,
         continuation_of_turn_id=request.continuation_of_turn_id,
         retry_of_turn_id=request.retry_of_turn_id,
         partial_reply=request.partial_reply,

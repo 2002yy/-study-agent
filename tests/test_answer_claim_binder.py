@@ -221,7 +221,9 @@ def test_malformed_structured_output_fails_closed() -> None:
             return "not json at all"
         return json.dumps({"refused": "yes"})
 
-    snapshot = _snapshot_of(bind_answer_claims(request=request, model_fn=broken))
+    snapshot = _snapshot_of(
+        bind_answer_claims(request=request, model_fn=broken, max_attempts=2)
+    )
     assert snapshot.status == "rejected"
     assert snapshot.reason == "malformed_structured_output"
     assert calls["count"] == 2
@@ -253,7 +255,9 @@ def test_provider_failure_then_malformed_uses_last_error_reason() -> None:
             raise TimeoutError("timeout")
         return "[]"
 
-    snapshot = _snapshot_of(bind_answer_claims(request=request, model_fn=flaky))
+    snapshot = _snapshot_of(
+        bind_answer_claims(request=request, model_fn=flaky, max_attempts=2)
+    )
     assert snapshot.status == "rejected"
     assert snapshot.reason == "malformed_structured_output"
 

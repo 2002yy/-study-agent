@@ -79,6 +79,7 @@ class AnswerClaimBindingRequest:
 class BoundAnswerClaims:
     snapshot: AnswerClaimSnapshotV1
     raw_output: str = ""
+    attempt_count: int = 0
 
 
 def bind_answer_claims(
@@ -86,12 +87,19 @@ def bind_answer_claims(
     request: AnswerClaimBindingRequest,
     model_fn: BinderModelFn,
     producer: str = ANSWER_CLAIM_BINDER_PRODUCER,
+    max_attempts: int = 1,
 ) -> BoundAnswerClaims:
     """Bind one final answer to existing evidence ids, failing closed.
 
     The final answer text is never modified; the returned snapshot carries the
     canonical answer hash of the original text.  Any malformed or unverifiable
     producer output resolves to a ``rejected`` snapshot instead of raising.
+
+    ``max_attempts`` is the server-authorized physical model-call ceiling for
+    this binding (bounded by the binder retry capability).  Defaults to one
+    attempt; a caller holding an authoritative remaining budget may allow the
+    second retry.  The physical attempt count is always reported back on the
+    result so callers can record authoritative model-call accounting.
     """
     answer = _clean_text(request.final_answer)
     if not answer:
@@ -100,8 +108,9 @@ def bind_answer_claims(
     known_evidence_ids = tuple(row.evidence_id for row in rows)
     messages = _binding_messages(question=request.question, answer=answer, rows=rows)
 
+    attempts = max(0, min(int(max_attempts), 2))
     last_error = ""
-    for attempt in range(1, 3):
+    for attempt in range(1, attempts + 1):
         try:
             raw = model_fn(messages)
         except Exception as exc:  # noqa: BLE001 - provider failures are results
@@ -114,14 +123,17 @@ def bind_answer_claims(
             producer=producer,
         )
         if parsed is not None:
-            return BoundAnswerClaims(snapshot=parsed, raw_output=raw)
+            return BoundAnswerClaims(
+                snapshot=parsed, raw_output=raw, attempt_count=attempt
+            )
         last_error = "malformed_structured_output"
     return BoundAnswerClaims(
         snapshot=rejected_answer_claim_snapshot(
             answer=answer,
             producer=producer,
             reason=last_error or "producer_unavailable",
-        )
+        ),
+        attempt_count=attempts,
     )
 
 

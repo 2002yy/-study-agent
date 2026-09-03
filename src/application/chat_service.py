@@ -7,7 +7,22 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Callable, Iterator
 
+from src.application.answer_claim_binder import (
+    AnswerClaimBindingRequest,
+    AnswerClaimBindingRow,
+    bind_answer_claims,
+)
 from src.context_builder import build_messages
+from src.domain.answer_claims import rejected_answer_claim_snapshot
+from src.domain.answer_validation import (
+    PHASE_ANSWER_CLAIM_BINDING,
+    PHASE_ANSWER_GENERATION,
+    PHASE_OUTCOME_BUDGET_EXHAUSTED,
+    PHASE_OUTCOME_COMPLETED,
+    PHASE_OUTCOME_PASSED,
+    PHASE_OUTCOME_REJECTED,
+    build_answer_validation_audit,
+)
 from src.domain.runtime_entities import ChatThread, ChatTurn, new_id, utc_now
 from src.llm_client import async_stream_chat, chat, stream_chat
 from src.memory import read_memory_bundle
@@ -26,6 +41,13 @@ from src.tools.local_knowledge import retrieve_local_knowledge
 from src.tools.web_agent import WebToolTrace, web_tools_disabled
 
 PERFORMANCE_MODES = {"fast", "standard", "deep"}
+
+# Canonical learner-facing copy when a research-backed answer cannot be
+# published because its claims failed evidence binding/validation.  Deliberately
+# carries no provider detail.
+RESEARCH_ANSWER_BLOCKED_COPY = (
+    "联网检索结果未能通过证据核验，本次回答未发布基于联网来源的结论。"
+)
 
 
 class TurnCancelled(Exception):
@@ -70,6 +92,11 @@ class ChatCommand:
     partial_reply: str = ""
     turn_id: str | None = None
     operation_id: str | None = None
+    # Server-owned research answer-validation plan (never client-authored):
+    # {"evidence_rows": [...bounded rows...], "allowed_attempts": int}.  When
+    # present the turn is research-backed and the final answer is gated on
+    # claim/evidence binding before it is published to the learner.
+    answer_validation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +139,9 @@ class PreparedChatTurn:
     learning_state_before: LearningState
     disclosure_policy: str
     learner_evaluation: PedagogyEvalRun
+    # Research-backed publication-gate plan carried from the server-owned
+    # command; None means this turn is a normal chat with no validation gate.
+    answer_validation: dict[str, Any] | None = None
 
 
 def _poll_cancel(repository: RuntimeRepository, turn_id: str, operation_id: str):
@@ -472,6 +502,7 @@ class ChatService:
             learning_state_before=learning_state,
             disclosure_policy=disclosed.policy,
             learner_evaluation=learner_evaluation,
+            answer_validation=command.answer_validation,
         )
 
     def generate(self, prepared: PreparedChatTurn) -> str:
@@ -537,8 +568,192 @@ class ChatService:
         ):
             yield token
 
+    def _gate_research_answer(
+        self,
+        prepared: PreparedChatTurn,
+        candidate: str,
+    ) -> tuple[str, Any | None, dict[str, Any], bool]:
+        """Run the research-backed publication gate over one candidate answer.
+
+        Fail-closed: only a binding that validates may publish the candidate.
+        Any other outcome replaces the learner-facing text with the canonical
+        blocked copy and keeps the rejected audit truth in the same commit.
+        Returns ``(published_text, claims_snapshot_or_none, audit_phases,
+        pedagogy_blocked)``.
+        """
+        generation_phase = {
+            "attempted": True,
+            "model_calls": 1,
+            "attempts": 1,
+            "outcome": PHASE_OUTCOME_COMPLETED,
+            "error_type": "",
+        }
+        plan = prepared.answer_validation or {}
+        raw_allowed = plan.get("allowed_attempts")
+        try:
+            allowed_attempts = (
+                0 if raw_allowed == 0 else max(1, min(int(raw_allowed or 1), 2))
+            )
+        except (TypeError, ValueError):
+            allowed_attempts = 1
+        if allowed_attempts < 1:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                {
+                    PHASE_ANSWER_GENERATION: generation_phase,
+                    PHASE_ANSWER_CLAIM_BINDING: {
+                        "attempted": True,
+                        "model_calls": 0,
+                        "attempts": 0,
+                        "outcome": PHASE_OUTCOME_BUDGET_EXHAUSTED,
+                        "error_type": "budget_exhausted",
+                    },
+                },
+                True,
+            )
+        raw_rows = plan.get("evidence_rows") or ()
+        rows = tuple(
+            AnswerClaimBindingRow(
+                evidence_id=str(row.get("evidence_id") or "").strip(),
+                title=str(row.get("title") or ""),
+                url=str(row.get("url") or ""),
+                source_role=str(row.get("source_role") or ""),
+                source_cluster_id=str(row.get("source_cluster_id") or ""),
+                relation=str(row.get("relation") or ""),
+                strength=str(row.get("strength") or ""),
+                locator=str(row.get("locator") or ""),
+                anchored_spans=tuple(
+                    str(span) for span in row.get("anchored_spans") or ()
+                ),
+                caveats=tuple(str(caveat) for caveat in row.get("caveats") or ()),
+            )
+            for row in raw_rows
+            if isinstance(row, dict)
+        )
+        if not rows:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                self._blocked_audit_phases(generation_phase, "missing_evidence_brief"),
+                True,
+            )
+        question = prepared.turn.user_message
+        answer = candidate.strip()
+        if not answer:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                self._blocked_audit_phases(generation_phase, "candidate_unavailable"),
+                True,
+            )
+        bound = bind_answer_claims(
+            request=AnswerClaimBindingRequest(
+                question=question,
+                final_answer=candidate,
+                evidence_rows=rows,
+            ),
+            model_fn=lambda messages: self.dependencies.chat(
+                list(messages),
+                model_profile=prepared.route["model_profile"],
+                max_tokens=self.dependencies.chat_max_tokens(
+                    prepared.runtime_modes.performance_mode
+                ),
+                task_name="answer_claim_binding",
+            ),
+            max_attempts=allowed_attempts,
+        )
+        binding_phase: dict[str, Any] = {
+            "attempted": True,
+            "model_calls": bound.attempt_count,
+            "attempts": bound.attempt_count,
+            "outcome": "",
+            "error_type": "",
+        }
+        snapshot = bound.snapshot
+        if snapshot.status == "validated":
+            binding_phase["outcome"] = PHASE_OUTCOME_PASSED
+            return (
+                candidate,
+                snapshot,
+                {
+                    PHASE_ANSWER_GENERATION: generation_phase,
+                    PHASE_ANSWER_CLAIM_BINDING: binding_phase,
+                },
+                False,
+            )
+        binding_phase["outcome"] = PHASE_OUTCOME_REJECTED
+        binding_phase["error_type"] = str(snapshot.reason or "")[:120]
+        rejected = rejected_answer_claim_snapshot(
+            answer=RESEARCH_ANSWER_BLOCKED_COPY,
+            producer="answer_claim_binder_v1",
+            reason=str(snapshot.reason or "producer_unavailable"),
+        )
+        return (
+            RESEARCH_ANSWER_BLOCKED_COPY,
+            rejected,
+            {
+                PHASE_ANSWER_GENERATION: generation_phase,
+                PHASE_ANSWER_CLAIM_BINDING: binding_phase,
+            },
+            True,
+        )
+
+    def _blocked_audit_phases(
+        self, generation_phase: dict[str, Any], error_type: str
+    ) -> dict[str, Any]:
+        return {
+            PHASE_ANSWER_GENERATION: generation_phase,
+            PHASE_ANSWER_CLAIM_BINDING: {
+                "attempted": True,
+                "model_calls": 0,
+                "attempts": 0,
+                "outcome": PHASE_OUTCOME_REJECTED,
+                "error_type": error_type,
+            },
+        }
+
     def complete_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
+        gate_blocked_pedagogy = False
+        if prepared.answer_validation is not None:
+            reply, claims_snapshot, audit_phases, gate_blocked_pedagogy = (
+                self._gate_research_answer(prepared, reply)
+            )
+            audit = build_answer_validation_audit(
+                candidate_answer=(
+                    f"{prepared.base_reply}{suffix}"
+                    if prepared.is_continuation
+                    else suffix
+                ),
+                published_answer=reply,
+                phases=audit_phases,
+            )
+            published_rag = {
+                **deepcopy(prepared.rag),
+                "answer_validation_audit": audit,
+            }
+            if claims_snapshot is not None:
+                published_rag["answer_claim_snapshot"] = claims_snapshot.to_dict()
+            if claims_snapshot is not None and claims_snapshot.status == "validated":
+                # Persist the bounded server-owned evidence rows behind the
+                # accepted claim links so later reads can re-validate them.
+                published_rag["research_evidence_refs"] = [
+                    {
+                        "evidence_id": str(row.get("evidence_id") or ""),
+                        "title": str(row.get("title") or ""),
+                        "url": str(row.get("url") or ""),
+                        "source_cluster_id": str(row.get("source_cluster_id") or ""),
+                        "published_at": str(row.get("published_at") or ""),
+                    }
+                    for row in (prepared.answer_validation or {}).get(
+                        "evidence_rows"
+                    )
+                    or ()
+                    if isinstance(row, dict) and str(row.get("evidence_id") or "")
+                ]
+        else:
+            published_rag = deepcopy(prepared.rag)
         evaluation = self.dependencies.pedagogy_engine.evaluate_response(
             reply,
             plan=prepared.pedagogy_plan,
@@ -560,6 +775,8 @@ class ChatService:
                         },
                     }
                 )
+        if gate_blocked_pedagogy:
+            committed_state = prepared.learning_state_before
         pedagogy_snapshot = {
             **prepared.turn.pedagogy_snapshot,
             "assistant_evaluation": {
@@ -580,7 +797,7 @@ class ChatService:
             mode=prepared.route["mode"],
             model=prepared.route["model_profile"],
             route_snapshot=prepared.route,
-            rag_snapshot=prepared.rag,
+            rag_snapshot=published_rag,
             pedagogy_snapshot=pedagogy_snapshot,
             parent_turn_id=prepared.turn.parent_turn_id,
             operation_id=prepared.turn.operation_id,
