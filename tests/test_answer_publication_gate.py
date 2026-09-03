@@ -408,6 +408,64 @@ def test_client_forged_audit_is_replaced_on_load(tmp_path) -> None:
     assert generation["error_type"] == ""
 
 
+def test_generation_exception_leaves_no_committed_candidate(tmp_path) -> None:
+    """Provider failure during generation never reaches a completed commit."""
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        if kwargs.get("task_name") == "single_chat":
+            raise RuntimeError("generation exploded")
+        raise AssertionError("binder must not run without a candidate")
+
+    service, repository = _service(tmp_path, chat_fn)
+    prepared = service.start_turn(_command(rows=[_row()]))
+    try:
+        service.generate(prepared)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("generation exception must propagate")
+    turn = _turn(repository, prepared.turn.id)
+    assert turn.status == "failed"
+    assert turn.assistant_message != CANDIDATE
+    assert "answer_validation_audit" not in (turn.rag_snapshot or {})
+
+
+def test_unknown_evidence_id_is_never_published(tmp_path) -> None:
+    """A link to an evidence id outside the server rows fails closed."""
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        if kwargs.get("task_name") == "answer_claim_binding":
+            return _binding_payload(
+                [_claim_payload(CLAIM_TEXT)],
+                [_link("c1", "evidence_not_in_rows")],
+            )
+        return ANSWER
+
+    service, repository = _service(tmp_path, chat_fn)
+    reply, turn = _run_turn(service, repository, _command(rows=[_row()]))
+    assert reply == RESEARCH_ANSWER_BLOCKED_COPY
+    audit = _audit(turn)
+    assert audit["phases"]["answer_claim_binding"]["outcome"] == "rejected"
+
+
+def test_strong_factual_claim_without_eligible_binding_is_not_published(
+    tmp_path,
+) -> None:
+    """A strong factual claim with zero eligible evidence binding is blocked."""
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        if kwargs.get("task_name") == "answer_claim_binding":
+            return _binding_payload([_claim_payload(CLAIM_TEXT)], [])
+        return ANSWER
+
+    service, repository = _service(tmp_path, chat_fn)
+    reply, turn = _run_turn(service, repository, _command(rows=[_row()]))
+    assert reply == RESEARCH_ANSWER_BLOCKED_COPY
+    audit = _audit(turn)
+    binding = audit["phases"]["answer_claim_binding"]
+    assert binding["outcome"] == "rejected"
+    assert binding["model_calls"] == 1
+    claims = (turn.rag_snapshot or {}).get("answer_claim_snapshot")
+    assert claims is not None and claims["status"] == "rejected"
+
+
 def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> None:
     """The production ExternalDataPolicyChatService honors the same gate."""
     from src.pedagogy.evaluation import SemanticEvaluation

@@ -11,6 +11,7 @@ from src.application.answer_claim_binder import (
     AnswerClaimBindingRequest,
     AnswerClaimBindingRow,
     bind_answer_claims,
+    factual_claims_fully_bound,
 )
 from src.context_builder import build_messages
 from src.domain.answer_claims import rejected_answer_claim_snapshot
@@ -671,7 +672,7 @@ class ChatService:
             "error_type": "",
         }
         snapshot = bound.snapshot
-        if snapshot.status == "validated":
+        if snapshot.status == "validated" and factual_claims_fully_bound(snapshot):
             binding_phase["outcome"] = PHASE_OUTCOME_PASSED
             return (
                 candidate,
@@ -683,11 +684,20 @@ class ChatService:
                 False,
             )
         binding_phase["outcome"] = PHASE_OUTCOME_REJECTED
-        binding_phase["error_type"] = str(snapshot.reason or "")[:120]
+        binding_phase["error_type"] = (
+            str(snapshot.reason or "")[:120]
+            if snapshot.status != "validated"
+            else "unbound_factual_claim"
+        )
+        rejected_reason = (
+            str(snapshot.reason or "producer_unavailable")
+            if snapshot.status != "validated"
+            else "unbound_factual_claim"
+        )
         rejected = rejected_answer_claim_snapshot(
             answer=RESEARCH_ANSWER_BLOCKED_COPY,
             producer="answer_claim_binder_v1",
-            reason=str(snapshot.reason or "producer_unavailable"),
+            reason=rejected_reason,
         )
         return (
             RESEARCH_ANSWER_BLOCKED_COPY,

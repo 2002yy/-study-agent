@@ -215,6 +215,22 @@ def _parse_binder_output(
         return None
 
 
+def factual_claims_fully_bound(snapshot: AnswerClaimSnapshotV1) -> bool:
+    """True when every asserted factual claim carries at least one link.
+
+    The binder itself reports honest unbound claims (never invents a link);
+    the publication gate uses this to refuse publishing a final answer that
+    still contains an unsupported strong factual assertion.
+    """
+    bound_claim_ids = {
+        link.claim_id for link in snapshot.claim_links if link.claim_id
+    }
+    return all(
+        claim.kind != "factual" or claim.status != "asserted" or claim.id in bound_claim_ids
+        for claim in snapshot.claims
+    )
+
+
 def _binding_messages(*, question: str, answer: str, rows: tuple[AnswerClaimBindingRow, ...]) -> list[dict[str, str]]:
     context = _render_context(rows)
     system = (
