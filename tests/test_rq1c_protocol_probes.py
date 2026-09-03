@@ -3,8 +3,28 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from tools.run_rq1c_protocol_probes import REQUIRED_PROBES, run_protocol_probes
+
+
+_FORBIDDEN_ARTIFACT_KEYS = {
+    "query",
+    "query_text",
+    "page_body",
+    "raw_provider_error",
+    "raw_provider_errors",
+}
+
+
+def _assert_no_forbidden_artifact_keys(value: Any) -> None:
+    if isinstance(value, dict):
+        assert not (_FORBIDDEN_ARTIFACT_KEYS & set(value))
+        for item in value.values():
+            _assert_no_forbidden_artifact_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_no_forbidden_artifact_keys(item)
 
 
 def test_deterministic_protocol_runner_exercises_all_required_probes(tmp_path: Path) -> None:
@@ -42,11 +62,10 @@ def test_deterministic_protocol_runner_exercises_all_required_probes(tmp_path: P
         "stores_page_bodies": False,
         "stores_raw_provider_errors": False,
     }
+    _assert_no_forbidden_artifact_keys(artifact)
     serialized = output_path.read_text(encoding="utf-8")
     assert "private provider detail" not in serialized
     assert "private reader detail" not in serialized
-    assert "query_text" not in serialized
-    assert "page_body" not in serialized
 
 
 def test_protocol_runner_rejects_non_rq1c_runtime_artifact(tmp_path: Path) -> None:
