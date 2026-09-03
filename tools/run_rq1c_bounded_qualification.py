@@ -12,7 +12,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -53,6 +56,7 @@ DEFAULT_OUTPUT = (
     REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json"
 )
 _ALLOWED_CASE_KEYS = {"id", "category", "question"}
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _utc_now() -> str:
@@ -62,6 +66,25 @@ def _utc_now() -> str:
 def _sha256_text(value: str) -> str:
     normalized = " ".join(value.split()).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _git_sha() -> str:
+    configured = str(os.getenv("GITHUB_SHA") or "").strip().lower()
+    if _HEX40.fullmatch(configured):
+        return configured
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    value = completed.stdout.strip().lower()
+    return value if _HEX40.fullmatch(value) else ""
 
 
 def _load_manifest(path: Path) -> tuple[dict[str, str], ...]:
@@ -309,10 +332,14 @@ def _run_case(
 def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
     load_dotenv(REPO_ROOT / ".env")
     cases = _load_manifest(manifest_path)
+    git_sha = _git_sha()
+    if not git_sha:
+        raise RuntimeError("RQ1-C runtime qualification requires an exact git head")
     manifest_bytes = manifest_path.read_bytes()
     reference_date = datetime.now(timezone.utc).date().isoformat()
     artifact: dict[str, Any] = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "git_sha": git_sha,
         "started_at": _utc_now(),
         "completed_at": None,
         "manifest": {

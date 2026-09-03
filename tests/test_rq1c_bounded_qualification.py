@@ -20,10 +20,13 @@ REQUIRED_PROBES = (
     "unreadable_page",
     "duplicate_republication",
 )
+TEST_GIT_SHA = "a" * 40
 
 
 def _write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _rubric() -> dict[str, object]:
@@ -33,6 +36,7 @@ def _rubric() -> dict[str, object]:
 def _runtime(case_ids: list[str]) -> dict[str, object]:
     return {
         "schema_version": "rq1c-bounded-qualification-runtime-v1",
+        "git_sha": TEST_GIT_SHA,
         "leakage_contract": {
             "runtime_case_keys": ["id", "category", "question"],
             "rubric_loaded_by_runner": False,
@@ -73,8 +77,10 @@ def _protocol(
     failed_probe: str | None = None,
     probe_ids: tuple[str, ...] = REQUIRED_PROBES,
 ) -> dict[str, object]:
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
     return {
         "schema_version": "rq1c-bounded-protocol-probes-v1",
+        "git_sha": runtime["git_sha"],
         "runtime_artifact_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
         "leakage_contract": {
             "stores_generated_query_text": False,
@@ -138,6 +144,7 @@ def test_independent_evaluator_can_reach_go_only_after_all_gates(tmp_path: Path)
     report = _evaluate_fixture_set(tmp_path)
 
     assert report["decision"] == "GO"
+    assert report["inputs"]["git_sha"] == TEST_GIT_SHA  # type: ignore[index]
     assert report["scores"]["truthfulness"] == "12/12"  # type: ignore[index]
     assert report["scores"]["quality"] == "10/12"  # type: ignore[index]
     assert all(report["checks"].values())  # type: ignore[union-attr]
@@ -165,6 +172,30 @@ def test_review_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
         )
 
 
+def test_runtime_git_sha_must_be_exact(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["git_sha"] = "not-a-git-sha"
+    runtime_path = tmp_path / "runtime.json"
+    review_path = tmp_path / "review.json"
+    protocol_path = tmp_path / "protocol.json"
+    _write_json(runtime_path, runtime)
+    _write_json(review_path, _review(case_ids, runtime_path))
+    protocol = _protocol(runtime_path)
+    protocol["git_sha"] = TEST_GIT_SHA
+    _write_json(protocol_path, protocol)
+
+    with pytest.raises(ValueError, match="runtime artifact git_sha"):
+        evaluate(
+            runtime_path=runtime_path,
+            rubric_path=RUBRIC,
+            review_path=review_path,
+            protocol_path=protocol_path,
+            output_path=tmp_path / "report.json",
+        )
+
+
 def test_protocol_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
     rubric = _rubric()
     case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
@@ -178,6 +209,28 @@ def test_protocol_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
     _write_json(protocol_path, protocol)
 
     with pytest.raises(ValueError, match="protocol probes are not bound"):
+        evaluate(
+            runtime_path=runtime_path,
+            rubric_path=RUBRIC,
+            review_path=review_path,
+            protocol_path=protocol_path,
+            output_path=tmp_path / "report.json",
+        )
+
+
+def test_protocol_git_sha_must_match_runtime(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime_path = tmp_path / "runtime.json"
+    review_path = tmp_path / "review.json"
+    protocol_path = tmp_path / "protocol.json"
+    _write_json(runtime_path, _runtime(case_ids))
+    _write_json(review_path, _review(case_ids, runtime_path))
+    protocol = _protocol(runtime_path)
+    protocol["git_sha"] = "b" * 40
+    _write_json(protocol_path, protocol)
+
+    with pytest.raises(ValueError, match="protocol/runtime git sha mismatch"):
         evaluate(
             runtime_path=runtime_path,
             rubric_path=RUBRIC,

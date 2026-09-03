@@ -57,6 +57,9 @@ def test_deterministic_protocol_runner_exercises_all_required_probes(tmp_path: P
     assert artifact["runtime_artifact_sha256"] == hashlib.sha256(
         runtime_path.read_bytes()
     ).hexdigest()
+    git_sha = str(artifact["git_sha"])
+    assert len(git_sha) == 40
+    assert all(character in "0123456789abcdef" for character in git_sha)
     assert artifact["leakage_contract"] == {
         "stores_generated_query_text": False,
         "stores_page_bodies": False,
