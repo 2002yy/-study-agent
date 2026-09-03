@@ -67,15 +67,26 @@ def _review(case_ids: list[str], runtime_path: Path) -> dict[str, object]:
     }
 
 
-def _protocol(*, failed_probe: str | None = None) -> dict[str, object]:
+def _protocol(
+    runtime_path: Path,
+    *,
+    failed_probe: str | None = None,
+    probe_ids: tuple[str, ...] = REQUIRED_PROBES,
+) -> dict[str, object]:
     return {
         "schema_version": "rq1c-bounded-protocol-probes-v1",
+        "runtime_artifact_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+        "leakage_contract": {
+            "stores_generated_query_text": False,
+            "stores_page_bodies": False,
+            "stores_raw_provider_errors": False,
+        },
         "probes": [
             {
                 "id": probe_id,
                 "status": "fail" if probe_id == failed_probe else "pass",
             }
-            for probe_id in REQUIRED_PROBES
+            for probe_id in probe_ids
         ],
     }
 
@@ -95,7 +106,7 @@ def _evaluate_fixture_set(
     output_path = tmp_path / "report.json"
     _write_json(runtime_path, runtime_value)
     _write_json(review_path, _review(case_ids, runtime_path))
-    _write_json(protocol_path, _protocol(failed_probe=failed_probe))
+    _write_json(protocol_path, _protocol(runtime_path, failed_probe=failed_probe))
     return evaluate(
         runtime_path=runtime_path,
         rubric_path=RUBRIC,
@@ -142,7 +153,7 @@ def test_review_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
     review = _review(case_ids, runtime_path)
     review["runtime_artifact_sha256"] = "0" * 64
     _write_json(review_path, review)
-    _write_json(protocol_path, _protocol())
+    _write_json(protocol_path, _protocol(runtime_path))
 
     with pytest.raises(ValueError, match="not bound to this runtime artifact"):
         evaluate(
@@ -152,6 +163,54 @@ def test_review_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
             protocol_path=protocol_path,
             output_path=tmp_path / "report.json",
         )
+
+
+def test_protocol_must_bind_exact_runtime_artifact(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime_path = tmp_path / "runtime.json"
+    review_path = tmp_path / "review.json"
+    protocol_path = tmp_path / "protocol.json"
+    _write_json(runtime_path, _runtime(case_ids))
+    _write_json(review_path, _review(case_ids, runtime_path))
+    protocol = _protocol(runtime_path)
+    protocol["runtime_artifact_sha256"] = "0" * 64
+    _write_json(protocol_path, protocol)
+
+    with pytest.raises(ValueError, match="protocol probes are not bound"):
+        evaluate(
+            runtime_path=runtime_path,
+            rubric_path=RUBRIC,
+            review_path=review_path,
+            protocol_path=protocol_path,
+            output_path=tmp_path / "report.json",
+        )
+
+
+def test_protocol_probe_set_is_exact_and_unique(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime_path = tmp_path / "runtime.json"
+    review_path = tmp_path / "review.json"
+    protocol_path = tmp_path / "protocol.json"
+    _write_json(runtime_path, _runtime(case_ids))
+    _write_json(review_path, _review(case_ids, runtime_path))
+
+    invalid_sets = (
+        REQUIRED_PROBES[:-1],
+        (*REQUIRED_PROBES[:-1], REQUIRED_PROBES[0]),
+        (*REQUIRED_PROBES, "unexpected_probe"),
+    )
+    for index, probe_ids in enumerate(invalid_sets):
+        _write_json(protocol_path, _protocol(runtime_path, probe_ids=probe_ids))
+        with pytest.raises(ValueError, match="protocol probe"):
+            evaluate(
+                runtime_path=runtime_path,
+                rubric_path=RUBRIC,
+                review_path=review_path,
+                protocol_path=protocol_path,
+                output_path=tmp_path / f"report-{index}.json",
+            )
 
 
 def test_runtime_artifact_rejects_plaintext_generated_query(tmp_path: Path) -> None:
@@ -165,7 +224,7 @@ def test_runtime_artifact_rejects_plaintext_generated_query(tmp_path: Path) -> N
     protocol_path = tmp_path / "protocol.json"
     _write_json(runtime_path, runtime)
     _write_json(review_path, _review(case_ids, runtime_path))
-    _write_json(protocol_path, _protocol())
+    _write_json(protocol_path, _protocol(runtime_path))
 
     with pytest.raises(ValueError, match="leaked generated research query text"):
         evaluate(

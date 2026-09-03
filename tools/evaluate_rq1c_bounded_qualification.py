@@ -1,10 +1,4 @@
-"""Evaluate an RQ1-C bounded qualification artifact after independent review.
-
-This evaluator is deliberately separate from the live runner. The live runner never
-loads this rubric or the manual review file. A final GO requires all 12 truthfulness
-reviews, at least 10 quality passes, zero hard failures, zero runtime budget
-violations, and all deterministic protocol probes.
-"""
+"""Evaluate an RQ1-C bounded qualification artifact after independent review."""
 
 from __future__ import annotations
 
@@ -20,16 +14,8 @@ RUNTIME_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
 REVIEW_SCHEMA_VERSION = "rq1c-bounded-independent-review-v1"
 PROTOCOL_SCHEMA_VERSION = "rq1c-bounded-protocol-probes-v1"
 REPORT_SCHEMA_VERSION = "rq1c-bounded-qualification-report-v1"
-DEFAULT_RUBRIC = (
-    REPO_ROOT
-    / "tests"
-    / "fixtures"
-    / "research_quality"
-    / "rq1c_bounded_holdout_rubric.json"
-)
-DEFAULT_OUTPUT = (
-    REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_REPORT.json"
-)
+DEFAULT_RUBRIC = REPO_ROOT / "tests" / "fixtures" / "research_quality" / "rq1c_bounded_holdout_rubric.json"
+DEFAULT_OUTPUT = REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_REPORT.json"
 _REQUIRED_PROBES = {
     "provider_timeout_retry",
     "user_cancellation",
@@ -114,17 +100,12 @@ def _validate_runtime(runtime: dict[str, Any], rubric_ids: set[str]) -> tuple[in
             if "query" in audit or "query_text" in audit:
                 raise ValueError("runtime artifact leaked generated research query text")
             digest = str(audit.get("query_sha256") or "")
-            if digest and (
-                len(digest) != 64
-                or any(c not in "0123456789abcdef" for c in digest)
-            ):
+            if digest and (len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
                 raise ValueError("invalid research query sha256")
     return runner_errors, budget_violations
 
 
-def _validate_review(
-    review: dict[str, Any], runtime_path: Path, ids: set[str]
-) -> tuple[int, int, int]:
+def _validate_review(review: dict[str, Any], runtime_path: Path, ids: set[str]) -> tuple[int, int, int]:
     if review.get("schema_version") != REVIEW_SCHEMA_VERSION:
         raise ValueError("unsupported RQ1-C independent review schema")
     expected_sha = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
@@ -151,9 +132,18 @@ def _validate_review(
     return truthful, quality, hard_failures
 
 
-def _validate_protocol(protocol: dict[str, Any]) -> tuple[int, list[str]]:
+def _validate_protocol(protocol: dict[str, Any], runtime_path: Path) -> tuple[int, list[str]]:
     if protocol.get("schema_version") != PROTOCOL_SCHEMA_VERSION:
         raise ValueError("unsupported RQ1-C protocol probe schema")
+    expected_runtime_sha = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    if protocol.get("runtime_artifact_sha256") != expected_runtime_sha:
+        raise ValueError("protocol probes are not bound to this runtime artifact")
+    leakage = protocol.get("leakage_contract")
+    if not isinstance(leakage, dict):
+        raise ValueError("protocol artifact missing leakage contract")
+    for key in ("stores_generated_query_text", "stores_page_bodies", "stores_raw_provider_errors"):
+        if leakage.get(key) is not False:
+            raise ValueError(f"protocol artifact violates leakage contract: {key}")
     records = protocol.get("probes")
     if not isinstance(records, list):
         raise ValueError("protocol probes must be a list")
@@ -166,6 +156,8 @@ def _validate_protocol(protocol: dict[str, Any]) -> tuple[int, list[str]]:
         if probe_id in seen or probe_id not in _REQUIRED_PROBES:
             raise ValueError(f"invalid or duplicate protocol probe: {probe_id}")
         seen.add(probe_id)
+        if record.get("status") not in {"pass", "fail"}:
+            raise ValueError("protocol probe status must be pass/fail")
         if record.get("status") != "pass":
             failed.append(probe_id)
     missing = sorted(_REQUIRED_PROBES - seen)
@@ -174,14 +166,7 @@ def _validate_protocol(protocol: dict[str, Any]) -> tuple[int, list[str]]:
     return len(seen), failed
 
 
-def evaluate(
-    *,
-    runtime_path: Path,
-    rubric_path: Path,
-    review_path: Path,
-    protocol_path: Path,
-    output_path: Path,
-) -> dict[str, Any]:
+def evaluate(*, runtime_path: Path, rubric_path: Path, review_path: Path, protocol_path: Path, output_path: Path) -> dict[str, Any]:
     runtime = _load_json(runtime_path)
     rubric = _load_json(rubric_path)
     review = _load_json(review_path)
@@ -189,7 +174,7 @@ def evaluate(
     ids, gate = _validate_rubric(rubric)
     runner_errors, budget_violations = _validate_runtime(runtime, ids)
     truthful, quality, hard_failures = _validate_review(review, runtime_path, ids)
-    probe_count, failed_probes = _validate_protocol(protocol)
+    probe_count, failed_probes = _validate_protocol(protocol, runtime_path)
     checks = {
         "truthfulness": truthful == gate["truthfulness_required"],
         "quality": quality >= gate["quality_required"],
@@ -218,9 +203,7 @@ def evaluate(
         "decision": "GO" if all(checks.values()) else "NO-GO",
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
 
 
