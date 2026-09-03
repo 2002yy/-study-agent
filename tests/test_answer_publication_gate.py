@@ -466,6 +466,68 @@ def test_strong_factual_claim_without_eligible_binding_is_not_published(
     assert claims is not None and claims["status"] == "rejected"
 
 
+def test_web_policy_denied_never_calls_the_binder(tmp_path) -> None:
+    """P0-3: G16 outbound denial means zero binder provider calls.
+
+    The turn keeps ordinary non-research semantics: the candidate publishes
+    normally (no research material reached the model) and no validation audit
+    is fabricated.
+    """
+    from src.pedagogy.evaluation import SemanticEvaluation
+    from src.task_contract import (
+        TaskAwarePedagogyEngine,
+        TaskAwarePedagogyEvaluationService,
+        route_request_with_task_contract,
+    )
+
+    class _FailingSemanticEvaluator:
+        def evaluate(self, **kwargs: Any) -> SemanticEvaluation:
+            raise AssertionError("semantic evaluation must not run in this test")
+
+    calls = {"binding": 0, "generation": 0}
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        if kwargs.get("task_name") == "answer_claim_binding":
+            calls["binding"] += 1
+            raise AssertionError("binder must not run when web is denied")
+        calls["generation"] += 1
+        return ANSWER
+
+    def retrieve(_query: str, **kwargs: Any) -> Any:
+        return _FakeRagResult()
+
+    repository = RuntimeRepository(RuntimeDatabase(tmp_path / "runtime.db"))
+    dependencies = ChatDependencies(
+        route_request=route_request_with_task_contract,
+        read_memory_bundle=lambda _mode: {},
+        retrieve_local_knowledge=retrieve,
+        resolve_web_tools=lambda *args, **kwargs: WebToolTrace(enabled=False),
+        build_messages=lambda **kwargs: [
+            {"role": "system", "content": kwargs.get("rag_context", "")},
+            {"role": "user", "content": kwargs["user_input"]},
+        ],
+        pedagogy_engine=TaskAwarePedagogyEngine(),
+        pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
+            _FailingSemanticEvaluator()
+        ),
+        build_role_prompt=lambda *_args, **_kwargs: "ROLE",
+        chat=chat_fn,
+        chat_max_tokens=lambda performance_mode: 1000,
+    )
+    service = ExternalDataPolicyChatService(repository, dependencies)
+    base = _command(rows=[_row()], policy_service=True)
+    assert isinstance(base, PolicyChatCommand)
+    denied_kwargs = {**base.__dict__, "web_policy": "off", "web_consent": False}
+    denied = PolicyChatCommand(**denied_kwargs)
+    prepared = service.start_turn(denied)
+    reply = service.generate(prepared)
+    assert reply == ANSWER
+    assert calls["binding"] == 0
+    assert calls["generation"] == 1
+    turn = _turn(repository, prepared.turn.id)
+    assert (turn.rag_snapshot or {}).get("answer_validation_audit") is None
+
+
 def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> None:
     """The production ExternalDataPolicyChatService honors the same gate."""
     from src.pedagogy.evaluation import SemanticEvaluation

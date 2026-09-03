@@ -512,6 +512,9 @@ class ChatService:
         )
         cancel_check("generate_pre")
         try:
+            # request_max_retries=0: the SDK never retries under this call, so
+            # one method call is exactly one physical outbound attempt and the
+            # answer-stage audit stays authoritative.
             suffix = self.dependencies.chat(
                 prepared.messages,
                 model_profile=prepared.route["model_profile"],
@@ -519,6 +522,7 @@ class ChatService:
                     prepared.runtime_modes.performance_mode
                 ),
                 task_name="single_chat",
+                request_max_retries=0,
             )
         except TurnCancelled:
             # Fence: settle to a durable terminal state without the model
@@ -556,6 +560,7 @@ class ChatService:
             ),
             task_name="single_chat",
             should_cancel=should_cancel,
+            request_max_retries=0,
         )
 
     async def stream_async(self, prepared: PreparedChatTurn) -> AsyncIterator[str]:
@@ -566,8 +571,21 @@ class ChatService:
                 prepared.runtime_modes.performance_mode
             ),
             task_name="single_chat",
+            request_max_retries=0,
         ):
             yield token
+
+    def _research_outbound_allowed(self, prepared: PreparedChatTurn) -> bool | None:
+        """Outbound policy grant for a research turn.
+
+        ``None`` when no policy marker exists (plain ChatService callers);
+        ``False`` means the G16 decision denied web outbound, so the turn runs
+        with ordinary non-research semantics and no binder provider call.
+        """
+        policy = prepared.route.get("external_data_policy")
+        if not isinstance(policy, dict):
+            return None
+        return bool(policy.get("web_allowed"))
 
     def _gate_research_answer(
         self,
@@ -661,6 +679,7 @@ class ChatService:
                     prepared.runtime_modes.performance_mode
                 ),
                 task_name="answer_claim_binding",
+                request_max_retries=0,
             ),
             max_attempts=allowed_attempts,
         )
@@ -726,7 +745,10 @@ class ChatService:
     def complete_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
         gate_blocked_pedagogy = False
-        if prepared.answer_validation is not None:
+        if (
+            prepared.answer_validation is not None
+            and self._research_outbound_allowed(prepared) is not False
+        ):
             reply, claims_snapshot, audit_phases, gate_blocked_pedagogy = (
                 self._gate_research_answer(prepared, reply)
             )
