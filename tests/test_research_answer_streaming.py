@@ -18,6 +18,7 @@ from src.api.models.chat import ChatRequest
 from src.api.routes.chat_routes import chat_stream_endpoint
 from src.application.chat_service import (
     RESEARCH_ANSWER_BLOCKED_COPY,
+    ChatCommand,
     ChatDependencies,
     ChatService,
 )
@@ -402,6 +403,87 @@ def test_research_stream_processes_cancel_while_binder_runs_off_loop(
     assert turn is not None
     assert turn.status == "cancelled"
     assert turn.assistant_message == ""
+
+
+def test_continuation_cancel_before_generation_skips_binder(
+    runtime_test_context,
+) -> None:
+    session_id = "research-cancel-before-continuation-session"
+    turn_id = "research-cancel-before-continuation-turn"
+    partial = "旧的已发布片段"
+    binder_calls = 0
+
+    def binding_model() -> str:
+        nonlocal binder_calls
+        binder_calls += 1
+        return _payload()
+
+    def provider_must_not_run(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
+        raise AssertionError("continuation provider ran after cancellation")
+
+    service = _service(
+        runtime_test_context,
+        tokens=(),
+        binding_json=_payload(),
+        async_stream_chat=provider_must_not_run,
+        binding_model=binding_model,
+    )
+
+    first = service.start_turn(
+        ChatCommand(
+            user_input="该版本发布了吗？",
+            thread_id=session_id,
+            turn_id=turn_id,
+        )
+    )
+    assert list(service.stream(first)) == []
+    interrupted = service.interrupt_turn(first, partial)
+    assert interrupted.status == "interrupted"
+    assert interrupted.route_snapshot["answer_generation_calls"] == 1
+
+    original_start_turn = service.start_turn
+
+    def cancel_after_continuation_start(command: Any) -> Any:
+        prepared = original_start_turn(command)
+        if getattr(command, "continuation_of_turn_id", None):
+            outcome, _ = runtime_test_context.repository.request_turn_cancel(
+                prepared.turn.id,
+                expected_operation_id=prepared.turn.operation_id or "",
+            )
+            assert outcome == "accepted"
+        return prepared
+
+    service.start_turn = cancel_after_continuation_start
+
+    async def scenario() -> str:
+        response = await chat_stream_endpoint(
+            ChatRequest(
+                user_input="该版本发布了吗？",
+                session_id=session_id,
+                turn_id=turn_id,
+                continuation_of_turn_id=turn_id,
+                partial_reply=partial,
+            ),
+            ConnectedRequest(),
+            service,
+            runtime_test_context.web_lookup_service,
+            runtime_test_context.session_service,
+        )
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        return "".join(chunks)
+
+    body = asyncio.run(scenario())
+    stored = runtime_test_context.repository.get_chat_turn(turn_id)
+
+    assert binder_calls == 0
+    assert "event: cancelled" in body
+    assert "event: done" not in body
+    assert stored is not None
+    assert stored.status == "interrupted"
+    assert stored.assistant_message == partial
+    assert stored.route_snapshot["answer_generation_calls"] == 1
 
 
 async def _async_iter(values: tuple[str, ...]) -> AsyncIterator[str]:
