@@ -261,9 +261,9 @@ async def chat_stream_endpoint(
 
             def complete_if_active() -> Any:
                 # Second linearization check in the worker immediately before
-                # complete_turn/binder begins. Cancellation after this point is
-                # treated as cancellation of an already-started binder, which
-                # remains protected by the repository completion fence below.
+                # complete_turn begins. The application service performs the
+                # final checkpoint again immediately before each physical
+                # binder provider attempt.
                 if cancel_poll is not None and cancel_poll():
                     raise _TurnCancelled(
                         cancel_poll.turn_id,
@@ -273,10 +273,16 @@ async def chat_stream_endpoint(
 
             try:
                 completed = await asyncio.to_thread(complete_if_active)
+            except TurnCancelled as exc:
+                # Application-level binder checkpoints use TurnCancelled so the
+                # signal cannot be mistaken for a provider failure/retry. Route
+                # it back through the existing streaming cancellation state
+                # machine, which owns durable terminal settlement below.
+                raise _TurnCancelled(exc.turn_id, exc.operation_id) from None
             except ValueError:
-                # A cancel request can arrive while the synchronous binder is
-                # running in the worker.  The repository then rejects the
-                # completion write; preserve the cancellation state machine
+                # A cancel request can arrive after the binder provider call
+                # started but before its completion write. The repository then
+                # rejects the completion write; preserve cancellation semantics
                 # instead of surfacing a generic stream error.
                 if cancel_poll is not None and cancel_poll():
                     raise _TurnCancelled(
