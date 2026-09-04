@@ -1,6 +1,6 @@
-"""Answer-claim binder v2 segment-protocol tests (RQ1-C answer batch).
+"""Answer-claim binder v3 segment-protocol tests (RQ1-C answer batch).
 
-The binder never trusts the model to invent claim identity.  The server splits
+The binder never trusts the model to invent claim identity. The server splits
 the immutable final answer into segments (s1, s2, ...) and the producer must
 classify EVERY segment: missing, duplicate or unknown segment refs reject the
 whole binding, an asserted/qualified factual segment without positive
@@ -30,11 +30,13 @@ _ANSWER = "该版本已正式发布。另外该版本没有修复安全漏洞。
 _ANSWER_ONE = "该版本已正式发布。"
 _CLAIM_ONE = "该版本已正式发布。"
 _CLAIM_TWO = "另外该版本没有修复安全漏洞。"
+_RESEARCH_CLAIM_ID = "research_claim_1"
 
 
 def _row(evidence_id: str = "evidence_abc123", **extra: Any) -> AnswerClaimBindingRow:
     return AnswerClaimBindingRow(
         evidence_id=evidence_id,
+        claim_id=extra.get("claim_id", _RESEARCH_CLAIM_ID),
         title=extra.get("title", "Example release"),
         url=extra.get("url", "https://official.example/release"),
         source_role=extra.get("source_role", "official_statement"),
@@ -70,7 +72,9 @@ def _payload(segments: list[dict[str, Any]], *, refused: bool = False) -> str:
     )
 
 
-def _request(answer: str = "", rows: tuple[AnswerClaimBindingRow, ...] = ()) -> AnswerClaimBindingRequest:
+def _request(
+    answer: str = "", rows: tuple[AnswerClaimBindingRow, ...] = ()
+) -> AnswerClaimBindingRequest:
     return AnswerClaimBindingRequest(
         question="该版本发布了吗？",
         final_answer=answer or _ANSWER,
@@ -472,6 +476,7 @@ def test_context_contains_segment_refs_and_bounded_evidence_only() -> None:
             _row(),
             AnswerClaimBindingRow(
                 evidence_id="evidence_body_1",
+                claim_id=_RESEARCH_CLAIM_ID,
                 title="Full body",
                 url="https://example.com/body",
                 relation="supports",
