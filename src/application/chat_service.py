@@ -169,6 +169,45 @@ class ChatService:
         self, turn_id: str, operation_id: str
     ) -> Callable[[str], None]:
         def check(stage: str) -> None:
+            if stage == "answer_claim_binding_pre":
+                current = self.repository.get_chat_turn(turn_id)
+                if current is None:
+                    raise ValueError(f"Chat turn not found: {turn_id}")
+                try:
+                    started = int(
+                        current.route_snapshot.get(
+                            "answer_claim_binding_calls_started", 0
+                        )
+                    )
+                except (TypeError, ValueError):
+                    started = 0
+                reservation_route = {
+                    **current.route_snapshot,
+                    "answer_claim_binding_calls_started": max(
+                        0, min(started, 1000)
+                    )
+                    + 1,
+                }
+                try:
+                    self.repository.update_chat_turn(
+                        turn_id,
+                        assistant_message=current.assistant_message,
+                        status="streaming",
+                        route_snapshot=reservation_route,
+                        expected_operation_id=operation_id,
+                        enforce_operation_owner=True,
+                        expected_status="streaming",
+                        forbid_cancel_requested=True,
+                    )
+                except ValueError:
+                    if self.repository.turn_cancel_requested(turn_id, operation_id):
+                        raise TurnCancelled(
+                            stage=stage,
+                            turn_id=turn_id,
+                            operation_id=operation_id,
+                        ) from None
+                    raise
+                return
             if self.repository.turn_cancel_requested(turn_id, operation_id):
                 raise TurnCancelled(
                     stage=stage, turn_id=turn_id, operation_id=operation_id
