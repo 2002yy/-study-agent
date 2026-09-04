@@ -24,6 +24,7 @@ from src.domain.evidence import ClaimEvidenceLinkV1
 
 ANSWER = "该版本已正式发布。"
 EVIDENCE_ID = "evidence_support_1"
+RESEARCH_CLAIM_ID = "research_claim_1"
 
 
 def _run_with_brief(brief: Mapping[str, Any]) -> SimpleNamespace:
@@ -33,7 +34,12 @@ def _run_with_brief(brief: Mapping[str, Any]) -> SimpleNamespace:
     )
 
 
-def _brief(*, gate_status: str = "pass", rows: list[dict[str, Any]] | None = None, **extra: Any) -> dict[str, Any]:
+def _brief(
+    *,
+    gate_status: str = "pass",
+    rows: list[dict[str, Any]] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "research-evidence-brief-v1",
         "gate_status": gate_status,
@@ -55,7 +61,7 @@ def _evidence(
 ) -> dict[str, Any]:
     return {
         "evidence_id": evidence_id,
-        "claim_id": "research_claim_1",
+        "claim_id": RESEARCH_CLAIM_ID,
         "relation": relation,
         "strength": strength,
         "source_role": "primary",
@@ -68,9 +74,12 @@ def _evidence(
     }
 
 
-def _binding_row(*, relation: str = "supports", strength: str = "0.9") -> AnswerClaimBindingRow:
+def _binding_row(
+    *, relation: str = "supports", strength: str = "0.9"
+) -> AnswerClaimBindingRow:
     return AnswerClaimBindingRow(
         evidence_id=EVIDENCE_ID,
+        claim_id=RESEARCH_CLAIM_ID,
         title="Official source",
         url="https://official.example/source",
         source_role="primary",
@@ -109,9 +118,7 @@ def test_projection_requires_full_evidence_gate_pass() -> None:
         _run_with_brief(_brief(gate_status="partial", rows=[row]))
     ) == []
     assert research_binding_rows(
-        _run_with_brief(
-            _brief(rows=[row], conditional_wording_required=True)
-        )
+        _run_with_brief(_brief(rows=[row], conditional_wording_required=True))
     ) == []
     assert research_binding_rows(
         _run_with_brief(
@@ -182,6 +189,31 @@ def test_binder_preserves_server_owned_strength_in_link() -> None:
     link = bound.snapshot.claim_links[0]
     assert link.support_type == "direct_support"
     assert link.confidence == 0.81
+
+
+def test_ambiguous_missing_research_claim_id_fails_closed() -> None:
+    row_a = AnswerClaimBindingRow(
+        evidence_id=EVIDENCE_ID,
+        claim_id="research_claim_a",
+        relation="supports",
+        strength="strong",
+    )
+    row_b = AnswerClaimBindingRow(
+        evidence_id=EVIDENCE_ID,
+        claim_id="research_claim_b",
+        relation="supports",
+        strength="strong",
+    )
+    bound = bind_answer_claims(
+        request=AnswerClaimBindingRequest(
+            question="发布了吗？",
+            final_answer=ANSWER,
+            evidence_rows=(row_a, row_b),
+        ),
+        model_fn=lambda _messages: _model_payload(),
+    )
+    assert bound.snapshot.status == "rejected"
+    assert bound.snapshot.reason == "missing_research_claim_id"
 
 
 def test_publication_fallback_rejects_low_confidence_positive_link() -> None:
