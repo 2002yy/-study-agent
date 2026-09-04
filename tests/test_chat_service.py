@@ -379,11 +379,16 @@ def test_partial_commit_interrupts_streaming_turn_without_overwriting_server_met
     )
 
     thread = repository.get_chat_thread("chat_streaming_partial")
+    expected_route = {
+        **prepared.turn.route_snapshot,
+        "answer_generation_calls": 1,
+    }
     assert changed is True
     assert stored.status == "interrupted"
     assert stored.user_message == "server question"
     assert stored.role == prepared.turn.role
-    assert stored.route_snapshot == prepared.turn.route_snapshot
+    assert stored.route_snapshot == expected_route
+    assert stored.route_snapshot["role"] != "client-role"
     assert stored.rag_snapshot == prepared.turn.rag_snapshot
     assert thread is not None
     assert thread.active_operation_id is None
