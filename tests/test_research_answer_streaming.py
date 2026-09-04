@@ -2,8 +2,8 @@
 
 A research-backed turn buffers the whole candidate until the publication gate
 passes; a binding failure therefore emits zero candidate tokens while the
-canonical blocked copy is what the learner sees.  Ordinary chat streaming
-keeps emitting tokens as they arrive.
+canonical blocked copy is what the learner sees. Ordinary chat streaming keeps
+emitting tokens as they arrive.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from src.mode_manager import RuntimeModes
 from src.router import route_request
 
 EVIDENCE_ID = "evidence_stream_1"
+RESEARCH_CLAIM_ID = "research_claim_stream_1"
 
 
 class ConnectedRequest:
@@ -35,6 +36,7 @@ class ConnectedRequest:
 def _row(evidence_id: str = EVIDENCE_ID) -> dict[str, Any]:
     return {
         "evidence_id": evidence_id,
+        "claim_id": RESEARCH_CLAIM_ID,
         "title": "Stream release note",
         "url": "https://official.example/stream-release",
         "source_role": "official_statement",
@@ -53,6 +55,7 @@ def _payload(
     segment = {
         "segment_ref": "s1",
         "kind": "factual",
+        "research_claim_id": RESEARCH_CLAIM_ID,
         "status": "asserted",
         "evidence_support": list(support),
     }
@@ -135,7 +138,12 @@ class _FakeRagResult:
 
 
 async def _consume(
-    service, research_service, session_service, session_id: str, *, user_input: str = "该版本发布了吗？"
+    service,
+    research_service,
+    session_service,
+    session_id: str,
+    *,
+    user_input: str = "该版本发布了吗？",
 ) -> str:
     response = await chat_stream_endpoint(
         ChatRequest(user_input=user_input, session_id=session_id),
@@ -165,11 +173,9 @@ def test_research_stream_passes_binding_and_flushes_once(runtime_test_context) -
             "stream-pass-session",
         )
     )
-    # The verified candidate arrives as exactly one token event followed by
-    # the done payload; no partial candidate chunk preceded validation.
     assert body.count("event: token") == 1
-    assert body.count(candidate) == 2  # one token event + done reply
-    assert body.index('event: done') > body.index(candidate)
+    assert body.count(candidate) == 2
+    assert body.index("event: done") > body.index(candidate)
 
 
 def test_research_stream_binding_failure_emits_zero_candidate_tokens(
@@ -190,9 +196,9 @@ def test_research_stream_binding_failure_emits_zero_candidate_tokens(
             "stream-reject-session",
         )
     )
-    assert candidate not in body  # zero candidate chunks reached the learner
+    assert candidate not in body
     assert RESEARCH_ANSWER_BLOCKED_COPY in body
-    assert 'event: done' in body
+    assert "event: done" in body
 
 
 def test_plain_stream_keeps_emitting_tokens_immediately(runtime_test_context) -> None:
@@ -218,18 +224,12 @@ def test_plain_stream_keeps_emitting_tokens_immediately(runtime_test_context) ->
             "plain-stream-session",
         )
     )
-    assert 'event: token' in body
+    assert "event: token" in body
     assert "part" in body and " two" in body
-    assert 'event: done' in body
+    assert "event: done" in body
 
 
 def test_policy_denied_turn_streams_tokens_immediately(runtime_test_context) -> None:
-    """P1: buffering predicate matches the gate's own activation predicate.
-
-    A web-policy-denied research turn keeps ordinary streaming semantics:
-    tokens arrive as they are generated (no single late flush) and no binder
-    provider call happens.
-    """
     candidate = "该版本已正式发布。"
     service = _service(
         runtime_test_context,
@@ -245,10 +245,9 @@ def test_policy_denied_turn_streams_tokens_immediately(runtime_test_context) -> 
             "policy-denied-stream-session",
         )
     )
-    # Two separate token events (per generated chunk), not one buffered flush.
     assert body.count("event: token") >= 2
     assert candidate in body
-    assert 'event: done' in body
+    assert "event: done" in body
     assert RESEARCH_ANSWER_BLOCKED_COPY not in body
 
 
