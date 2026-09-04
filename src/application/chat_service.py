@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -306,9 +307,9 @@ class ChatService:
                 **route,
                 "pedagogy": pedagogy_plan.to_dict(),
                 "learning_state": next_learning_state.to_dict(),
-                # Durable count of generation calls that already produced the
-                # partial candidate before this operation. The current call is
-                # added only when it actually settles as interrupted/completed.
+                # Durable count of generation calls that already contributed to
+                # this turn. The current operation increments only immediately
+                # before its provider call is invoked.
                 "answer_generation_calls": prior_generation_calls,
             }
             role_prompt = self.dependencies.build_role_prompt(
@@ -417,7 +418,11 @@ class ChatService:
                 operation_id=operation_id,
                 conversation_instruction=command.conversation_instruction,
             )
-            expected = "pending" if reserved_existing is None or reserved_existing.status == "pending" else "interrupted"
+            expected = (
+                "pending"
+                if reserved_existing is None or reserved_existing.status == "pending"
+                else "interrupted"
+            )
             streaming = self.repository.update_chat_turn(
                 turn_id,
                 assistant_message=base_reply,
@@ -488,18 +493,68 @@ class ChatService:
             answer_validation=command.answer_validation,
         )
 
+    def _begin_generation_call(self, prepared: PreparedChatTurn) -> bool:
+        """Durably record one server-initiated generation call before invocation.
+
+        Terminal/partial paths only inherit this counter. A cancellation that won
+        the ownership race prevents this CAS and therefore never invents a model
+        call merely because the turn later settles as interrupted/cancelled.
+        """
+        operation_id = prepared.turn.operation_id or ""
+        next_calls = _route_generation_calls(prepared.route) + 1
+        route_snapshot = {
+            **prepared.route,
+            "answer_generation_calls": next_calls,
+        }
+        try:
+            updated = self.repository.update_chat_turn(
+                prepared.turn.id,
+                assistant_message=prepared.turn.assistant_message,
+                status="streaming",
+                route_snapshot=route_snapshot,
+                expected_operation_id=operation_id,
+                enforce_operation_owner=True,
+                expected_status="streaming",
+                forbid_cancel_requested=True,
+            )
+        except ValueError:
+            if operation_id and self.repository.turn_cancel_requested(
+                prepared.turn.id, operation_id
+            ):
+                return False
+            raise
+        if updated is None:
+            raise RuntimeError(f"Chat turn disappeared: {prepared.turn.id}")
+        prepared.route["answer_generation_calls"] = next_calls
+        return True
+
     def generate(self, prepared: PreparedChatTurn) -> str:
         cancel_check = self._make_cancel_check(
             prepared.turn.id, prepared.turn.operation_id or ""
         )
         cancel_check("generate_pre")
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        if not self._begin_generation_call(prepared):
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage="generate_pre",
+                assistant_message=(
+                    prepared.base_reply if prepared.is_continuation else ""
+                ),
+            )
+            raise TurnCancelled(
+                stage="generate_pre",
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+            )
         try:
             suffix = self.dependencies.chat(
                 prepared.messages,
                 model_profile=prepared.route["model_profile"],
-                max_tokens=self.dependencies.chat_max_tokens(
-                    prepared.runtime_modes.performance_mode
-                ),
+                max_tokens=max_tokens,
                 task_name="single_chat",
                 request_max_retries=0,
             )
@@ -527,24 +582,31 @@ class ChatService:
         return self.complete_turn(prepared, suffix).assistant_message
 
     def stream(self, prepared: PreparedChatTurn, *, should_cancel=None) -> Iterator[str]:
-        return self.dependencies.stream_chat(
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        if not self._begin_generation_call(prepared):
+            return
+        yield from self.dependencies.stream_chat(
             prepared.messages,
             model_profile=prepared.route["model_profile"],
-            max_tokens=self.dependencies.chat_max_tokens(
-                prepared.runtime_modes.performance_mode
-            ),
+            max_tokens=max_tokens,
             task_name="single_chat",
             should_cancel=should_cancel,
             request_max_retries=0,
         )
 
     async def stream_async(self, prepared: PreparedChatTurn) -> AsyncIterator[str]:
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        started = await asyncio.to_thread(self._begin_generation_call, prepared)
+        if not started:
+            return
         async for token in self.dependencies.async_stream_chat(
             prepared.messages,
             model_profile=prepared.route["model_profile"],
-            max_tokens=self.dependencies.chat_max_tokens(
-                prepared.runtime_modes.performance_mode
-            ),
+            max_tokens=max_tokens,
             task_name="single_chat",
             request_max_retries=0,
         ):
@@ -606,9 +668,9 @@ class ChatService:
         prepared: PreparedChatTurn,
         candidate: str,
     ) -> tuple[str, Any | None, dict[str, Any], bool]:
-        generation_calls = _route_generation_calls(prepared.route) + 1
+        generation_calls = _route_generation_calls(prepared.route)
         generation_phase = {
-            "attempted": True,
+            "attempted": generation_calls > 0,
             "model_calls": generation_calls,
             "attempts": generation_calls,
             "outcome": PHASE_OUTCOME_COMPLETED,
@@ -861,7 +923,7 @@ class ChatService:
                 "web_context_used": prepared.web_context_used,
                 "is_continuation": prepared.is_continuation,
                 "is_continuation_resolved": prepared.is_continuation,
-                "answer_generation_calls": _route_generation_calls(prepared.route) + 1,
+                "answer_generation_calls": _route_generation_calls(prepared.route),
             },
             rag_snapshot=completed_truth.rag_snapshot,
             operation_id=prepared.turn.operation_id or "",
@@ -886,7 +948,7 @@ class ChatService:
             route_snapshot={
                 **prepared.route,
                 "interrupted": True,
-                "answer_generation_calls": _route_generation_calls(prepared.route) + 1,
+                "answer_generation_calls": _route_generation_calls(prepared.route),
             },
             rag_snapshot=prepared.rag,
             pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
@@ -1039,10 +1101,6 @@ class ChatService:
         if existing.status == "interrupted" and existing.assistant_message == stored_reply:
             return existing, False
         route_truth = deepcopy(existing.route_snapshot)
-        if existing.status == "streaming":
-            route_truth["answer_generation_calls"] = (
-                _route_generation_calls(existing.route_snapshot) + 1
-            )
         partial_truth = _normalized_turn_truth(
             turn=existing,
             fallback_turn_id=turn_id,
