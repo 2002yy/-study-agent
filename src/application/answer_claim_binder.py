@@ -50,10 +50,16 @@ _MAX_SEGMENT_CHARS = 1200
 _ALLOWED_SEGMENT_KINDS = frozenset(
     {"factual", "instructional", "question", "recommendation", "uncertainty"}
 )
-# Preserve paragraph/list boundaries and split common sentence/clause endings.
-# The bounded segment limit makes over-segmentation fail closed rather than
-# silently dropping part of an answer.
-_SEGMENT_BOUNDARY = re.compile(r"(?<=[。！？；!?;.:：，,])|[\r\n]+")
+# Hard boundaries are sentence/semicolon/paragraph endings. Commas split only
+# when the following clause clearly switches into advice/instruction wording;
+# splitting every comma over-segments ordinary factual prose and can exhaust
+# the bounded segment budget without improving claim coverage.
+_SEGMENT_BOUNDARY = re.compile(
+    r"(?<=[。！？；!?;.:：])|[\r\n]+|"
+    r"(?<=[，,])(?=\s*(?:建议|应该|应当|请|不要|需要|需|推荐|最好|可考虑|"
+    r"recommend\b|should\b|please\b|consider\b))",
+    re.IGNORECASE,
+)
 
 BinderModelFn = Callable[[Sequence[Mapping[str, Any]]], str]
 
