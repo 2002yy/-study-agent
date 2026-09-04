@@ -9,6 +9,8 @@ from src.application.policy_chat_service import (
 )
 from src.context_builder import build_messages
 from src.mode_manager import RuntimeModes
+from src.pedagogy.engine import PedagogyEngine
+from src.pedagogy.evaluation import PedagogyEvaluationService
 from src.router import route_request
 
 
@@ -22,6 +24,19 @@ class _FakeRagResult:
             "result_count": 0,
             "results": [],
         }
+
+
+class _PolicyPedagogyEvaluation(PedagogyEvaluationService):
+    def evaluate_learner(self, **kwargs: Any) -> Any:
+        kwargs.pop("task_contract", None)
+        kwargs.pop("semantic_review_allowed", None)
+        return super().evaluate_learner(**kwargs)
+
+
+class _PolicyPedagogyEngine(PedagogyEngine):
+    def plan(self, **kwargs: Any) -> Any:
+        kwargs.pop("task_contract", None)
+        return super().plan(**kwargs)
 
 
 def _policy_route_request(**kwargs: Any) -> dict[str, Any]:
@@ -40,6 +55,8 @@ def _dependencies() -> ChatDependencies:
         chat=lambda *_args, **_kwargs: "unused",
         stream_chat=lambda *_args, **_kwargs: iter(()),
         chat_max_tokens=lambda _performance_mode: 1000,
+        pedagogy_engine=_PolicyPedagogyEngine(),
+        pedagogy_evaluation=_PolicyPedagogyEvaluation(),
     )
 
 
