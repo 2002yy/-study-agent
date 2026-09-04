@@ -213,6 +213,11 @@ class ChatService:
         settings = _session_settings(command, context_mode)
         turn_id = command.turn_id or command.continuation_of_turn_id or new_id("turn")
         is_continuation = bool(command.continuation_of_turn_id)
+        prior_generation_calls = (
+            _persisted_generation_calls(existing)
+            if is_continuation and existing is not None
+            else 0
+        )
         thread_id = command.thread_id or (
             existing.thread_id if existing is not None and is_continuation else ChatThread().id
         )
@@ -301,6 +306,10 @@ class ChatService:
                 **route,
                 "pedagogy": pedagogy_plan.to_dict(),
                 "learning_state": next_learning_state.to_dict(),
+                # Durable count of generation calls that already produced the
+                # partial candidate before this operation. The current call is
+                # added only when it actually settles as interrupted/completed.
+                "answer_generation_calls": prior_generation_calls,
             }
             role_prompt = self.dependencies.build_role_prompt(
                 route["role"],
@@ -597,10 +606,11 @@ class ChatService:
         prepared: PreparedChatTurn,
         candidate: str,
     ) -> tuple[str, Any | None, dict[str, Any], bool]:
+        generation_calls = _route_generation_calls(prepared.route) + 1
         generation_phase = {
             "attempted": True,
-            "model_calls": 1,
-            "attempts": 1,
+            "model_calls": generation_calls,
+            "attempts": generation_calls,
             "outcome": PHASE_OUTCOME_COMPLETED,
             "error_type": "",
         }
@@ -769,6 +779,11 @@ class ChatService:
             if claims_snapshot is not None:
                 published_rag["answer_claim_snapshot"] = claims_snapshot.to_dict()
             if claims_snapshot is not None and claims_snapshot.status == "validated":
+                linked_evidence_ids = {
+                    link.evidence_id
+                    for link in claims_snapshot.claim_links
+                    if link.evidence_id
+                }
                 published_rag["research_evidence_refs"] = [
                     {
                         "evidence_id": str(row.get("evidence_id") or ""),
@@ -782,7 +797,8 @@ class ChatService:
                         "evidence_rows"
                     )
                     or ()
-                    if isinstance(row, dict) and str(row.get("evidence_id") or "")
+                    if isinstance(row, dict)
+                    and str(row.get("evidence_id") or "") in linked_evidence_ids
                 ]
         else:
             published_rag = deepcopy(prepared.rag)
@@ -845,6 +861,7 @@ class ChatService:
                 "web_context_used": prepared.web_context_used,
                 "is_continuation": prepared.is_continuation,
                 "is_continuation_resolved": prepared.is_continuation,
+                "answer_generation_calls": _route_generation_calls(prepared.route) + 1,
             },
             rag_snapshot=completed_truth.rag_snapshot,
             operation_id=prepared.turn.operation_id or "",
@@ -866,7 +883,11 @@ class ChatService:
             role=prepared.route["role"],
             mode=prepared.route["mode"],
             model=prepared.route["model_profile"],
-            route_snapshot={**prepared.route, "interrupted": True},
+            route_snapshot={
+                **prepared.route,
+                "interrupted": True,
+                "answer_generation_calls": _route_generation_calls(prepared.route) + 1,
+            },
             rag_snapshot=prepared.rag,
             pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
             parent_turn_id=prepared.turn.parent_turn_id,
@@ -1017,6 +1038,11 @@ class ChatService:
             )
         if existing.status == "interrupted" and existing.assistant_message == stored_reply:
             return existing, False
+        route_truth = deepcopy(existing.route_snapshot)
+        if existing.status == "streaming":
+            route_truth["answer_generation_calls"] = (
+                _route_generation_calls(existing.route_snapshot) + 1
+            )
         partial_truth = _normalized_turn_truth(
             turn=existing,
             fallback_turn_id=turn_id,
@@ -1027,7 +1053,7 @@ class ChatService:
             role=existing.role,
             mode=existing.mode,
             model=existing.model,
-            route_snapshot=existing.route_snapshot,
+            route_snapshot=route_truth,
             rag_snapshot=existing.rag_snapshot,
             pedagogy_snapshot=existing.pedagogy_snapshot,
             parent_turn_id=existing.parent_turn_id,
@@ -1123,6 +1149,27 @@ def _normalized_turn_truth(
         created_at=turn.created_at if turn is not None else utc_now(),
         updated_at=utc_now(),
     )
+
+
+def _route_generation_calls(route_snapshot: dict[str, Any]) -> int:
+    try:
+        calls = int(route_snapshot.get("answer_generation_calls", 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(calls, 1000))
+
+
+def _persisted_generation_calls(turn: ChatTurn) -> int:
+    """Recover durable generation truth for a continuation.
+
+    New interrupted turns carry an explicit server-owned count in the route
+    snapshot. Legacy interrupted turns predate that marker; reaching the
+    interrupted state itself proves at least one physical generation attempt,
+    so they conservatively resume from one instead of silently undercounting.
+    """
+    if "answer_generation_calls" in turn.route_snapshot:
+        return _route_generation_calls(turn.route_snapshot)
+    return 1 if turn.status == "interrupted" else 0
 
 
 def _requires_mastery_evidence(plan: PedagogyTurnPlan) -> bool:
