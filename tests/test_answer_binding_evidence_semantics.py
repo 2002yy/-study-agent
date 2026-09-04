@@ -280,3 +280,62 @@ def test_newline_is_a_deterministic_segment_boundary() -> None:
     )
     assert bound.snapshot.status == "validated"
     assert "[s1]" in seen[0] and "[s2]" in seen[0]
+
+
+def test_ordinary_factual_comma_stays_one_segment() -> None:
+    answer = "该版本已正式发布，并修复了已知问题。"
+    seen: list[str] = []
+
+    def model_fn(messages: Sequence[Mapping[str, Any]]) -> str:
+        seen.append(str(messages[1]["content"]))
+        return _model_payload()
+
+    bound = bind_answer_claims(
+        request=AnswerClaimBindingRequest(
+            question="发布了吗？",
+            final_answer=answer,
+            evidence_rows=(_binding_row(),),
+        ),
+        model_fn=model_fn,
+    )
+    assert bound.snapshot.status == "validated"
+    assert "[s1]" in seen[0]
+    assert "[s2]" not in seen[0]
+
+
+def test_factual_to_recommendation_comma_splits_deterministically() -> None:
+    answer = "该版本已正式发布，建议立即升级。"
+    seen: list[str] = []
+
+    def model_fn(messages: Sequence[Mapping[str, Any]]) -> str:
+        seen.append(str(messages[1]["content"]))
+        return json.dumps(
+            {
+                "refused": False,
+                "segments": [
+                    {
+                        "segment_ref": "s1",
+                        "kind": "factual",
+                        "status": "asserted",
+                        "evidence_support": [EVIDENCE_ID],
+                    },
+                    {
+                        "segment_ref": "s2",
+                        "kind": "recommendation",
+                        "evidence_support": [],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    bound = bind_answer_claims(
+        request=AnswerClaimBindingRequest(
+            question="发布了吗？",
+            final_answer=answer,
+            evidence_rows=(_binding_row(),),
+        ),
+        model_fn=model_fn,
+    )
+    assert bound.snapshot.status == "validated"
+    assert "[s1]" in seen[0] and "[s2]" in seen[0]
