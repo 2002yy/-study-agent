@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from dataclasses import replace
 from typing import Any, Callable
 
 from src.application.answer_claim_binder import _segment_answer
@@ -158,6 +160,59 @@ def test_client_partial_commit_cannot_invent_generation_call(tmp_path) -> None:
     assert changed is True
     assert committed.status == "interrupted"
     assert committed.route_snapshot["answer_generation_calls"] == 0
+
+
+def test_async_generation_marker_precedes_provider_and_respects_cancel(tmp_path) -> None:
+    evidence_id = "evidence-1"
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        return _binding_payload(evidence_id)
+
+    service, repository = _service(tmp_path, chat_fn)
+    observed_counts: list[int] = []
+
+    async def async_stream_fn(*args: Any, **kwargs: Any):
+        turn_id = str(kwargs.pop("_test_turn_id", ""))
+        if not turn_id:
+            active = [
+                turn
+                for thread in repository.list_chat_threads()
+                for turn in repository.list_chat_turns(thread.id)
+                if turn.status == "streaming"
+            ]
+            turn_id = active[-1].id
+        stored = repository.get_chat_turn(turn_id)
+        assert stored is not None
+        observed_counts.append(stored.route_snapshot["answer_generation_calls"])
+        if False:
+            yield "unused"
+
+    service.dependencies = replace(
+        service.dependencies,
+        async_stream_chat=async_stream_fn,
+    )
+
+    async def consume(prepared) -> list[str]:
+        return [token async for token in service.stream_async(prepared)]
+
+    prepared = service.start_turn(_command(rows=[_row(evidence_id)]))
+    assert asyncio.run(consume(prepared)) == []
+    assert observed_counts == [1]
+    stored = repository.get_chat_turn(prepared.turn.id)
+    assert stored is not None
+    assert stored.route_snapshot["answer_generation_calls"] == 1
+
+    cancelled = service.start_turn(_command(rows=[_row(evidence_id)]))
+    outcome, _turn = repository.request_turn_cancel(
+        cancelled.turn.id,
+        expected_operation_id=cancelled.turn.operation_id or "",
+    )
+    assert outcome == "accepted"
+    assert asyncio.run(consume(cancelled)) == []
+    assert observed_counts == [1]
+    stored_cancelled = repository.get_chat_turn(cancelled.turn.id)
+    assert stored_cancelled is not None
+    assert stored_cancelled.route_snapshot["answer_generation_calls"] == 0
 
 
 def test_continuation_audit_counts_prior_generation_call(tmp_path) -> None:
