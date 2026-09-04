@@ -148,18 +148,19 @@ def test_whitespace_only_evidence_ids_are_skipped():
     assert [row["evidence_id"] for row in rows] == ["evidence_b2"]
 
 
-def test_ignores_client_supplied_shape_without_run_brief():
-    # Even if someone crafts a research_context that looks like a brief, the
-    # projection only reads whitelisted scalar fields and never page bodies.
+def test_ignores_unwhitelisted_page_body_on_valid_support_row():
+    # The row must otherwise satisfy the publication support contract; this
+    # test is specifically about privacy projection, not eligibility.
     run = _brief_run(
         rows=[
-            {
-                "evidence_id": "evidence_x1",
-                "title": "T",
-                "url": "https://example.com/x",
-                "content": "full page body that must never leave",
-            }
+            _eligible_row(
+                "evidence_x1",
+                title="T",
+                url="https://example.com/x",
+                content="full page body that must never leave",
+            )
         ]
     )
     rows = research_binding_rows(run)
+    assert len(rows) == 1
     assert "content" not in rows[0]
