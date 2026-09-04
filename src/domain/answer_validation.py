@@ -3,7 +3,8 @@
 ``rag_snapshot["answer_validation_audit"]`` is the authoritative record of the
 final-answer model phases for one ChatTurn:
 
-- ``answer_generation``       the single physical answer-generator call;
+- ``answer_generation``       physical answer-generator calls that contributed to
+                              this turn; continuations accumulate prior calls;
 - ``answer_claim_binding``    binder provider calls behind the publication gate.
 
 It answers one question only: how many physical model calls happened in the
