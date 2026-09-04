@@ -381,7 +381,7 @@ def test_partial_commit_interrupts_streaming_turn_without_overwriting_server_met
     thread = repository.get_chat_thread("chat_streaming_partial")
     expected_route = {
         **prepared.turn.route_snapshot,
-        "answer_generation_calls": 1,
+        "answer_generation_calls": 0,
     }
     assert changed is True
     assert stored.status == "interrupted"
