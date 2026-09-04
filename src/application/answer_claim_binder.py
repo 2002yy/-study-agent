@@ -65,6 +65,7 @@ _SEGMENT_BOUNDARY = re.compile(
 )
 
 BinderModelFn = Callable[[Sequence[Mapping[str, Any]]], str]
+BinderBeforeCallFn = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,7 @@ def bind_answer_claims(
     model_fn: BinderModelFn,
     producer: str = ANSWER_CLAIM_BINDER_PRODUCER,
     max_attempts: int = 1,
+    before_model_call: BinderBeforeCallFn | None = None,
 ) -> BoundAnswerClaims:
     """Bind the immutable candidate answer to server-owned research evidence."""
     answer = str(request.final_answer or "")
@@ -134,6 +136,11 @@ def bind_answer_claims(
     attempts = max(0, min(int(max_attempts), 2))
     last_error = ""
     for attempt in range(1, attempts + 1):
+        # This hook intentionally runs outside the provider-failure catch: an
+        # accepted cancellation is control flow, not a failed binder attempt,
+        # and must never be swallowed or retried as producer failure.
+        if before_model_call is not None:
+            before_model_call()
         try:
             raw = model_fn(messages)
         except Exception as exc:  # noqa: BLE001 - provider failures are results
