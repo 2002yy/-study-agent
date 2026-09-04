@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -600,7 +599,7 @@ class ChatService:
         max_tokens = self.dependencies.chat_max_tokens(
             prepared.runtime_modes.performance_mode
         )
-        started = await asyncio.to_thread(self._begin_generation_call, prepared)
+        started = self._begin_generation_call(prepared)
         if not started:
             return
         async for token in self.dependencies.async_stream_chat(
