@@ -382,8 +382,6 @@ def test_factual_claims_fully_bound_requires_positive_support() -> None:
     snapshot = _snapshot_of(bind_answer_claims(request=request, model_fn=model_fn))
     assert factual_claims_fully_bound(snapshot) is True
 
-    # Manually downgrade the only link to a contradicts relation: the gate
-    # check must now refuse publication.
     forged = AnswerClaimSnapshotV1(
         answer_hash=snapshot.answer_hash,
         claims=snapshot.claims,
@@ -459,7 +457,10 @@ def test_chinese_and_english_sentence_splitting_is_deterministic() -> None:
             ]
         )
 
-    bound = bind_answer_claims(request=_request(answer=answer, rows=(_row(), _row("evidence_def456"))), model_fn=model_fn)
+    bound = bind_answer_claims(
+        request=_request(answer=answer, rows=(_row(), _row("evidence_def456"))),
+        model_fn=model_fn,
+    )
     assert bound.snapshot.status == "validated"
     assert len(bound.snapshot.claims) == 3
     assert all(claim.text in answer for claim in bound.snapshot.claims)
@@ -473,6 +474,8 @@ def test_context_contains_segment_refs_and_bounded_evidence_only() -> None:
                 evidence_id="evidence_body_1",
                 title="Full body",
                 url="https://example.com/body",
+                relation="supports",
+                strength="strong",
             ),
         )
     )
