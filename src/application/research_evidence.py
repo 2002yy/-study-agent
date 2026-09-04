@@ -46,7 +46,6 @@ def research_sources_snapshot(run: Any) -> dict[str, Any]:
     Full snippets, extracted article content, query attempts, tokens, credentials
     and arbitrary provider payloads are intentionally excluded from ChatTurn truth.
     """
-
     context = getattr(run, "research_context", None)
     context = context if isinstance(context, dict) else {}
     read_summary = context.get("read_summary")
@@ -71,11 +70,7 @@ def research_sources_snapshot(run: Any) -> dict[str, Any]:
 
 
 def _safe_records(records: Iterable[Any]) -> list[dict[str, Any]]:
-    return [
-        safe
-        for record in records
-        if (safe := _safe_record(record)) is not None
-    ]
+    return [safe for record in records if (safe := _safe_record(record)) is not None]
 
 
 def _safe_record(record: Any) -> dict[str, Any] | None:
@@ -163,19 +158,18 @@ def research_run_provenance(run: Any) -> bool:
 
 
 def research_binding_rows(run: Any) -> list[dict[str, Any]]:
-    """Project positive strong support from a server-owned Evidence Brief.
+    """Project claim-specific positive strong support from an Evidence Brief.
 
     The Evidence Brief is broader than the binder support surface: it may carry
     contradictions, qualifying evidence and partial/block gate state so the
     synthesis model can explain uncertainty. Publication validation must not
-    convert those rows into support. Therefore this projection returns rows
-    only when the upstream Evidence Gate fully passed and all gate-owned
-    closure fields explicitly say there are no remaining constraints, then
-    keeps only ``supports`` rows meeting the production strong threshold.
+    convert those rows into support. This projection therefore requires an
+    explicit fully-passed Evidence Gate and retains the claim_id on every row.
 
-    Missing, malformed, partial, blocked or older incomplete briefs yield an
-    empty list so the existing publication gate fails closed before any binder
-    provider call.
+    Dedupe is by ``(claim_id, evidence_id)`` rather than evidence id alone: one
+    physical source can participate differently in multiple research claims,
+    and answer validation must never collapse those relations into one global
+    support truth.
     """
     context = getattr(run, "research_context", None)
     context = context if isinstance(context, dict) else {}
@@ -188,16 +182,20 @@ def research_binding_rows(run: Any) -> list[dict[str, Any]]:
     if not isinstance(eligible, list):
         return []
     rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for raw_row in eligible:
         if not isinstance(raw_row, Mapping):
             continue
         if not _row_is_positive_strong_support(raw_row):
             continue
         evidence_id = _scalar_text(raw_row.get("evidence_id"))
-        if not evidence_id or evidence_id in seen:
+        claim_id = _scalar_text(raw_row.get("claim_id"))
+        if not evidence_id or not claim_id:
             continue
-        seen.add(evidence_id)
+        key = (claim_id, evidence_id)
+        if key in seen:
+            continue
+        seen.add(key)
         rows.append(
             {
                 field: _scalar_text(raw_row.get(field))
@@ -241,8 +239,6 @@ def _row_is_positive_strong_support(row: Mapping[str, Any]) -> bool:
 
 
 def _support_strength(value: Any) -> float | None:
-    # ``strong`` is retained only for existing synthetic/fixture surfaces;
-    # production Evidence Brief rows carry numeric confidence.
     if isinstance(value, str) and value.strip().lower() == "strong":
         return 1.0
     try:
