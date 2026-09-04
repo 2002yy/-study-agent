@@ -14,10 +14,7 @@ from src.application.answer_claim_binder import (
     AnswerClaimBindingRow,
     bind_answer_claims,
 )
-from src.application.chat_service import (
-    ChatDependencies,
-    TurnCancelled,
-)
+from src.application.chat_service import ChatDependencies
 from src.context_builder import build_messages
 from src.mode_manager import RuntimeModes
 from src.router import route_request
