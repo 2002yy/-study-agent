@@ -223,15 +223,23 @@ def _parse_binder_output(
             continue
         if status not in {"asserted", "qualified"}:
             return None, "malformed_structured_output"
-        if not research_claim_id:
-            return None, "missing_research_claim_id"
-        if research_claim_id not in known_research_claim_ids:
-            return None, "unknown_research_claim_id"
         if not support_ids:
             return None, "unbound_factual_segment"
         unknown = [item for item in support_ids if item not in known_evidence_ids]
         if unknown:
             return None, "unknown_evidence_id"
+        if research_claim_id:
+            if research_claim_id not in known_research_claim_ids:
+                return None, "unknown_research_claim_id"
+        else:
+            inferred = _infer_research_claim_id(
+                support_ids=support_ids,
+                rows_by_link=rows_by_link,
+                known_research_claim_ids=known_research_claim_ids,
+            )
+            if inferred is None:
+                return None, "missing_research_claim_id"
+            research_claim_id = inferred
 
         support_rows: list[tuple[str, float]] = []
         for evidence_id in support_ids:
@@ -278,6 +286,28 @@ def _parse_binder_output(
         )
     except (TypeError, ValueError):
         return None, "malformed_structured_output"
+
+
+def _infer_research_claim_id(
+    *,
+    support_ids: tuple[str, ...],
+    rows_by_link: Mapping[tuple[str, str], AnswerClaimBindingRow],
+    known_research_claim_ids: set[str],
+) -> str | None:
+    """Infer a claim id only when all support ids imply one unique claim.
+
+    This is server-side lineage resolution, not model authority: no new id is
+    invented. If the same evidence set can belong to multiple research claims,
+    omission stays ambiguous and the binding fails closed.
+    """
+    candidates = {
+        claim_id
+        for claim_id in known_research_claim_ids
+        if all((claim_id, evidence_id) in rows_by_link for evidence_id in support_ids)
+    }
+    if len(candidates) != 1:
+        return None
+    return next(iter(candidates))
 
 
 def _positive_support_confidence(row: AnswerClaimBindingRow) -> float | None:
@@ -357,10 +387,11 @@ def _binding_messages(
         "2. Return EXACTLY one entry per segment_ref; missing, duplicate or "
         "unknown refs are rejected.\n"
         "3. kind is factual/instructional/question/recommendation/uncertainty.\n"
-        "4. Every factual segment must choose exactly one research_claim_id "
-        "shown in the evidence rows, status asserted|qualified, and at least "
-        "one evidence_id from that SAME research claim. Use only evidence rows "
-        "that positively and strongly support the segment.\n"
+        "4. Every factual segment needs status asserted|qualified and at least "
+        "one evidence_id from one research claim. research_claim_id SHOULD be "
+        "copied from the evidence rows; if omitted, the server accepts it only "
+        "when all chosen evidence ids uniquely imply the same claim. Use only "
+        "evidence rows that positively and strongly support the segment.\n"
         "5. Non-factual segments must omit status/research_claim_id and have an "
         "empty evidence_support list.\n"
         "6. If the whole answer cannot be safely bound, set refused=true.\n"
