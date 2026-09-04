@@ -6,19 +6,16 @@ bound to existing server-owned evidence ids. It is deliberately NOT an answer
 generator:
 
 - it never rewrites the final answer text;
-- it never invents evidence ids (unknown references fail closed);
+- it never invents evidence or research-claim ids;
 - it never reads rubric or qualification expected answers;
-- it validates support against server-owned evidence relation/strength rather
-  than trusting the producer to promote any known id into positive support.
+- it validates support against server-owned research-claim/evidence lineage,
+  relation and strength rather than trusting the producer to promote any known
+  id into positive support.
 
 Fail-closed contract: malformed structured output, provider failures and
-unverifiable bindings yield a ``rejected`` / ``unavailable`` snapshot with a
-canonical reason; a fabricated ``validated`` snapshot is impossible because
-the domain layer rejects unknown evidence ids before a snapshot can be built.
-
-Evidence context is bounded on purpose: each row renders only metadata and
-short anchored-span excerpts (never the full page body), matching the frozen
-external-data boundary of the research runtime.
+unverifiable bindings yield a ``rejected`` snapshot with a canonical reason.
+Evidence context is bounded: each row renders only metadata and short anchored
+excerpts, never a page body.
 """
 
 from __future__ import annotations
@@ -37,8 +34,8 @@ from src.domain.answer_claims import (
 )
 from src.web.research.evidence_gate import STRONG_EVIDENCE_THRESHOLD
 
-BINDER_SCHEMA_VERSION = "answer-claim-binder-v2"
-ANSWER_CLAIM_BINDER_PRODUCER = "answer_claim_binder_v2"
+BINDER_SCHEMA_VERSION = "answer-claim-binder-v3"
+ANSWER_CLAIM_BINDER_PRODUCER = "answer_claim_binder_v3"
 
 _MAX_EVIDENCE_ROWS = 24
 _MAX_CONTEXT_CHARS = 16000
@@ -53,22 +50,20 @@ _MAX_SEGMENT_CHARS = 1200
 _ALLOWED_SEGMENT_KINDS = frozenset(
     {"factual", "instructional", "question", "recommendation", "uncertainty"}
 )
-_SEGMENT_BOUNDARY = re.compile(r"(?<=[。！？；!?;.])|[\r\n]+")
+# Preserve paragraph/list boundaries and split common sentence/clause endings.
+# The bounded segment limit makes over-segmentation fail closed rather than
+# silently dropping part of an answer.
+_SEGMENT_BOUNDARY = re.compile(r"(?<=[。！？；!?;.:：，,])|[\r\n]+")
 
 BinderModelFn = Callable[[Sequence[Mapping[str, Any]]], str]
 
 
 @dataclass(frozen=True)
 class AnswerClaimBindingRow:
-    """One bounded evidence row offered to the binder.
-
-    ``anchored_spans`` are short excerpts of the source text that the
-    extractor already anchored to claims (locator-verified), not page bodies.
-    ``relation`` and ``strength`` remain server-owned support truth and are
-    rechecked after the model chooses an evidence id.
-    """
+    """One server-owned research claim/evidence relation offered to the binder."""
 
     evidence_id: str
+    claim_id: str = ""
     title: str = ""
     url: str = ""
     source_role: str = ""
@@ -101,20 +96,9 @@ def bind_answer_claims(
     producer: str = ANSWER_CLAIM_BINDER_PRODUCER,
     max_attempts: int = 1,
 ) -> BoundAnswerClaims:
-    """Bind one final answer to existing evidence ids, failing closed.
-
-    The final answer text is never modified; the returned snapshot carries the
-    canonical answer hash of the original text. Any malformed or unverifiable
-    producer output resolves to a ``rejected`` snapshot instead of raising.
-
-    ``max_attempts`` is the server-authorized physical model-call ceiling for
-    this binding (bounded by the binder retry capability). Defaults to one
-    attempt; a caller holding an authoritative remaining budget may allow the
-    second retry. The physical attempt count is always reported back on the
-    result so callers can record authoritative model-call accounting.
-    """
-    answer = _clean_text(request.final_answer)
-    if not answer:
+    """Bind the immutable candidate answer to server-owned research evidence."""
+    answer = str(request.final_answer or "")
+    if not answer.strip():
         raise ValueError("answer claim binding requires a final answer")
     segments = _segment_answer(answer)
     if not segments:
@@ -127,7 +111,13 @@ def bind_answer_claims(
             attempt_count=0,
         )
     rows = tuple(_bounded_rows(request.evidence_rows))
-    rows_by_id = {row.evidence_id: row for row in rows}
+    rows_by_link = {
+        (row.claim_id, row.evidence_id): row
+        for row in rows
+        if row.claim_id and row.evidence_id
+    }
+    known_evidence_ids = {row.evidence_id for row in rows if row.evidence_id}
+    known_research_claim_ids = {row.claim_id for row in rows if row.claim_id}
     messages = _binding_messages(
         question=request.question, answer=answer, segments=segments, rows=rows
     )
@@ -144,7 +134,9 @@ def bind_answer_claims(
             raw_output=raw,
             answer=answer,
             segments=segments,
-            evidence_rows_by_id=rows_by_id,
+            rows_by_link=rows_by_link,
+            known_evidence_ids=known_evidence_ids,
+            known_research_claim_ids=known_research_claim_ids,
             producer=producer,
         )
         if parsed is not None:
@@ -167,10 +159,11 @@ def _parse_binder_output(
     raw_output: str,
     answer: str,
     segments: tuple[str, ...],
-    evidence_rows_by_id: Mapping[str, AnswerClaimBindingRow],
+    rows_by_link: Mapping[tuple[str, str], AnswerClaimBindingRow],
+    known_evidence_ids: set[str],
+    known_research_claim_ids: set[str],
     producer: str,
 ) -> tuple[AnswerClaimSnapshotV1 | None, str]:
-    """Parse the segment protocol v2 output against server-owned evidence."""
     if not raw_output or not raw_output.strip():
         return None, "empty_producer_output"
     try:
@@ -197,7 +190,7 @@ def _parse_binder_output(
     segment_entries = tuple(_object(entry) for entry in raw_segments)
     if len(segment_entries) != len(segments):
         return None, "segment_coverage_mismatch"
-    ref_to_text: dict[str, str] = {
+    ref_to_text = {
         _segment_ref(index): text for index, text in enumerate(segments)
     }
     claims: list[dict[str, Any]] = []
@@ -205,41 +198,47 @@ def _parse_binder_output(
     seen_refs: set[str] = set()
     for entry in segment_entries:
         ref = _clean_identifier(entry.get("segment_ref"))
-        if not ref or ref not in ref_to_text:
-            return None, "segment_coverage_mismatch"
-        if ref in seen_refs:
+        if not ref or ref not in ref_to_text or ref in seen_refs:
             return None, "segment_coverage_mismatch"
         seen_refs.add(ref)
         kind = str(entry.get("kind") or "").strip()
         status = str(entry.get("status") or "").strip()
+        research_claim_id = _clean_identifier(entry.get("research_claim_id"))
         raw_support = entry.get("evidence_support")
         if kind not in _ALLOWED_SEGMENT_KINDS:
-            return None, "malformed_structured_output"
-        if kind == "factual":
-            if status not in {"asserted", "qualified"}:
-                return None, "malformed_structured_output"
-        elif status:
             return None, "malformed_structured_output"
         if not isinstance(raw_support, list) or not all(
             isinstance(item, str) for item in raw_support
         ):
             return None, "malformed_structured_output"
         support_ids = tuple(_clean_identifier(item) for item in raw_support)
+        if any(not item for item in support_ids):
+            return None, "malformed_structured_output"
+        if len(set(support_ids)) != len(support_ids):
+            return None, "duplicate_evidence_support"
+
         if kind != "factual":
-            if support_ids:
+            if status or research_claim_id or support_ids:
                 return None, "non_factual_segment_support"
             continue
+        if status not in {"asserted", "qualified"}:
+            return None, "malformed_structured_output"
+        if not research_claim_id:
+            return None, "missing_research_claim_id"
+        if research_claim_id not in known_research_claim_ids:
+            return None, "unknown_research_claim_id"
         if not support_ids:
             return None, "unbound_factual_segment"
-        unknown = [item for item in support_ids if item not in evidence_rows_by_id]
+        unknown = [item for item in support_ids if item not in known_evidence_ids]
         if unknown:
             return None, "unknown_evidence_id"
 
         support_rows: list[tuple[str, float]] = []
         for evidence_id in support_ids:
-            confidence = _positive_support_confidence(
-                evidence_rows_by_id[evidence_id]
-            )
+            row = rows_by_link.get((research_claim_id, evidence_id))
+            if row is None:
+                return None, "claim_evidence_mismatch"
+            confidence = _positive_support_confidence(row)
             if confidence is None:
                 return None, "ineligible_evidence_support"
             support_rows.append((evidence_id, confidence))
@@ -270,7 +269,7 @@ def _parse_binder_output(
                 answer=answer,
                 claims=claims,
                 claim_links=links,
-                known_evidence_ids=tuple(evidence_rows_by_id),
+                known_evidence_ids=known_evidence_ids,
                 producer=producer,
                 status="validated",
                 trust_upstream_claim_ids=False,
@@ -307,13 +306,6 @@ def _segment_ref(index: int) -> str:
 
 
 def _segment_answer(answer: str) -> tuple[str, ...]:
-    """Deterministic server-side segmentation of the immutable answer.
-
-    Newlines are boundaries as well as sentence punctuation so Markdown/list
-    formatting cannot silently merge separate semantic statements. Overlong
-    single segments and answers with more than ``_MAX_SEGMENTS`` segments fail
-    closed rather than allowing partial coverage.
-    """
     raw_parts = _SEGMENT_BOUNDARY.split(answer)
     segments: list[str] = []
     for part in raw_parts:
@@ -329,7 +321,7 @@ def _segment_answer(answer: str) -> tuple[str, ...]:
 
 
 def factual_claims_fully_bound(snapshot: AnswerClaimSnapshotV1) -> bool:
-    """True when every factual claim has server-eligible positive support."""
+    """True when every factual claim has server-eligible strong support."""
     bound_claim_ids = {
         link.claim_id
         for link in snapshot.claim_links
@@ -358,33 +350,29 @@ def _binding_messages(
         f"[{_segment_ref(index)}] {segment}" for index, segment in enumerate(segments)
     )
     system = (
-        "You classify every segment of an already-written final answer "
-        "against a fixed list of server-owned evidence items.\n"
+        "You classify every segment of an already-written final answer against "
+        "server-owned research claim/evidence relations.\n"
         "Rules:\n"
-        "1. Never modify, restate-instead-of-quoting or add to the answer. "
-        "The server already split it into segments; you classify those exact "
-        "segments only.\n"
-        "2. segments: return EXACTLY one entry per segment ref shown in the "
-        "user message. Missing, duplicate or unknown refs are rejected.\n"
-        "3. kind: factual/instructional/question/recommendation/uncertainty. "
-        "Use uncertainty for genuinely unverifiable or speculative wording; "
-        "a qualified factual statement is still factual and needs evidence.\n"
-        "4. factual segments: status asserted or qualified, and "
-        "evidence_support MUST list at least one evidence_id that positively "
-        "and strongly supports the claim. Never bind disagreement, qualifiers, "
-        "background or weak evidence as support.\n"
-        "5. non-factual segments: omit status and keep evidence_support empty.\n"
-        "6. If you cannot produce a safe binding for the whole answer, set "
-        "refused=true with an empty segments list.\n"
+        "1. Never modify or add to the answer; classify every server segment.\n"
+        "2. Return EXACTLY one entry per segment_ref; missing, duplicate or "
+        "unknown refs are rejected.\n"
+        "3. kind is factual/instructional/question/recommendation/uncertainty.\n"
+        "4. Every factual segment must choose exactly one research_claim_id "
+        "shown in the evidence rows, status asserted|qualified, and at least "
+        "one evidence_id from that SAME research claim. Use only evidence rows "
+        "that positively and strongly support the segment.\n"
+        "5. Non-factual segments must omit status/research_claim_id and have an "
+        "empty evidence_support list.\n"
+        "6. If the whole answer cannot be safely bound, set refused=true.\n"
         'Respond with JSON only: {"refused": bool, "segments": '
-        '[{"segment_ref": "s1", "kind": "...", "status": "asserted|qualified", '
-        '"evidence_support": ["evidence_id"]}]}.'
+        '[{"segment_ref":"s1","kind":"factual",'
+        '"research_claim_id":"claim_id","status":"asserted|qualified",'
+        '"evidence_support":["evidence_id"]}]}.'
     )
     user = (
         "Question:\n{question}\n\n"
-        "Final answer segments (read-only input to classify):\n{numbered}\n\n"
-        "Available evidence (bounded metadata; use evidence_id values "
-        "verbatim):\n{context}"
+        "Final answer segments (read-only):\n{numbered}\n\n"
+        "Available server-owned research claim/evidence rows:\n{context}"
     ).format(
         question=_clean_text(question)[:_MAX_CONTEXT_CHARS],
         numbered=numbered[:_MAX_CONTEXT_CHARS],
@@ -419,6 +407,7 @@ def _render_row(row: AnswerClaimBindingRow) -> str:
     )
     parts = [
         f"[{row.evidence_id}]",
+        f"claim={_clip(row.claim_id, 160)}",
         _clip(row.title, 200),
         _clip(row.url, 500),
         _clip(row.source_role, 100),
@@ -431,25 +420,29 @@ def _render_row(row: AnswerClaimBindingRow) -> str:
         parts.append(f"anchors: {spans}")
     if caveats:
         parts.append(f"caveats: {caveats}")
-    line = " | ".join(part for part in parts if part)
-    return line[:_MAX_ROW_CHARS]
+    return " | ".join(part for part in parts if part)[:_MAX_ROW_CHARS]
 
 
 def _bounded_rows(
     rows: Iterable[AnswerClaimBindingRow],
 ) -> Iterable[AnswerClaimBindingRow]:
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     count = 0
     for row in rows:
-        evidence_id = _clean_text(row.evidence_id)
-        if not evidence_id or evidence_id in seen:
+        evidence_id = _clean_identifier(row.evidence_id)
+        claim_id = _clean_identifier(row.claim_id)
+        if not evidence_id or not claim_id:
             continue
-        seen.add(evidence_id)
+        key = (claim_id, evidence_id)
+        if key in seen:
+            continue
+        seen.add(key)
         count += 1
         if count > _MAX_EVIDENCE_ROWS:
             return
         yield AnswerClaimBindingRow(
             evidence_id=evidence_id,
+            claim_id=claim_id,
             title=_clean_text(row.title),
             url=_clean_text(row.url),
             source_role=_clean_text(row.source_role),
