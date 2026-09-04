@@ -35,11 +35,11 @@ from src.domain.answer_claims import (
     deterministic_claim_id,
     rejected_answer_claim_snapshot,
 )
+from src.web.research.evidence_gate import STRONG_EVIDENCE_THRESHOLD
 
 BINDER_SCHEMA_VERSION = "answer-claim-binder-v2"
 ANSWER_CLAIM_BINDER_PRODUCER = "answer_claim_binder_v2"
 
-# Bounded context budget: metadata rows plus short anchored excerpts only.
 _MAX_EVIDENCE_ROWS = 24
 _MAX_CONTEXT_CHARS = 16000
 _MAX_ROW_CHARS = 1600
@@ -49,7 +49,6 @@ _MAX_ANCHORED_SPANS_PER_ROW = 6
 _MAX_CAVEATS_PER_ROW = 6
 _MAX_SEGMENTS = 16
 _MAX_SEGMENT_CHARS = 1200
-_STRONG_SUPPORT_THRESHOLD = 0.7
 
 _ALLOWED_SEGMENT_KINDS = frozenset(
     {"factual", "instructional", "question", "recommendation", "uncertainty"}
@@ -129,7 +128,6 @@ def bind_answer_claims(
         )
     rows = tuple(_bounded_rows(request.evidence_rows))
     rows_by_id = {row.evidence_id: row for row in rows}
-    known_evidence_ids = tuple(rows_by_id)
     messages = _binding_messages(
         question=request.question, answer=answer, segments=segments, rows=rows
     )
@@ -287,7 +285,7 @@ def _positive_support_confidence(row: AnswerClaimBindingRow) -> float | None:
     if _clean_text(row.relation) != "supports":
         return None
     strength = _parse_strength(row.strength)
-    if strength is None or strength < _STRONG_SUPPORT_THRESHOLD:
+    if strength is None or strength < STRONG_EVIDENCE_THRESHOLD:
         return None
     return strength
 
@@ -337,7 +335,7 @@ def factual_claims_fully_bound(snapshot: AnswerClaimSnapshotV1) -> bool:
         for link in snapshot.claim_links
         if link.claim_id
         and link.support_type in _POSITIVE_SUPPORT_TYPES
-        and link.confidence >= _STRONG_SUPPORT_THRESHOLD
+        and link.confidence >= STRONG_EVIDENCE_THRESHOLD
     }
     return all(
         claim.kind != "factual" or claim.id in bound_claim_ids
