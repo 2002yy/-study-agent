@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+from src.web.research.evidence_gate import STRONG_EVIDENCE_THRESHOLD
+
 _ITEM_FIELDS = (
     "title",
     "url",
@@ -124,9 +126,6 @@ def _nonnegative_int(value: Any) -> int:
         return 0
 
 
-# Server-owned bounded rows for answer-claim binding (RQ1-C answer batch).
-# Only these whitelisted fields may leave the durable research_context toward
-# the binder model call; page bodies and arbitrary provider payloads never do.
 _BINDING_ROW_FIELDS = (
     "evidence_id",
     "claim_id",
@@ -145,15 +144,6 @@ _MAX_BINDING_SEQUENCE_ITEMS = 6
 _MAX_BINDING_ITEM_CHARS = 300
 _BINDING_CONTEXT_KEY = "claim_engine_evidence_brief"
 _BINDING_EVIDENCE_KEY = "eligible_evidence"
-# Keep this threshold aligned with the production Evidence Gate's strong
-# support threshold. The projection is deliberately stricter than the brief:
-# the brief may contain contradictions/qualifiers for synthesis, while the
-# binder support-id surface must contain positive strong support only.
-_STRONG_SUPPORT_THRESHOLD = 0.7
-# Any of these durable research-runtime traces marks the run as a
-# claim-engine ResearchRun (provenance == research_run) even when the current
-# Evidence Brief carries zero eligible rows (old runs, gated-out runs).  Plain
-# search/tool-loop runs never contain them.
 _RESEARCH_PROVENANCE_KEYS = (
     "claim_engine_evidence_brief",
     "claim_engine_runtime",
@@ -165,13 +155,7 @@ _RESEARCH_PROVENANCE_KEYS = (
 
 
 def research_run_provenance(run: Any) -> bool:
-    """True when the server-side run object is a claim-engine ResearchRun.
-
-    This is the only provenance gate for answer-validation plans: the caller
-    must already hold a real run resolved from the repository; a matching
-    context key on that object is required so look-alike fields can never be
-    mistaken for a ResearchRun.
-    """
+    """True when the server-side run object is a claim-engine ResearchRun."""
     context = getattr(run, "research_context", None)
     if not isinstance(context, dict):
         return False
@@ -185,12 +169,13 @@ def research_binding_rows(run: Any) -> list[dict[str, Any]]:
     contradictions, qualifying evidence and partial/block gate state so the
     synthesis model can explain uncertainty. Publication validation must not
     convert those rows into support. Therefore this projection returns rows
-    only when the upstream Evidence Gate fully passed and no unresolved gate
-    constraint remains, and then keeps only ``supports`` rows meeting the
-    strong-evidence threshold.
+    only when the upstream Evidence Gate fully passed and all gate-owned
+    closure fields explicitly say there are no remaining constraints, then
+    keeps only ``supports`` rows meeting the production strong threshold.
 
-    Missing, malformed, partial or blocked briefs yield an empty list so the
-    existing publication gate fails closed before any binder provider call.
+    Missing, malformed, partial, blocked or older incomplete briefs yield an
+    empty list so the existing publication gate fails closed before any binder
+    provider call.
     """
     context = getattr(run, "research_context", None)
     context = context if isinstance(context, dict) else {}
@@ -235,13 +220,15 @@ def research_binding_rows(run: Any) -> list[dict[str, Any]]:
 
 
 def _brief_allows_full_publication(brief: Mapping[str, Any]) -> bool:
+    if _scalar_text(brief.get("schema_version")) != "research-evidence-brief-v1":
+        return False
     if _scalar_text(brief.get("gate_status")) != "pass":
         return False
-    if brief.get("conditional_wording_required") is True:
+    if brief.get("conditional_wording_required") is not False:
         return False
     for key in ("unresolved_conflicts", "open_critical_claim_ids", "open_gap_ids"):
         value = brief.get(key)
-        if isinstance(value, (list, tuple)) and value:
+        if not isinstance(value, (list, tuple)) or value:
             return False
     return True
 
@@ -250,11 +237,11 @@ def _row_is_positive_strong_support(row: Mapping[str, Any]) -> bool:
     if _scalar_text(row.get("relation")) != "supports":
         return False
     strength = _support_strength(row.get("strength"))
-    return strength is not None and strength >= _STRONG_SUPPORT_THRESHOLD
+    return strength is not None and strength >= STRONG_EVIDENCE_THRESHOLD
 
 
 def _support_strength(value: Any) -> float | None:
-    # ``strong`` is retained only for the existing synthetic/fixture surface;
+    # ``strong`` is retained only for existing synthetic/fixture surfaces;
     # production Evidence Brief rows carry numeric confidence.
     if isinstance(value, str) and value.strip().lower() == "strong":
         return 1.0
