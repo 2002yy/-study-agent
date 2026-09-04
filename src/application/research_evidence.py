@@ -145,6 +145,11 @@ _MAX_BINDING_SEQUENCE_ITEMS = 6
 _MAX_BINDING_ITEM_CHARS = 300
 _BINDING_CONTEXT_KEY = "claim_engine_evidence_brief"
 _BINDING_EVIDENCE_KEY = "eligible_evidence"
+# Keep this threshold aligned with the production Evidence Gate's strong
+# support threshold. The projection is deliberately stricter than the brief:
+# the brief may contain contradictions/qualifiers for synthesis, while the
+# binder support-id surface must contain positive strong support only.
+_STRONG_SUPPORT_THRESHOLD = 0.7
 # Any of these durable research-runtime traces marks the run as a
 # claim-engine ResearchRun (provenance == research_run) even when the current
 # Evidence Brief carries zero eligible rows (old runs, gated-out runs).  Plain
@@ -174,17 +179,25 @@ def research_run_provenance(run: Any) -> bool:
 
 
 def research_binding_rows(run: Any) -> list[dict[str, Any]]:
-    """Project bounded evidence rows from the server-owned Evidence Brief.
+    """Project positive strong support from a server-owned Evidence Brief.
 
-    The rows feed the answer-claim binder only.  ``run`` must be a server
-    object loaded from the repository; client-supplied content is never an
-    input here.  Missing or malformed briefs yield an empty list so callers
-    fail safe instead of treating old runs as validated.
+    The Evidence Brief is broader than the binder support surface: it may carry
+    contradictions, qualifying evidence and partial/block gate state so the
+    synthesis model can explain uncertainty. Publication validation must not
+    convert those rows into support. Therefore this projection returns rows
+    only when the upstream Evidence Gate fully passed and no unresolved gate
+    constraint remains, and then keeps only ``supports`` rows meeting the
+    strong-evidence threshold.
+
+    Missing, malformed, partial or blocked briefs yield an empty list so the
+    existing publication gate fails closed before any binder provider call.
     """
     context = getattr(run, "research_context", None)
     context = context if isinstance(context, dict) else {}
     brief = context.get(_BINDING_CONTEXT_KEY)
     if not isinstance(brief, Mapping):
+        return []
+    if not _brief_allows_full_publication(brief):
         return []
     eligible = brief.get(_BINDING_EVIDENCE_KEY)
     if not isinstance(eligible, list):
@@ -193,6 +206,8 @@ def research_binding_rows(run: Any) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for raw_row in eligible:
         if not isinstance(raw_row, Mapping):
+            continue
+        if not _row_is_positive_strong_support(raw_row):
             continue
         evidence_id = _scalar_text(raw_row.get("evidence_id"))
         if not evidence_id or evidence_id in seen:
@@ -217,6 +232,39 @@ def research_binding_rows(run: Any) -> list[dict[str, Any]]:
         if len(rows) >= _MAX_BINDING_ROWS:
             break
     return rows
+
+
+def _brief_allows_full_publication(brief: Mapping[str, Any]) -> bool:
+    if _scalar_text(brief.get("gate_status")) != "pass":
+        return False
+    if brief.get("conditional_wording_required") is True:
+        return False
+    for key in ("unresolved_conflicts", "open_critical_claim_ids", "open_gap_ids"):
+        value = brief.get(key)
+        if isinstance(value, (list, tuple)) and value:
+            return False
+    return True
+
+
+def _row_is_positive_strong_support(row: Mapping[str, Any]) -> bool:
+    if _scalar_text(row.get("relation")) != "supports":
+        return False
+    strength = _support_strength(row.get("strength"))
+    return strength is not None and strength >= _STRONG_SUPPORT_THRESHOLD
+
+
+def _support_strength(value: Any) -> float | None:
+    # ``strong`` is retained only for the existing synthetic/fixture surface;
+    # production Evidence Brief rows carry numeric confidence.
+    if isinstance(value, str) and value.strip().lower() == "strong":
+        return 1.0
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed > 1:
+        return None
+    return parsed
 
 
 def _sequence(value: Any) -> tuple[Any, ...]:
