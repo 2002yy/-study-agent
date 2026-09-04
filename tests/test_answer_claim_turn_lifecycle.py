@@ -126,6 +126,57 @@ def test_completed_chat_turn_rejects_claims_for_unknown_evidence():
     assert turn.evidence_snapshot["claim_links"] == []
 
 
+def test_completed_turn_retains_bound_evidence_with_cluster_identity_only():
+    evidence_id = "cluster-only-evidence"
+    claim_id = deterministic_claim_id(
+        answer_hash=answer_content_hash(ANSWER),
+        claim_text=ANSWER,
+    )
+    snapshot = build_answer_claim_snapshot(
+        answer=ANSWER,
+        claims=[
+            {
+                "text": ANSWER,
+                "kind": "factual",
+                "status": "asserted",
+                "source": "provider_structured",
+            }
+        ],
+        claim_links=[
+            {
+                "claim_id": claim_id,
+                "evidence_id": evidence_id,
+                "support_type": "direct_support",
+                "confidence": 0.9,
+            }
+        ],
+        known_evidence_ids=[evidence_id],
+        producer="answer-claim-binder-v1",
+        status="validated",
+    )
+    turn = ChatTurn(
+        id="turn-cluster-only",
+        thread_id="thread-1",
+        assistant_message=ANSWER,
+        status="completed",
+        rag_snapshot={
+            "answer_claim_snapshot": snapshot.to_dict(),
+            "research_evidence_refs": [
+                {
+                    "evidence_id": evidence_id,
+                    "source_cluster_id": "cluster-only-source",
+                    "title": "",
+                    "url": "",
+                }
+            ],
+        },
+    )
+
+    assert turn.answer_claim_snapshot["status"] == "validated"
+    assert [ref["id"] for ref in turn.evidence_snapshot["refs"]] == [evidence_id]
+    assert turn.evidence_snapshot["claim_links"][0]["evidence_id"] == evidence_id
+
+
 def test_streaming_interrupted_and_failed_turns_invalidate_supplied_claims():
     for status in ("streaming", "interrupted", "failed", "abandoned"):
         rag = _rag()

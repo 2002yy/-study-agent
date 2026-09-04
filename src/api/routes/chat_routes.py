@@ -184,6 +184,15 @@ async def chat_stream_endpoint(
         reply_parts: list[str] = []
         stream = service.stream_async(prepared)
         buffered_validation = answer_validation_active(prepared)
+        cancel_poll = (
+            _make_cancel_poll(
+                service,
+                prepared.turn.id,
+                prepared.turn.operation_id or "",
+            )
+            if prepared.turn.operation_id
+            else None
+        )
 
         try:
             yield sse_event(
@@ -229,17 +238,29 @@ async def chat_stream_endpoint(
             async for token in _tokens_until_disconnected(
                 stream,
                 http_request,
-                cancel_poll=(
-                    _make_cancel_poll(service, prepared.turn.id, prepared.turn.operation_id or "")
-                    if prepared.turn.operation_id
-                    else None
-                ),
+                cancel_poll=cancel_poll,
             ):
                 reply_parts.append(token)
                 if not buffered_validation:
                     yield sse_event("token", {"text": token})
             suffix = "".join(reply_parts)
-            completed = service.complete_turn(prepared, suffix)
+            try:
+                completed = await asyncio.to_thread(
+                    service.complete_turn,
+                    prepared,
+                    suffix,
+                )
+            except ValueError:
+                # A cancel request can arrive while the synchronous binder is
+                # running in the worker.  The repository then rejects the
+                # completion write; preserve the cancellation state machine
+                # instead of surfacing a generic stream error.
+                if cancel_poll is not None and cancel_poll():
+                    raise _TurnCancelled(
+                        cancel_poll.turn_id,
+                        cancel_poll.operation_id,
+                    ) from None
+                raise
             if buffered_validation:
                 yield sse_event("token", {"text": completed.assistant_message})
             yield sse_event("usage", stream_usage_payload(completed.assistant_message))

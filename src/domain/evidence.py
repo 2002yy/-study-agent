@@ -303,14 +303,15 @@ def _add_claim_binding_refs(
         evidence_id = _text(raw.get("evidence_id"))
         title = _text(raw.get("title"))
         url = _text(raw.get("url"))
-        if not evidence_id or not (title or url):
+        source_cluster_id = _text(raw.get("source_cluster_id"))
+        if not evidence_id or not (title or url or source_cluster_id):
             continue
         accumulator.add(
             EvidenceRefV1(
                 id=evidence_id,
                 type="research",
                 title=title,
-                source=_text(raw.get("source_cluster_id")),
+                source=source_cluster_id,
                 url=url,
                 domain=_domain(url),
                 published_at=_published_at(raw),

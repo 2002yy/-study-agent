@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from dataclasses import replace
 from typing import Any, AsyncIterator
 
@@ -87,6 +88,7 @@ def _service(
     user_input: str = "该版本发布了吗？",
     deny_web_policy: bool = False,
     async_stream_chat: Any | None = None,
+    binding_model: Any | None = None,
 ) -> ChatService:
     async def async_tokens(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
         for token in tokens:
@@ -98,6 +100,8 @@ def _service(
         if kwargs.get("task_name") == "answer_claim_binding":
             if refuse_binding:
                 return json.dumps({"refused": True, "segments": []})
+            if binding_model is not None:
+                return binding_model()
             return effective_plan["binding_json"]
         return "".join(tokens)
 
@@ -342,6 +346,57 @@ def test_research_stream_cancel_discards_unvalidated_partial(
     turn = runtime_test_context.repository.get_chat_turn(turn_id)
 
     assert candidate not in body
+    assert "event: cancelled" in body
+    assert '"partial": ""' in body
+    assert turn is not None
+    assert turn.status == "cancelled"
+    assert turn.assistant_message == ""
+
+
+def test_research_stream_processes_cancel_while_binder_runs_off_loop(
+    runtime_test_context,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    turn_id = "research-cancel-during-binder-turn"
+
+    def blocking_binding() -> str:
+        entered.set()
+        if not release.wait(timeout=1):
+            raise AssertionError("event loop did not process binder cancellation")
+        return _payload()
+
+    service = _service(
+        runtime_test_context,
+        tokens=("该版本已正式发布。",),
+        binding_json=_payload(),
+        binding_model=blocking_binding,
+    )
+
+    async def scenario() -> str:
+        consume_task = asyncio.create_task(
+            _consume(
+                service,
+                runtime_test_context.web_lookup_service,
+                runtime_test_context.session_service,
+                "research-cancel-during-binder-session",
+                turn_id=turn_id,
+            )
+        )
+        assert await asyncio.to_thread(entered.wait, 0.5)
+        turn = runtime_test_context.repository.get_chat_turn(turn_id)
+        assert turn is not None
+        outcome, _ = runtime_test_context.repository.request_turn_cancel(
+            turn_id,
+            expected_operation_id=turn.operation_id,
+        )
+        assert outcome == "accepted"
+        release.set()
+        return await asyncio.wait_for(consume_task, timeout=1)
+
+    body = asyncio.run(scenario())
+    turn = runtime_test_context.repository.get_chat_turn(turn_id)
+
     assert "event: cancelled" in body
     assert '"partial": ""' in body
     assert turn is not None

@@ -31,12 +31,22 @@ QUESTION = "该版本发布了吗？"
 RESEARCH_CLAIM_ID = "research_claim_1"
 
 
-def _research_run(*, brief_rows: list[dict[str, Any]] | None = None, context: dict | None = None) -> SimpleNamespace:
+def _research_run(
+    *,
+    brief_rows: list[dict[str, Any]] | None = None,
+    context: dict | None = None,
+    active: bool = True,
+) -> SimpleNamespace:
     research_context: dict[str, Any] = {
         "run_kind": "standalone",
         "research_mode": "deep",
         "candidate_items": [],
     }
+    if active:
+        research_context["claim_engine"] = {
+            "mode": "active",
+            "schema_version": "1",
+        }
     if context is not None:
         research_context.update(context)
     if brief_rows is not None:
@@ -154,6 +164,15 @@ def test_plain_tool_loop_run_never_gets_a_validation_plan() -> None:
     command = _chat_command_for(service)
     assert command.research_sources is not None  # sources remain for UI truth
     assert command.answer_validation is None  # but no research gate
+
+
+def test_legacy_deep_run_without_active_claim_engine_has_no_validation_plan() -> None:
+    service = _FakeResearchService(_research_run(active=False))
+
+    command = _chat_command_for(service)
+
+    assert command.research_sources is not None
+    assert command.answer_validation is None
 
 
 def test_request_without_run_id_has_no_plan() -> None:

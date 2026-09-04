@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from src.web.research.evidence_gate import STRONG_EVIDENCE_THRESHOLD
+from src.web.research.steering import is_active_claim_engine_context
 
 _ITEM_FIELDS = (
     "title",
@@ -139,22 +140,12 @@ _MAX_BINDING_SEQUENCE_ITEMS = 6
 _MAX_BINDING_ITEM_CHARS = 300
 _BINDING_CONTEXT_KEY = "claim_engine_evidence_brief"
 _BINDING_EVIDENCE_KEY = "eligible_evidence"
-_RESEARCH_PROVENANCE_KEYS = (
-    "claim_engine_evidence_brief",
-    "claim_engine_runtime",
-    "claim_engine_metrics",
-    "claim_engine_assessments",
-    "claim_engine_evidence",
-    "deep",
-)
-
-
 def research_run_provenance(run: Any) -> bool:
     """True when the server-side run object is a claim-engine ResearchRun."""
     context = getattr(run, "research_context", None)
     if not isinstance(context, dict):
         return False
-    return any(key in context for key in _RESEARCH_PROVENANCE_KEYS)
+    return is_active_claim_engine_context(context)
 
 
 def research_binding_rows(run: Any) -> list[dict[str, Any]]:
