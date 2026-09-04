@@ -1,20 +1,20 @@
 """Production answer-claim binder (RQ1-C answer/citation binding batch).
 
 The binder runs AFTER the final answer is generated and BEFORE the ChatTurn
-completes.  It turns the already-produced answer into structured factual
-claims bound to existing server-owned evidence ids.  It is deliberately NOT an
-answer generator:
+completes. It turns the already-produced answer into structured factual claims
+bound to existing server-owned evidence ids. It is deliberately NOT an answer
+generator:
 
 - it never rewrites the final answer text;
 - it never invents evidence ids (unknown references fail closed);
 - it never reads rubric or qualification expected answers;
-- it runs only when the turn carries research evidence (wired in a later
-  batch; this module stays a pure, injectable service).
+- it validates support against server-owned evidence relation/strength rather
+  than trusting the producer to promote any known id into positive support.
 
 Fail-closed contract: malformed structured output, provider failures and
 unverifiable bindings yield a ``rejected`` / ``unavailable`` snapshot with a
-canonical reason; a fabricated ``validated`` snapshot is impossible because the
-domain layer rejects unknown evidence ids before a snapshot can be built.
+canonical reason; a fabricated ``validated`` snapshot is impossible because
+the domain layer rejects unknown evidence ids before a snapshot can be built.
 
 Evidence context is bounded on purpose: each row renders only metadata and
 short anchored-span excerpts (never the full page body), matching the frozen
@@ -49,11 +49,12 @@ _MAX_ANCHORED_SPANS_PER_ROW = 6
 _MAX_CAVEATS_PER_ROW = 6
 _MAX_SEGMENTS = 16
 _MAX_SEGMENT_CHARS = 1200
+_STRONG_SUPPORT_THRESHOLD = 0.7
 
 _ALLOWED_SEGMENT_KINDS = frozenset(
     {"factual", "instructional", "question", "recommendation", "uncertainty"}
 )
-_SEGMENT_BOUNDARY = re.compile(r"(?<=[。！？；!?;.])")
+_SEGMENT_BOUNDARY = re.compile(r"(?<=[。！？；!?;.])|[\r\n]+")
 
 BinderModelFn = Callable[[Sequence[Mapping[str, Any]]], str]
 
@@ -64,6 +65,8 @@ class AnswerClaimBindingRow:
 
     ``anchored_spans`` are short excerpts of the source text that the
     extractor already anchored to claims (locator-verified), not page bodies.
+    ``relation`` and ``strength`` remain server-owned support truth and are
+    rechecked after the model chooses an evidence id.
     """
 
     evidence_id: str
@@ -102,13 +105,13 @@ def bind_answer_claims(
     """Bind one final answer to existing evidence ids, failing closed.
 
     The final answer text is never modified; the returned snapshot carries the
-    canonical answer hash of the original text.  Any malformed or unverifiable
+    canonical answer hash of the original text. Any malformed or unverifiable
     producer output resolves to a ``rejected`` snapshot instead of raising.
 
     ``max_attempts`` is the server-authorized physical model-call ceiling for
-    this binding (bounded by the binder retry capability).  Defaults to one
+    this binding (bounded by the binder retry capability). Defaults to one
     attempt; a caller holding an authoritative remaining budget may allow the
-    second retry.  The physical attempt count is always reported back on the
+    second retry. The physical attempt count is always reported back on the
     result so callers can record authoritative model-call accounting.
     """
     answer = _clean_text(request.final_answer)
@@ -116,8 +119,6 @@ def bind_answer_claims(
         raise ValueError("answer claim binding requires a final answer")
     segments = _segment_answer(answer)
     if not segments:
-        # Overlong answers fail closed: partial coverage would let
-        # unsupported factual statements vanish.
         return BoundAnswerClaims(
             snapshot=rejected_answer_claim_snapshot(
                 answer=answer,
@@ -127,7 +128,8 @@ def bind_answer_claims(
             attempt_count=0,
         )
     rows = tuple(_bounded_rows(request.evidence_rows))
-    known_evidence_ids = tuple(row.evidence_id for row in rows)
+    rows_by_id = {row.evidence_id: row for row in rows}
+    known_evidence_ids = tuple(rows_by_id)
     messages = _binding_messages(
         question=request.question, answer=answer, segments=segments, rows=rows
     )
@@ -144,7 +146,7 @@ def bind_answer_claims(
             raw_output=raw,
             answer=answer,
             segments=segments,
-            known_evidence_ids=known_evidence_ids,
+            evidence_rows_by_id=rows_by_id,
             producer=producer,
         )
         if parsed is not None:
@@ -167,16 +169,10 @@ def _parse_binder_output(
     raw_output: str,
     answer: str,
     segments: tuple[str, ...],
-    known_evidence_ids: tuple[str, ...],
+    evidence_rows_by_id: Mapping[str, AnswerClaimBindingRow],
     producer: str,
 ) -> tuple[AnswerClaimSnapshotV1 | None, str]:
-    """Parse the segment protocol v2 output.
-
-    Returns ``(snapshot, "")`` on success, ``(None, reason_token)`` when the
-    output is structurally unusable so the attempt loop may retry, and
-    ``(rejected_snapshot, "")`` for determinate refusals that must not burn
-    further retries (``refused=true``).
-    """
+    """Parse the segment protocol v2 output against server-owned evidence."""
     if not raw_output or not raw_output.strip():
         return None, "empty_producer_output"
     try:
@@ -224,27 +220,32 @@ def _parse_binder_output(
         if kind == "factual":
             if status not in {"asserted", "qualified"}:
                 return None, "malformed_structured_output"
-        else:
-            if status:
-                return None, "malformed_structured_output"
+        elif status:
+            return None, "malformed_structured_output"
         if not isinstance(raw_support, list) or not all(
             isinstance(item, str) for item in raw_support
         ):
             return None, "malformed_structured_output"
-        support_ids = tuple(
-            _clean_identifier(item) for item in raw_support
-        )
+        support_ids = tuple(_clean_identifier(item) for item in raw_support)
         if kind != "factual":
             if support_ids:
                 return None, "non_factual_segment_support"
             continue
         if not support_ids:
-            # A factual statement the model cannot bind to eligible evidence
-            # must never vanish: the whole binding is rejected.
             return None, "unbound_factual_segment"
-        unknown = [item for item in support_ids if item not in known_evidence_ids]
+        unknown = [item for item in support_ids if item not in evidence_rows_by_id]
         if unknown:
             return None, "unknown_evidence_id"
+
+        support_rows: list[tuple[str, float]] = []
+        for evidence_id in support_ids:
+            confidence = _positive_support_confidence(
+                evidence_rows_by_id[evidence_id]
+            )
+            if confidence is None:
+                return None, "ineligible_evidence_support"
+            support_rows.append((evidence_id, confidence))
+
         claim_id = deterministic_claim_id(
             answer_hash=answer_content_hash(answer), claim_text=ref_to_text[ref]
         )
@@ -256,13 +257,13 @@ def _parse_binder_output(
                 "source": "provider_structured",
             }
         )
-        for evidence_id in support_ids:
+        for evidence_id, confidence in support_rows:
             links.append(
                 {
                     "claim_id": claim_id,
                     "evidence_id": evidence_id,
                     "support_type": "direct_support",
-                    "confidence": 1.0,
+                    "confidence": confidence,
                 }
             )
     try:
@@ -271,7 +272,7 @@ def _parse_binder_output(
                 answer=answer,
                 claims=claims,
                 claim_links=links,
-                known_evidence_ids=known_evidence_ids,
+                known_evidence_ids=tuple(evidence_rows_by_id),
                 producer=producer,
                 status="validated",
                 trust_upstream_claim_ids=False,
@@ -282,6 +283,27 @@ def _parse_binder_output(
         return None, "malformed_structured_output"
 
 
+def _positive_support_confidence(row: AnswerClaimBindingRow) -> float | None:
+    if _clean_text(row.relation) != "supports":
+        return None
+    strength = _parse_strength(row.strength)
+    if strength is None or strength < _STRONG_SUPPORT_THRESHOLD:
+        return None
+    return strength
+
+
+def _parse_strength(value: Any) -> float | None:
+    if isinstance(value, str) and value.strip().lower() == "strong":
+        return 1.0
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed > 1:
+        return None
+    return parsed
+
+
 def _segment_ref(index: int) -> str:
     return f"s{index + 1}"
 
@@ -289,11 +311,10 @@ def _segment_ref(index: int) -> str:
 def _segment_answer(answer: str) -> tuple[str, ...]:
     """Deterministic server-side segmentation of the immutable answer.
 
-    The model never invents claim identity: it receives the exact segment refs
-    (s1, s2, ...) and must classify every one of them.  Overlong single
-    segments fail closed (too long to be classified safely) and answers with
-    more than ``_MAX_SEGMENTS`` segments are refused, because partial coverage
-    would otherwise let unsupported factual statements vanish.
+    Newlines are boundaries as well as sentence punctuation so Markdown/list
+    formatting cannot silently merge separate semantic statements. Overlong
+    single segments and answers with more than ``_MAX_SEGMENTS`` segments fail
+    closed rather than allowing partial coverage.
     """
     raw_parts = _SEGMENT_BOUNDARY.split(answer)
     segments: list[str] = []
@@ -310,16 +331,13 @@ def _segment_answer(answer: str) -> tuple[str, ...]:
 
 
 def factual_claims_fully_bound(snapshot: AnswerClaimSnapshotV1) -> bool:
-    """True when every factual claim (asserted or qualified) has support.
-
-    A link whose ``support_type`` is ``contradicts`` never satisfies support;
-    only positive support types count.  Uncertainty-classified statements are
-    not factual claims and need no evidence.
-    """
+    """True when every factual claim has server-eligible positive support."""
     bound_claim_ids = {
         link.claim_id
         for link in snapshot.claim_links
-        if link.claim_id and link.support_type in _POSITIVE_SUPPORT_TYPES
+        if link.claim_id
+        and link.support_type in _POSITIVE_SUPPORT_TYPES
+        and link.confidence >= _STRONG_SUPPORT_THRESHOLD
     }
     return all(
         claim.kind != "factual" or claim.id in bound_claim_ids
@@ -342,7 +360,7 @@ def _binding_messages(
         f"[{_segment_ref(index)}] {segment}" for index, segment in enumerate(segments)
     )
     system = (
-        "You classify every sentence of an already-written final answer "
+        "You classify every segment of an already-written final answer "
         "against a fixed list of server-owned evidence items.\n"
         "Rules:\n"
         "1. Never modify, restate-instead-of-quoting or add to the answer. "
@@ -352,12 +370,11 @@ def _binding_messages(
         "user message. Missing, duplicate or unknown refs are rejected.\n"
         "3. kind: factual/instructional/question/recommendation/uncertainty. "
         "Use uncertainty for genuinely unverifiable or speculative wording; "
-        "a qualified factual statement (weakened with hedging) is still "
-        "factual and still needs evidence support.\n"
+        "a qualified factual statement is still factual and needs evidence.\n"
         "4. factual segments: status asserted or qualified, and "
-        "evidence_support MUST list at least one evidence_id that directly "
-        "states the claim. Never bind contradicts-style disagreement as "
-        "support and never put evidence on non-factual segments.\n"
+        "evidence_support MUST list at least one evidence_id that positively "
+        "and strongly supports the claim. Never bind disagreement, qualifiers, "
+        "background or weak evidence as support.\n"
         "5. non-factual segments: omit status and keep evidence_support empty.\n"
         "6. If you cannot produce a safe binding for the whole answer, set "
         "refused=true with an empty segments list.\n"
@@ -368,7 +385,7 @@ def _binding_messages(
     user = (
         "Question:\n{question}\n\n"
         "Final answer segments (read-only input to classify):\n{numbered}\n\n"
-        "Available evidence (bounded metadata; use the evidence_id values "
+        "Available evidence (bounded metadata; use evidence_id values "
         "verbatim):\n{context}"
     ).format(
         question=_clean_text(question)[:_MAX_CONTEXT_CHARS],
@@ -443,12 +460,11 @@ def _bounded_rows(
             strength=_clean_text(row.strength),
             locator=_clean_text(row.locator),
             anchored_spans=tuple(
-                _clip(span, _MAX_ANCHOR_CHARS)
-                for span in row.anchored_spans
-            )[: _MAX_ANCHORED_SPANS_PER_ROW],
+                _clip(span, _MAX_ANCHOR_CHARS) for span in row.anchored_spans
+            )[:_MAX_ANCHORED_SPANS_PER_ROW],
             caveats=tuple(
                 _clip(caveat, _MAX_CAVEAT_CHARS) for caveat in row.caveats
-            )[: _MAX_CAVEATS_PER_ROW],
+            )[:_MAX_CAVEATS_PER_ROW],
         )
 
 
