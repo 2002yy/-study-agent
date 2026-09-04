@@ -42,6 +42,10 @@ def _research_run(*, brief_rows: list[dict[str, Any]] | None = None, context: di
         research_context["claim_engine_evidence_brief"] = {
             "schema_version": "research-evidence-brief-v1",
             "gate_status": "pass",
+            "conditional_wording_required": False,
+            "unresolved_conflicts": [],
+            "open_critical_claim_ids": [],
+            "open_gap_ids": [],
             "eligible_evidence": brief_rows,
         }
     return SimpleNamespace(
@@ -215,7 +219,7 @@ def test_spoofed_research_sources_field_on_command_never_gates(tmp_path) -> None
     service = ChatService(repository, dependencies)
     spoofed = PolicyChatCommand(
         user_input=QUESTION,
-        research_sources={  # look-alike: not a real plan carrier
+        research_sources={
             "run_id": "run_research_1",
             "provider_status": "completed",
             "selected_sources": [],
