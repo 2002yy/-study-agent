@@ -20,6 +20,7 @@ from src.application.chat_service import (
     TurnCancelled,
     _continuation_instruction,
     _normalized_turn_truth,
+    _persisted_generation_calls,
     _poll_cancel,
     _preferred_partial_reply,
     _previous_assistant_role,
@@ -300,6 +301,11 @@ class ExternalDataPolicyChatService(ChatService):
         }
         turn_id = command.turn_id or command.continuation_of_turn_id or new_id("turn")
         is_continuation = bool(command.continuation_of_turn_id)
+        prior_generation_calls = (
+            _persisted_generation_calls(existing)
+            if is_continuation and existing is not None
+            else 0
+        )
         thread_id = command.thread_id or (
             existing.thread_id if existing is not None and is_continuation else ChatThread().id
         )
@@ -434,6 +440,7 @@ class ExternalDataPolicyChatService(ChatService):
                 **route,
                 "pedagogy": pedagogy_plan.to_dict(),
                 "learning_state": next_learning_state.to_dict(),
+                "answer_generation_calls": prior_generation_calls,
             }
             role_prompt = self.dependencies.build_role_prompt(
                 route["role"],
