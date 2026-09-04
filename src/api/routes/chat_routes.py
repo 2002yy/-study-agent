@@ -243,13 +243,35 @@ async def chat_stream_endpoint(
                 reply_parts.append(token)
                 if not buffered_validation:
                     yield sse_event("token", {"text": token})
-            suffix = "".join(reply_parts)
-            try:
-                completed = await asyncio.to_thread(
-                    service.complete_turn,
-                    prepared,
-                    suffix,
+
+            # A provider stream may end without yielding when cancellation won
+            # the generation-start CAS. Re-check both terminal signals before
+            # entering the synchronous binder worker so an old continuation
+            # partial can never trigger fresh external validation after cancel.
+            if await http_request.is_disconnected():
+                raise _ClientDisconnected
+            if cancel_poll is not None and cancel_poll():
+                raise _TurnCancelled(
+                    cancel_poll.turn_id,
+                    cancel_poll.operation_id,
                 )
+
+            suffix = "".join(reply_parts)
+
+            def complete_if_active() -> Any:
+                # Second linearization check in the worker immediately before
+                # complete_turn/binder begins. Cancellation after this point is
+                # treated as cancellation of an already-started binder, which
+                # remains protected by the repository completion fence below.
+                if cancel_poll is not None and cancel_poll():
+                    raise _TurnCancelled(
+                        cancel_poll.turn_id,
+                        cancel_poll.operation_id,
+                    )
+                return service.complete_turn(prepared, suffix)
+
+            try:
+                completed = await asyncio.to_thread(complete_if_active)
             except ValueError:
                 # A cancel request can arrive while the synchronous binder is
                 # running in the worker.  The repository then rejects the
