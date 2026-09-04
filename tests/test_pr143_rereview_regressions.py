@@ -117,6 +117,49 @@ def test_segmenter_keeps_urls_versions_and_decimals_intact() -> None:
     )
 
 
+def test_pre_generation_interrupt_does_not_invent_generation_call(tmp_path) -> None:
+    evidence_id = "evidence-1"
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        return _binding_payload(evidence_id)
+
+    service, _repository = _service(tmp_path, chat_fn)
+    prepared = service.start_turn(_command(rows=[_row(evidence_id)]))
+
+    interrupted = service.interrupt_turn(prepared, "")
+
+    assert interrupted.status == "interrupted"
+    assert interrupted.route_snapshot["answer_generation_calls"] == 0
+
+
+def test_client_partial_commit_cannot_invent_generation_call(tmp_path) -> None:
+    evidence_id = "evidence-1"
+
+    def chat_fn(*args: Any, **kwargs: Any) -> str:
+        return _binding_payload(evidence_id)
+
+    service, _repository = _service(tmp_path, chat_fn)
+    prepared = service.start_turn(_command(rows=[_row(evidence_id)]))
+
+    committed, changed = service.commit_partial_turn(
+        thread_id=prepared.thread.id,
+        turn_id=prepared.turn.id,
+        operation_id=prepared.turn.operation_id or "",
+        user_input=prepared.turn.user_message,
+        assistant_message="客户端声称已经生成",
+        role="forged-role",
+        mode="forged-mode",
+        model="forged-model",
+        route_snapshot={"answer_generation_calls": 999},
+        rag_snapshot={"forged": True},
+        conversation_instruction="forged",
+    )
+
+    assert changed is True
+    assert committed.status == "interrupted"
+    assert committed.route_snapshot["answer_generation_calls"] == 0
+
+
 def test_continuation_audit_counts_prior_generation_call(tmp_path) -> None:
     evidence_id = "evidence-1"
 
@@ -126,6 +169,7 @@ def test_continuation_audit_counts_prior_generation_call(tmp_path) -> None:
 
     service, repository = _service(tmp_path, chat_fn)
     first = service.start_turn(_command(rows=[_row(evidence_id)]))
+    assert list(service.stream(first)) == []
     interrupted = service.interrupt_turn(first, "版本已经")
     assert interrupted.status == "interrupted"
     assert interrupted.route_snapshot["answer_generation_calls"] == 1
@@ -137,6 +181,7 @@ def test_continuation_audit_counts_prior_generation_call(tmp_path) -> None:
             partial_reply="版本已经",
         )
     )
+    assert list(service.stream(resumed)) == []
     completed = service.complete_turn(resumed, "发布。")
 
     audit = completed.rag_snapshot["answer_validation_audit"]
@@ -144,6 +189,7 @@ def test_continuation_audit_counts_prior_generation_call(tmp_path) -> None:
     assert generation["model_calls"] == 2
     assert generation["attempts"] == 2
     assert completed.route_snapshot["answer_generation_calls"] == 2
+    assert repository.get_chat_turn(completed.id) == completed
 
 
 def test_completed_turn_persists_only_binder_linked_evidence(tmp_path) -> None:
@@ -158,6 +204,7 @@ def test_completed_turn_persists_only_binder_linked_evidence(tmp_path) -> None:
     prepared = service.start_turn(
         _command(rows=[_row(used_id), _row(unused_id, claim_id="research-claim-2")])
     )
+    assert list(service.stream(prepared)) == []
     completed = service.complete_turn(prepared, "版本已经发布。")
 
     refs = completed.rag_snapshot["research_evidence_refs"]
