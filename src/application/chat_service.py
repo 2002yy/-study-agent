@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Callable, Iterator
 
 from src.application.answer_claim_binder import (
+    ANSWER_CLAIM_BINDER_PRODUCER,
     AnswerClaimBindingRequest,
     AnswerClaimBindingRow,
     bind_answer_claims,
@@ -43,9 +44,6 @@ from src.tools.web_agent import WebToolTrace, web_tools_disabled
 
 PERFORMANCE_MODES = {"fast", "standard", "deep"}
 
-# Canonical learner-facing copy when a research-backed answer cannot be
-# published because its claims failed evidence binding/validation.  Deliberately
-# carries no provider detail.
 RESEARCH_ANSWER_BLOCKED_COPY = (
     "联网检索结果未能通过证据核验，本次回答未发布基于联网来源的结论。"
 )
@@ -58,12 +56,7 @@ def _configured_llm_provider() -> str:
 
 
 def answer_validation_active(prepared: PreparedChatTurn) -> bool:
-    """True when the publication gate actually runs for this turn.
-
-    Both the buffering decision (streaming) and the gate itself must use the
-    same predicate: a plan exists AND the G16 outbound decision did not deny
-    web research (denied turns run with ordinary non-research semantics).
-    """
+    """True when the publication gate actually runs for this turn."""
     if prepared.answer_validation is None:
         return False
     policy = prepared.route.get("external_data_policy")
@@ -73,11 +66,7 @@ def answer_validation_active(prepared: PreparedChatTurn) -> bool:
 
 
 class TurnCancelled(Exception):
-    """Raised at a cooperative checkpoint when a turn cancellation was accepted.
-
-    The repository already holds the ``cancel_requested_at`` marker; the worker
-    is expected to settle the durable terminal state before propagating this.
-    """
+    """Raised at a cooperative checkpoint when a turn cancellation was accepted."""
 
     def __init__(self, *, stage: str, turn_id: str, operation_id: str) -> None:
         super().__init__(f"Chat turn cancelled at stage '{stage}': {turn_id}")
@@ -114,10 +103,6 @@ class ChatCommand:
     partial_reply: str = ""
     turn_id: str | None = None
     operation_id: str | None = None
-    # Server-owned research answer-validation plan (never client-authored):
-    # {"evidence_rows": [...bounded rows...], "allowed_attempts": int}.  When
-    # present the turn is research-backed and the final answer is gated on
-    # claim/evidence binding before it is published to the learner.
     answer_validation: dict[str, Any] | None = None
 
 
@@ -161,14 +146,10 @@ class PreparedChatTurn:
     learning_state_before: LearningState
     disclosure_policy: str
     learner_evaluation: PedagogyEvalRun
-    # Research-backed publication-gate plan carried from the server-owned
-    # command; None means this turn is a normal chat with no validation gate.
     answer_validation: dict[str, Any] | None = None
 
 
 def _poll_cancel(repository: RuntimeRepository, turn_id: str, operation_id: str):
-    """Build a bool-returning cancel poll for retrieval layers."""
-
     def poll() -> bool:
         return repository.turn_cancel_requested(turn_id, operation_id)
 
@@ -187,13 +168,6 @@ class ChatService:
     def _make_cancel_check(
         self, turn_id: str, operation_id: str
     ) -> Callable[[str], None]:
-        """Build a cooperative checkpoint callable for one operation.
-
-        Each checkpoint call is a repository poll; the first accepted cancel
-        raises :class:`TurnCancelled`. A ``None`` turn/operation pair short
-        circuits to a no-op so legacy requests without a handle remain usable.
-        """
-
         def check(stage: str) -> None:
             if self.repository.turn_cancel_requested(turn_id, operation_id):
                 raise TurnCancelled(
@@ -210,34 +184,17 @@ class ChatService:
         stage: str,
         assistant_message: str,
     ) -> None:
-        """Settle a cancellation raised during pre-answer preparation.
-
-        With no visible output the turn settles to ``cancelled``; a continuation
-        carrying a previously persisted partial keeps it as ``interrupted``.
-        The repository releases the thread operation in the same transaction.
-        """
-
-        settled = self.repository.finish_turn_cancel(
+        self.repository.finish_turn_cancel(
             turn_id,
             operation_id=operation_id,
             stage=stage,
             reason="user_cancelled",
             assistant_message=assistant_message,
         )
-        if settled is None:
-            # The operation completed first or already reached a terminal
-            # state; the fence already released the operation.
-            return
 
     def finish_cancelled_turn(
         self, prepared: PreparedChatTurn, partial: str
     ) -> ChatTurn | None:
-        """Settle a cancellation raised during streaming generation.
-
-        Visible partial output becomes ``interrupted`` (preserved), otherwise
-        ``cancelled``. Returns ``None`` when the turn already settled (race
-        with completion); callers must tolerate that outcome.
-        """
         reply = (
             f"{prepared.base_reply}{partial}" if prepared.is_continuation else partial
         )
@@ -271,8 +228,6 @@ class ChatService:
                 "conversationInstruction": command.conversation_instruction,
             },
         )
-        # Reserve the turn before any expensive preparation (G12 decision 2) so a
-        # cancellation request can find it even before retrieval starts.
         reserved_existing = existing
         if existing is None:
             self.repository.add_chat_turn(
@@ -481,9 +436,6 @@ class ChatService:
             )
             raise
         except Exception:
-            # Settlement: ensure a reserved turn does not linger in pending
-            # when preparation failed. The settlement transaction releases the
-            # thread operation; fall back to a bare release when it cannot run.
             settled_failed = False
             with suppress(Exception):
                 lingering = self.repository.get_chat_turn(turn_id)
@@ -533,9 +485,6 @@ class ChatService:
         )
         cancel_check("generate_pre")
         try:
-            # request_max_retries=0: the SDK never retries under this call, so
-            # one method call is exactly one physical outbound attempt and the
-            # answer-stage audit stays authoritative.
             suffix = self.dependencies.chat(
                 prepared.messages,
                 model_profile=prepared.route["model_profile"],
@@ -546,8 +495,6 @@ class ChatService:
                 request_max_retries=0,
             )
         except TurnCancelled:
-            # Fence: settle to a durable terminal state without the model
-            # output; the repository releases the thread operation.
             self._settle_cancelled_preparation(
                 turn_id=prepared.turn.id,
                 operation_id=prepared.turn.operation_id or "",
@@ -561,8 +508,6 @@ class ChatService:
         try:
             cancel_check("generate_post")
         except TurnCancelled:
-            # Decision 9: the synchronous provider call returned naturally but
-            # its output is discarded — the accepted cancel fences completion.
             self._settle_cancelled_preparation(
                 turn_id=prepared.turn.id,
                 operation_id=prepared.turn.operation_id or "",
@@ -597,17 +542,21 @@ class ChatService:
             yield token
 
     def _record_claim_binding_call(
-        self, prepared: PreparedChatTurn, *, outcome: str
+        self,
+        prepared: PreparedChatTurn,
+        *,
+        outcome: str,
+        attempts: int,
+        candidate: str,
     ) -> None:
-        """G16 outbound audit for the binder provider call (P0-C).
+        """Record G16 egress truth for the binder phase.
 
-        The G16 policy layer must know that a real outbound happened beyond
-        answer generation.  Recorded only when a policy marker exists and a
-        physical provider call occurred; raw evidence/provider errors are never
-        stored here (the validation audit keeps canonical reasons only).
+        One logical phase record carries the exact number of physical outbound
+        attempts; the separate answer-validation audit records the same count.
+        Candidate answer text is never persisted here, only its payload class.
         """
         policy = prepared.route.get("external_data_policy")
-        if not isinstance(policy, dict):
+        if not isinstance(policy, dict) or attempts < 1:
             return
         plan = prepared.answer_validation or {}
         raw_rows = plan.get("evidence_rows") or ()
@@ -624,11 +573,17 @@ class ChatService:
                 "call_id": "answer_claim_binding:1",
                 "purpose": "answer_claim_binding",
                 "provider": _configured_llm_provider(),
-                "data_categories": ["current_question", "web_results"],
+                "data_categories": [
+                    "current_question",
+                    "candidate_answer",
+                    "web_results",
+                ],
                 "data_counts": {
                     "current_question": 1,
+                    "candidate_answer": 1 if candidate else 0,
                     "web_results": row_count,
                 },
+                "attempts": attempts,
                 "status": status,
                 "result": status,
             }
@@ -642,14 +597,6 @@ class ChatService:
         prepared: PreparedChatTurn,
         candidate: str,
     ) -> tuple[str, Any | None, dict[str, Any], bool]:
-        """Run the research-backed publication gate over one candidate answer.
-
-        Fail-closed: only a binding that validates may publish the candidate.
-        Any other outcome replaces the learner-facing text with the canonical
-        blocked copy and keeps the rejected audit truth in the same commit.
-        Returns ``(published_text, claims_snapshot_or_none, audit_phases,
-        pedagogy_blocked)``.
-        """
         generation_phase = {
             "attempted": True,
             "model_calls": 1,
@@ -685,6 +632,7 @@ class ChatService:
         rows = tuple(
             AnswerClaimBindingRow(
                 evidence_id=str(row.get("evidence_id") or "").strip(),
+                claim_id=str(row.get("claim_id") or "").strip(),
                 title=str(row.get("title") or ""),
                 url=str(row.get("url") or ""),
                 source_role=str(row.get("source_role") or ""),
@@ -741,8 +689,12 @@ class ChatService:
             "error_type": "",
         }
         snapshot = bound.snapshot
-        if bound.attempt_count > 0:
-            self._record_claim_binding_call(prepared, outcome=snapshot.status)
+        self._record_claim_binding_call(
+            prepared,
+            outcome=snapshot.status,
+            attempts=bound.attempt_count,
+            candidate=candidate,
+        )
         if snapshot.status == "validated" and factual_claims_fully_bound(snapshot):
             binding_phase["outcome"] = PHASE_OUTCOME_PASSED
             return (
@@ -767,7 +719,7 @@ class ChatService:
         )
         rejected = rejected_answer_claim_snapshot(
             answer=RESEARCH_ANSWER_BLOCKED_COPY,
-            producer="answer_claim_binder_v1",
+            producer=ANSWER_CLAIM_BINDER_PRODUCER,
             reason=rejected_reason,
         )
         return (
@@ -817,11 +769,10 @@ class ChatService:
             if claims_snapshot is not None:
                 published_rag["answer_claim_snapshot"] = claims_snapshot.to_dict()
             if claims_snapshot is not None and claims_snapshot.status == "validated":
-                # Persist the bounded server-owned evidence rows behind the
-                # accepted claim links so later reads can re-validate them.
                 published_rag["research_evidence_refs"] = [
                     {
                         "evidence_id": str(row.get("evidence_id") or ""),
+                        "claim_id": str(row.get("claim_id") or ""),
                         "title": str(row.get("title") or ""),
                         "url": str(row.get("url") or ""),
                         "source_cluster_id": str(row.get("source_cluster_id") or ""),
@@ -1206,7 +1157,6 @@ def _web_context_provenance(
 
 
 def _tool_context(history: list[dict[str, Any]]) -> str:
-    """Keep the planner aware of the immediate thread without leaking a full log."""
     recent = history[-6:]
     return "\n".join(
         f"{str(message.get('role', 'user'))}: {str(message.get('content', ''))[:500]}"
