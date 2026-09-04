@@ -33,6 +33,11 @@ class ConnectedRequest:
         return False
 
 
+class DisconnectedRequest:
+    async def is_disconnected(self) -> bool:
+        return True
+
+
 def _row(evidence_id: str = EVIDENCE_ID) -> dict[str, Any]:
     return {
         "evidence_id": evidence_id,
@@ -81,6 +86,7 @@ def _service(
     plan: dict[str, Any] | None = None,
     user_input: str = "该版本发布了吗？",
     deny_web_policy: bool = False,
+    async_stream_chat: Any | None = None,
 ) -> ChatService:
     async def async_tokens(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
         for token in tokens:
@@ -105,7 +111,7 @@ def _service(
             build_messages=build_messages,
             chat=sync_chat,
             stream_chat=lambda *args, **kwargs: iter(tokens),
-            async_stream_chat=async_tokens,
+            async_stream_chat=async_stream_chat or async_tokens,
             chat_max_tokens=lambda performance_mode: 1000,
         )
     )
@@ -144,10 +150,16 @@ async def _consume(
     session_id: str,
     *,
     user_input: str = "该版本发布了吗？",
+    http_request: Any | None = None,
+    turn_id: str | None = None,
 ) -> str:
     response = await chat_stream_endpoint(
-        ChatRequest(user_input=user_input, session_id=session_id),
-        ConnectedRequest(),
+        ChatRequest(
+            user_input=user_input,
+            session_id=session_id,
+            turn_id=turn_id,
+        ),
+        http_request or ConnectedRequest(),
         service,
         research_service,
         session_service,
@@ -249,6 +261,92 @@ def test_policy_denied_turn_streams_tokens_immediately(runtime_test_context) -> 
     assert candidate in body
     assert "event: done" in body
     assert RESEARCH_ANSWER_BLOCKED_COPY not in body
+
+
+def test_research_stream_disconnect_discards_unvalidated_partial(
+    runtime_test_context,
+) -> None:
+    candidate = "未验证候选"
+
+    async def partial_then_block(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
+        yield candidate
+        await asyncio.Event().wait()
+
+    service = _service(
+        runtime_test_context,
+        tokens=(),
+        binding_json=_payload(),
+        async_stream_chat=partial_then_block,
+    )
+
+    async def scenario() -> str:
+        return await asyncio.wait_for(
+            _consume(
+                service,
+                runtime_test_context.web_lookup_service,
+                runtime_test_context.session_service,
+                "research-disconnect-session",
+                http_request=DisconnectedRequest(),
+            ),
+            timeout=1,
+        )
+
+    body = asyncio.run(scenario())
+    turns = runtime_test_context.repository.list_chat_turns(
+        "research-disconnect-session"
+    )
+
+    assert candidate not in body
+    assert "event: done" not in body
+    assert len(turns) == 1
+    assert turns[0].status == "interrupted"
+    assert turns[0].assistant_message == ""
+
+
+def test_research_stream_cancel_discards_unvalidated_partial(
+    runtime_test_context,
+) -> None:
+    candidate = "未验证候选"
+    turn_id = "research-cancel-turn"
+
+    async def partial_then_cancel(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
+        yield candidate
+        turn = runtime_test_context.repository.get_chat_turn(turn_id)
+        assert turn is not None
+        runtime_test_context.repository.request_turn_cancel(
+            turn_id,
+            expected_operation_id=turn.operation_id,
+        )
+        await asyncio.Event().wait()
+
+    service = _service(
+        runtime_test_context,
+        tokens=(),
+        binding_json=_payload(),
+        async_stream_chat=partial_then_cancel,
+    )
+
+    async def scenario() -> str:
+        return await asyncio.wait_for(
+            _consume(
+                service,
+                runtime_test_context.web_lookup_service,
+                runtime_test_context.session_service,
+                "research-cancel-session",
+                turn_id=turn_id,
+            ),
+            timeout=1,
+        )
+
+    body = asyncio.run(scenario())
+    turn = runtime_test_context.repository.get_chat_turn(turn_id)
+
+    assert candidate not in body
+    assert "event: cancelled" in body
+    assert '"partial": ""' in body
+    assert turn is not None
+    assert turn.status == "cancelled"
+    assert turn.assistant_message == ""
 
 
 async def _async_iter(values: tuple[str, ...]) -> AsyncIterator[str]:

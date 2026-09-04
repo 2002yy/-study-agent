@@ -183,6 +183,7 @@ async def chat_stream_endpoint(
 
         reply_parts: list[str] = []
         stream = service.stream_async(prepared)
+        buffered_validation = answer_validation_active(prepared)
 
         try:
             yield sse_event(
@@ -201,7 +202,6 @@ async def chat_stream_endpoint(
             # therefore emits zero candidate tokens.  The predicate is the
             # same one the gate itself uses, so policy-denied turns stream
             # token-by-token like ordinary chat.
-            buffered_validation = answer_validation_active(prepared)
             web_tools = prepared.rag.get("web_tools")
             if (
                 isinstance(web_tools, dict)
@@ -254,29 +254,37 @@ async def chat_stream_endpoint(
             )
         except _ClientDisconnected:
             with suppress(ValueError):
-                service.interrupt_turn(prepared, "".join(reply_parts))
+                service.interrupt_turn(
+                    prepared,
+                    _publishable_partial(reply_parts, buffered_validation),
+                )
             return
         except _TurnCancelled as exc:
+            partial = _publishable_partial(reply_parts, buffered_validation)
             with suppress(ValueError):
-                service.finish_cancelled_turn(prepared, "".join(reply_parts))
+                service.finish_cancelled_turn(prepared, partial)
             yield sse_event(
                 "cancelled",
                 {
                     "turn_id": exc.turn_id,
                     "operation_id": exc.operation_id,
                     "stage": "generation",
-                    "partial": "".join(reply_parts),
+                    "partial": partial,
                 },
             )
             return
         except asyncio.CancelledError:
             with suppress(ValueError):
-                service.interrupt_turn(prepared, "".join(reply_parts))
+                service.interrupt_turn(
+                    prepared,
+                    _publishable_partial(reply_parts, buffered_validation),
+                )
             raise
         except Exception as exc:
+            partial = _publishable_partial(reply_parts, buffered_validation)
             with suppress(ValueError):
-                if reply_parts:
-                    service.interrupt_turn(prepared, "".join(reply_parts))
+                if partial:
+                    service.interrupt_turn(prepared, partial)
                 else:
                     service.fail_turn(prepared)
             yield sse_event(
@@ -288,9 +296,10 @@ async def chat_stream_endpoint(
                 await stream.aclose()
             current = service.repository.get_chat_turn(prepared.turn.id)
             if current is not None and current.status == "streaming":
+                partial = _publishable_partial(reply_parts, buffered_validation)
                 with suppress(ValueError):
-                    if reply_parts:
-                        service.interrupt_turn(prepared, "".join(reply_parts))
+                    if partial:
+                        service.interrupt_turn(prepared, partial)
                     else:
                         service.fail_turn(prepared)
             # G12 decision 15: run a queued archive once the operation settled.
@@ -381,6 +390,16 @@ def _web_source_preview(web_tools: dict[str, Any]) -> str:
     lines = [f"联网正文读取已完成，本次使用的来源（预览 {len(preview)}/{total}）："]
     lines.extend(f"- [{title}]({url})" for title, url in preview)
     return "\n".join(lines) + "\n\n"
+
+
+def _publishable_partial(
+    reply_parts: list[str], buffered_validation: bool
+) -> str:
+    """Return only text that was already eligible for learner publication."""
+
+    if buffered_validation:
+        return ""
+    return "".join(reply_parts)
 
 
 def _settle_disconnected_preparation(
