@@ -245,16 +245,17 @@ async def chat_stream_endpoint(
                     yield sse_event("token", {"text": token})
 
             # A provider stream may end without yielding when cancellation won
-            # the generation-start CAS. Re-check both terminal signals before
-            # entering the synchronous binder worker so an old continuation
-            # partial can never trigger fresh external validation after cancel.
-            if await http_request.is_disconnected():
-                raise _ClientDisconnected
+            # the generation-start CAS. Durable cancellation outranks the
+            # transient transport signal so its terminal state can always be
+            # settled through finish_cancelled_turn rather than a fenced
+            # interrupt write.
             if cancel_poll is not None and cancel_poll():
                 raise _TurnCancelled(
                     cancel_poll.turn_id,
                     cancel_poll.operation_id,
                 )
+            if await http_request.is_disconnected():
+                raise _ClientDisconnected
 
             suffix = "".join(reply_parts)
 
@@ -478,16 +479,16 @@ async def _tokens_until_disconnected(
                 done, _ = await asyncio.wait({next_token}, timeout=poll_interval)
                 if done:
                     break
-                if await request.is_disconnected():
-                    next_token.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await next_token
-                    raise _ClientDisconnected
                 if cancel_poll is not None and cancel_poll():
                     next_token.cancel()
                     with suppress(asyncio.CancelledError):
                         await next_token
                     raise _TurnCancelled(cancel_poll.turn_id, cancel_poll.operation_id)
+                if await request.is_disconnected():
+                    next_token.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await next_token
+                    raise _ClientDisconnected
             try:
                 yield next_token.result()
             except StopAsyncIteration:
