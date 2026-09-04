@@ -578,7 +578,16 @@ class ChatService:
                 assistant_message=prepared.base_reply if prepared.is_continuation else "",
             )
             raise
-        return self.complete_turn(prepared, suffix).assistant_message
+        try:
+            return self.complete_turn(prepared, suffix).assistant_message
+        except TurnCancelled as exc:
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage=exc.stage,
+                assistant_message=prepared.base_reply if prepared.is_continuation else "",
+            )
+            raise
 
     def stream(self, prepared: PreparedChatTurn, *, should_cancel=None) -> Iterator[str]:
         max_tokens = self.dependencies.chat_max_tokens(
@@ -735,6 +744,9 @@ class ChatService:
                 self._blocked_audit_phases(generation_phase, "candidate_unavailable"),
                 True,
             )
+        cancel_check = self._make_cancel_check(
+            prepared.turn.id, prepared.turn.operation_id or ""
+        )
         bound = bind_answer_claims(
             request=AnswerClaimBindingRequest(
                 question=question,
@@ -751,6 +763,7 @@ class ChatService:
                 request_max_retries=0,
             ),
             max_attempts=allowed_attempts,
+            before_model_call=lambda: cancel_check("answer_claim_binding_pre"),
         )
         binding_phase: dict[str, Any] = {
             "attempted": True,
