@@ -170,18 +170,10 @@ def test_async_generation_marker_precedes_provider_and_respects_cancel(tmp_path)
 
     service, repository = _service(tmp_path, chat_fn)
     observed_counts: list[int] = []
+    provider_turn_id = ""
 
     async def async_stream_fn(*args: Any, **kwargs: Any):
-        turn_id = str(kwargs.pop("_test_turn_id", ""))
-        if not turn_id:
-            active = [
-                turn
-                for thread in repository.list_chat_threads()
-                for turn in repository.list_chat_turns(thread.id)
-                if turn.status == "streaming"
-            ]
-            turn_id = active[-1].id
-        stored = repository.get_chat_turn(turn_id)
+        stored = repository.get_chat_turn(provider_turn_id)
         assert stored is not None
         observed_counts.append(stored.route_snapshot["answer_generation_calls"])
         if False:
@@ -196,6 +188,7 @@ def test_async_generation_marker_precedes_provider_and_respects_cancel(tmp_path)
         return [token async for token in service.stream_async(prepared)]
 
     prepared = service.start_turn(_command(rows=[_row(evidence_id)]))
+    provider_turn_id = prepared.turn.id
     assert asyncio.run(consume(prepared)) == []
     assert observed_counts == [1]
     stored = repository.get_chat_turn(prepared.turn.id)
@@ -203,6 +196,7 @@ def test_async_generation_marker_precedes_provider_and_respects_cancel(tmp_path)
     assert stored.route_snapshot["answer_generation_calls"] == 1
 
     cancelled = service.start_turn(_command(rows=[_row(evidence_id)]))
+    provider_turn_id = cancelled.turn.id
     outcome, _turn = repository.request_turn_cancel(
         cancelled.turn.id,
         expected_operation_id=cancelled.turn.operation_id or "",
