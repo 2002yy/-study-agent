@@ -24,12 +24,17 @@ class _FakeRagResult:
         }
 
 
+def _policy_route_request(**kwargs: Any) -> dict[str, Any]:
+    kwargs.pop("task_contract", None)
+    return route_request(**kwargs)
+
+
 def _dependencies() -> ChatDependencies:
     return ChatDependencies(
         load_runtime_modes=lambda: RuntimeModes(performance_mode="fast"),
         read_memory_bundle=lambda _context_mode: {},
         build_role_prompt=lambda role, **_kwargs: f"role prompt for {role}",
-        route_request=route_request,
+        route_request=_policy_route_request,
         retrieve_local_knowledge=lambda *_args, **_kwargs: _FakeRagResult(),
         build_messages=build_messages,
         chat=lambda *_args, **_kwargs: "unused",
