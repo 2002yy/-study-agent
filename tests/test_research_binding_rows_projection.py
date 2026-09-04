@@ -25,6 +25,10 @@ def _brief_run(
         context["claim_engine_evidence_brief"] = {
             "schema_version": "research-evidence-brief-v1",
             "gate_status": "pass",
+            "conditional_wording_required": False,
+            "unresolved_conflicts": [],
+            "open_critical_claim_ids": [],
+            "open_gap_ids": [],
             "eligible_evidence": rows,
         }
     return SimpleNamespace(id="web_lookup_1", research_context=context)
@@ -109,7 +113,7 @@ def test_bounds_text_and_drops_non_scalar_fields():
         ]
     )
     rows = research_binding_rows(run)
-    assert len(rows[0]["title"]) <= 5000  # scalar text is collapsed, not raw
+    assert len(rows[0]["title"]) <= 5000
     assert len(rows[0]["anchored_spans"][0]) <= 300
     assert rows[0]["caveats"] == ()
 
@@ -149,8 +153,6 @@ def test_whitespace_only_evidence_ids_are_skipped():
 
 
 def test_ignores_unwhitelisted_page_body_on_valid_support_row():
-    # The row must otherwise satisfy the publication support contract; this
-    # test is specifically about privacy projection, not eligibility.
     run = _brief_run(
         rows=[
             _eligible_row(
