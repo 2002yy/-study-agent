@@ -314,6 +314,11 @@ def test_research_stream_cancel_discards_unvalidated_partial(
     candidate = "未验证候选"
     turn_id = "research-cancel-turn"
 
+    class DisconnectOnceCancelled:
+        async def is_disconnected(self) -> bool:
+            turn = runtime_test_context.repository.get_chat_turn(turn_id)
+            return turn is not None and turn.cancel_requested_at is not None
+
     async def partial_then_cancel(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
         yield candidate
         turn = runtime_test_context.repository.get_chat_turn(turn_id)
@@ -338,6 +343,7 @@ def test_research_stream_cancel_discards_unvalidated_partial(
                 runtime_test_context.web_lookup_service,
                 runtime_test_context.session_service,
                 "research-cancel-session",
+                http_request=DisconnectOnceCancelled(),
                 turn_id=turn_id,
             ),
             timeout=1,
