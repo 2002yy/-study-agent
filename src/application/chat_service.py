@@ -588,6 +588,25 @@ class ChatService:
                 assistant_message=prepared.base_reply if prepared.is_continuation else "",
             )
             raise
+        except ValueError:
+            operation_id = prepared.turn.operation_id or ""
+            if operation_id and self.repository.turn_cancel_requested(
+                prepared.turn.id, operation_id
+            ):
+                self._settle_cancelled_preparation(
+                    turn_id=prepared.turn.id,
+                    operation_id=operation_id,
+                    stage="complete_turn",
+                    assistant_message=(
+                        prepared.base_reply if prepared.is_continuation else ""
+                    ),
+                )
+                raise TurnCancelled(
+                    stage="complete_turn",
+                    turn_id=prepared.turn.id,
+                    operation_id=operation_id,
+                ) from None
+            raise
 
     def stream(self, prepared: PreparedChatTurn, *, should_cancel=None) -> Iterator[str]:
         max_tokens = self.dependencies.chat_max_tokens(
