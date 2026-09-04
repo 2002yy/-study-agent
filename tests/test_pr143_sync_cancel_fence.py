@@ -71,6 +71,9 @@ def test_sync_cancel_after_binder_call_settles_as_cancelled(runtime_test_context
         nonlocal binder_calls
         if kwargs.get("task_name") == "answer_claim_binding":
             binder_calls += 1
+            reserved = runtime_test_context.repository.get_chat_turn(active_turn_id)
+            assert reserved is not None
+            assert reserved.route_snapshot["answer_claim_binding_calls_started"] == 1
             outcome, _turn = runtime_test_context.repository.request_turn_cancel(
                 active_turn_id,
                 expected_operation_id=active_operation_id,
@@ -116,3 +119,4 @@ def test_sync_cancel_after_binder_call_settles_as_cancelled(runtime_test_context
     assert turn.status == "cancelled"
     assert turn.assistant_message == ""
     assert turn.route_snapshot["answer_generation_calls"] == 1
+    assert turn.route_snapshot["answer_claim_binding_calls_started"] == 1
