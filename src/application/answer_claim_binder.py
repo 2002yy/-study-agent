@@ -50,12 +50,15 @@ _MAX_SEGMENT_CHARS = 1200
 _ALLOWED_SEGMENT_KINDS = frozenset(
     {"factual", "instructional", "question", "recommendation", "uncertainty"}
 )
-# Hard boundaries are sentence/semicolon/paragraph endings. Commas split only
-# when the following clause clearly switches into advice/instruction wording;
-# splitting every comma over-segments ordinary factual prose and can exhaust
-# the bounded segment budget without improving claim coverage.
+# Chinese sentence punctuation is unambiguous. ASCII punctuation only becomes
+# a boundary when followed by whitespace/end-of-answer, so URLs, versions and
+# decimals such as ``https://docs.python.org/3.12/`` and ``v3.12`` stay intact.
+# Commas split only when the following clause clearly switches into
+# advice/instruction wording; splitting every comma over-segments ordinary
+# factual prose and can exhaust the bounded segment budget without improving
+# claim coverage.
 _SEGMENT_BOUNDARY = re.compile(
-    r"(?<=[。！？；!?;.:：])|[\r\n]+|"
+    r"(?<=[。！？；])|(?<=[.!?;:：])(?=\s|$)|[\r\n]+|"
     r"(?<=[，,])(?=\s*(?:建议|应该|应当|请|不要|需要|需|推荐|最好|可考虑|"
     r"recommend\b|should\b|please\b|consider\b))",
     re.IGNORECASE,
