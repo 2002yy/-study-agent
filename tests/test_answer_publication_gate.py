@@ -31,6 +31,7 @@ from src.repositories.runtime_repository import RuntimeRepository
 from src.tools.web_agent import WebToolTrace
 
 EVIDENCE_ID = "evidence_abc123"
+RESEARCH_CLAIM_ID = "research_claim_1"
 CANDIDATE = "该版本已正式发布，并修复了已知问题。"
 CLAIM_TEXT = "该版本已正式发布。"
 ANSWER = "candidate text to publish"
@@ -51,6 +52,7 @@ class _FakeRagResult:
 def _row(evidence_id: str = EVIDENCE_ID) -> dict[str, Any]:
     return {
         "evidence_id": evidence_id,
+        "claim_id": RESEARCH_CLAIM_ID,
         "title": "Official release",
         "url": "https://official.example/release",
         "source_role": "official_statement",
@@ -70,7 +72,11 @@ def _segment_entry(
     status: str = "asserted",
     support: Sequence[str] = (),
 ) -> dict[str, Any]:
-    entry: dict[str, Any] = {"segment_ref": ref, "kind": kind, "evidence_support": list(support)}
+    entry: dict[str, Any] = {
+        "segment_ref": ref,
+        "kind": kind,
+        "evidence_support": list(support),
+    }
     if status:
         entry["status"] = status
     return entry
@@ -82,12 +88,12 @@ def _binding_payload(
     refused: bool = False,
     segment_count: int = 1,
 ) -> str:
-    """Build a v2 payload covering exactly ``segment_count`` server segments.
-
-    Unlisted remaining segments (all factual by default) stay supported by the
-    first provided entry's evidence ids unless per-ref entries are given.
-    """
-    provided = {str(entry.get("segment_ref")) for entry in segments if isinstance(entry, dict)}
+    """Build a v3 payload covering exactly ``segment_count`` server segments."""
+    provided = {
+        str(entry.get("segment_ref"))
+        for entry in segments
+        if isinstance(entry, dict)
+    }
     entries = [dict(entry) for entry in segments if isinstance(entry, dict)]
     default_support: list[str] = []
     for entry in entries:
@@ -226,7 +232,6 @@ def test_passed_binding_publishes_candidate_with_full_audit(tmp_path) -> None:
 
 
 def test_rejected_binding_never_publishes_candidate(tmp_path) -> None:
-    """A rejected binding publishes the blocked copy; audit keeps rejection."""
     calls = [json.dumps({"refused": True, "claims": [], "claim_links": []})]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
@@ -261,7 +266,7 @@ def test_zero_remaining_budget_makes_zero_binder_calls(tmp_path) -> None:
         service, repository, _command(rows=[_row()], allowed_attempts=0)
     )
     assert reply == RESEARCH_ANSWER_BLOCKED_COPY
-    assert calls["calls"] == 1  # generation only; binder never dials the provider
+    assert calls["calls"] == 1
     audit = _audit(turn)
     binding = audit["phases"]["answer_claim_binding"]
     assert binding["outcome"] == "budget_exhausted"
@@ -270,7 +275,6 @@ def test_zero_remaining_budget_makes_zero_binder_calls(tmp_path) -> None:
 
 
 def test_retry_counts_every_physical_binder_call(tmp_path) -> None:
-    """Two authorized attempts both appear as physical model calls."""
     calls = {"binding": 0}
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
@@ -337,11 +341,9 @@ def test_missing_evidence_brief_fails_closed_without_provider_calls(tmp_path) ->
         return ANSWER
 
     service, repository = _service(tmp_path, chat_fn)
-    # Server-owned plan with zero eligible rows (old/archive run without an
-    # Evidence Brief) must fail closed before any binder provider call.
     reply, turn = _run_turn(service, repository, _command(rows=[]))
     assert reply == RESEARCH_ANSWER_BLOCKED_COPY
-    assert calls["calls"] == 1  # no binder provider call for a missing brief
+    assert calls["calls"] == 1
     audit = _audit(turn)
     binding = audit["phases"]["answer_claim_binding"]
     assert binding["outcome"] == "rejected"
@@ -366,12 +368,6 @@ def test_normal_chat_has_no_validation_audit_at_all(tmp_path) -> None:
 
 
 def test_client_forged_audit_is_replaced_on_load(tmp_path) -> None:
-    """A fabricated audit never survives: ChatTurn normalization rebuilds it.
-
-    The server stores the audit inside the completed rag snapshot; a tampered
-    store is rebuilt on load: bounded counts, canonical error tokens, and the
-    learner hash is always recomputed from the assistant message that was kept.
-    """
     calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
@@ -415,18 +411,15 @@ def test_client_forged_audit_is_replaced_on_load(tmp_path) -> None:
     reloaded = _turn(repository, prepared.turn.id)
     audit = _audit(reloaded)
     assert audit["schema_version"] == "answer-validation-audit-v1"
-    # Learner identity is always rebound to the actually stored message.
     assert audit["learner_answer_sha256"] == sha256_text(CANDIDATE)
     phases = audit["phases"]
-    # Unknown outcomes collapse to no phase at all (fail-safe, not forged).
     assert "answer_claim_binding" not in phases
     generation = phases["answer_generation"]
-    assert generation["model_calls"] == 999  # bounded int passthrough, no clamp lie
+    assert generation["model_calls"] == 999
     assert generation["error_type"] == ""
 
 
 def test_generation_exception_leaves_no_committed_candidate(tmp_path) -> None:
-    """Provider failure during generation never reaches a completed commit."""
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "single_chat":
             raise RuntimeError("generation exploded")
@@ -447,7 +440,6 @@ def test_generation_exception_leaves_no_committed_candidate(tmp_path) -> None:
 
 
 def test_unknown_evidence_id_is_never_published(tmp_path) -> None:
-    """A link to an evidence id outside the server rows fails closed."""
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "answer_claim_binding":
             return _binding_payload(
@@ -465,10 +457,8 @@ def test_unknown_evidence_id_is_never_published(tmp_path) -> None:
 def test_strong_factual_claim_without_eligible_binding_is_not_published(
     tmp_path,
 ) -> None:
-    """A strong factual claim with zero eligible evidence binding is blocked."""
     def chat_fn(*args: Any, **kwargs: Any) -> str:
         if kwargs.get("task_name") == "answer_claim_binding":
-            # The only factual segment stays unbound: must fail closed.
             return _binding_payload(
                 [_segment_entry("s1", support=())], segment_count=1
             )
@@ -486,12 +476,6 @@ def test_strong_factual_claim_without_eligible_binding_is_not_published(
 
 
 def test_web_policy_denied_never_calls_the_binder(tmp_path) -> None:
-    """P0-3: G16 outbound denial means zero binder provider calls.
-
-    The turn keeps ordinary non-research semantics: the candidate publishes
-    normally (no research material reached the model) and no validation audit
-    is fabricated.
-    """
     from src.pedagogy.evaluation import SemanticEvaluation
     from src.task_contract import (
         TaskAwarePedagogyEngine,
@@ -551,11 +535,10 @@ def test_web_policy_denied_never_calls_the_binder(tmp_path) -> None:
         for item in (policy or {}).get("external_calls", [])
         if isinstance(item, dict) and item.get("purpose") == "answer_claim_binding"
     ]
-    assert recorded == []  # no outbound, no G16 binding record
+    assert recorded == []
 
 
 def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> None:
-    """The production ExternalDataPolicyChatService honors the same gate."""
     from src.pedagogy.evaluation import SemanticEvaluation
     from src.task_contract import (
         TaskAwarePedagogyEngine,
@@ -570,11 +553,7 @@ def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> 
     calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
-        return (
-            calls.pop(0)
-            if kwargs.get("task_name") == "answer_claim_binding"
-            else ANSWER
-        )
+        return calls.pop(0) if kwargs.get("task_name") == "answer_claim_binding" else ANSWER
 
     def retrieve(_query: str, **kwargs: Any) -> Any:
         return _FakeRagResult()
@@ -607,7 +586,6 @@ def test_policy_service_production_path_publishes_passed_candidate(tmp_path) -> 
 
 
 def test_g16_audit_records_binding_outbound_on_passed_policy_turn(tmp_path) -> None:
-    """P0-C: G16 sees the binder outbound beyond answer generation."""
     from src.pedagogy.evaluation import SemanticEvaluation
     from src.task_contract import (
         TaskAwarePedagogyEngine,
@@ -622,11 +600,7 @@ def test_g16_audit_records_binding_outbound_on_passed_policy_turn(tmp_path) -> N
     calls = [_binding_payload([_segment_entry("s1", support=(EVIDENCE_ID,))])]
 
     def chat_fn(*args: Any, **kwargs: Any) -> str:
-        return (
-            calls.pop(0)
-            if kwargs.get("task_name") == "answer_claim_binding"
-            else ANSWER
-        )
+        return calls.pop(0) if kwargs.get("task_name") == "answer_claim_binding" else ANSWER
 
     def retrieve(_query: str, **kwargs: Any) -> Any:
         return _FakeRagResult()
@@ -663,15 +637,24 @@ def test_g16_audit_records_binding_outbound_on_passed_policy_turn(tmp_path) -> N
     ]
     purposes = [item.get("purpose") for item in calls_recorded]
     assert "answer_claim_binding" in purposes
-    binding = next(item for item in calls_recorded if item.get("purpose") == "answer_claim_binding")
+    binding = next(
+        item
+        for item in calls_recorded
+        if item.get("purpose") == "answer_claim_binding"
+    )
     assert binding["status"] == "completed"
     assert binding["provider"]
-    assert binding["data_categories"] == ["current_question", "web_results"]
+    assert binding["data_categories"] == [
+        "current_question",
+        "candidate_answer",
+        "web_results",
+    ]
+    assert binding["data_counts"]["candidate_answer"] == 1
     assert binding["data_counts"]["web_results"] == 1
+    assert binding["attempts"] == 1
 
 
 def test_g16_audit_records_rejected_binding_outcome(tmp_path) -> None:
-    """P0-C: a rejected binding is visible to G16 as rejected, no raw error."""
     from src.pedagogy.evaluation import SemanticEvaluation
     from src.task_contract import (
         TaskAwarePedagogyEngine,
