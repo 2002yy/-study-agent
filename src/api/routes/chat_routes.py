@@ -213,15 +213,19 @@ async def chat_stream_endpoint(
                     if web_tools.get("evidence_status") == "candidate_only"
                     else "联网搜索失败，本回答未使用联网来源。\n\n"
                 )
-                reply_parts.append(notice)
+                # For a research-validation turn, this route-owned UI notice is
+                # not part of the model candidate and must not enter the binder
+                # or its answer hash.  The underlying web-tools truth remains
+                # available in route/RAG metadata.  Ordinary chat keeps the
+                # historical learner-facing notice behavior.
                 if not buffered_validation:
+                    reply_parts.append(notice)
                     yield sse_event("token", {"text": notice})
             elif isinstance(web_tools, dict) and web_tools.get("used") is True:
                 preview = _web_source_preview(web_tools)
-                if preview:
+                if preview and not buffered_validation:
                     reply_parts.append(preview)
-                    if not buffered_validation:
-                        yield sse_event("token", {"text": preview})
+                    yield sse_event("token", {"text": preview})
             async for token in _tokens_until_disconnected(
                 stream,
                 http_request,
