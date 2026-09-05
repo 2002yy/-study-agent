@@ -12,7 +12,12 @@ from src.llm_client import _resolve_timeout, chat as _production_chat
 MAX_MODEL_CALLS = 6
 HARD_TIMEOUT_SECONDS = 60.0
 
-_default_binding_rows_provider: Callable[[Any], Any] = lambda _run: ()
+
+def _empty_binding_rows_provider(_run: Any) -> tuple[Any, ...]:
+    return ()
+
+
+_default_binding_rows_provider: Callable[[Any], Any] = _empty_binding_rows_provider
 
 
 class QualificationModelBudgetExhausted(RuntimeError):
@@ -220,7 +225,10 @@ def make_guarded_run_case(
             if reason not in violations:
                 violations.append(reason)
 
-        if budget.phase_calls["other"] > 0 and "unclassified_answer_model_call" not in violations:
+        if (
+            budget.phase_calls["other"] > 0
+            and "unclassified_answer_model_call" not in violations
+        ):
             violations.append("unclassified_answer_model_call")
 
         answer = record.get("answer")
