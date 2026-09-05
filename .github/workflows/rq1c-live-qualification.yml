@@ -1,0 +1,183 @@
+name: RQ1-C Live 12 Qualification
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rq1c-live-12-qualification
+  cancel-in-progress: false
+
+jobs:
+  live12:
+    if: github.event.head_commit.message == 'chore(qualification): execute RQ1-C live 12'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+      LLM_PROVIDER_PROFILE: deepseek
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      DEEPSEEK_MODEL_FLASH_NAME: deepseek-v4-flash
+      DEEPSEEK_MODEL_PRO_NAME: deepseek-v4-flash
+      DEFAULT_MODEL_PROFILE: flash
+      DEEPSEEK_DEFAULT_MODEL_PROFILE: flash
+      LLM_MAX_RETRIES: '0'
+      DEEPSEEK_MAX_RETRIES: '0'
+      LLM_TIMEOUT_SECONDS: '20'
+      DEEPSEEK_TIMEOUT_SECONDS: '20'
+      WEB_TOOL_ENABLED: 'true'
+      WEB_ENABLE_DUCKDUCKGO: 'true'
+      WEB_ENABLE_SEARXNG: 'false'
+      WEB_ENABLE_BING_RSS: 'true'
+      WEB_SEARCH_PROVIDER_TIMEOUT_SECONDS: '6'
+      WEB_SEARCH_TOTAL_TIMEOUT_SECONDS: '8'
+      NEWS_ENABLE_FIRECRAWL_READER: 'false'
+      NEWS_ENABLE_JINA_READER: 'false'
+
+    steps:
+      - name: Check out exact qualification head
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Verify live provider credential and exact head
+        shell: bash
+        env:
+          KEY_DEEPSEEK: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY_DEEPSEEK" ]; then
+            echo 'DEEPSEEK_API_KEY is not configured for this repository.' >&2
+            exit 2
+          fi
+          export DEEPSEEK_API_KEY="$KEY_DEEPSEEK"
+          export OPENAI_API_KEY="$KEY_DEEPSEEK"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=no)"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from src.llm_client import get_provider_settings
+
+          settings = get_provider_settings()
+          metadata = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'provider_profile': settings.profile_name,
+              'base_url': settings.base_url,
+              'flash_model': settings.flash_model,
+              'pro_model': settings.pro_model,
+              'default_profile': settings.default_profile,
+              'sdk_max_retries': settings.max_retries,
+              'timeout_seconds': settings.timeout_seconds,
+          }
+          Path('output').mkdir(parents=True, exist_ok=True)
+          Path('output/rq1c-live12-environment.json').write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(metadata, sort_keys=True))
+          PY
+          echo "DEEPSEEK_API_KEY=$KEY_DEEPSEEK" >> "$GITHUB_ENV"
+          echo "OPENAI_API_KEY=$KEY_DEEPSEEK" >> "$GITHUB_ENV"
+
+      - name: Run bounded live 12 runtime
+        id: runtime
+        shell: bash
+        run: |
+          set +e
+          python tools/run_rq1c_bounded_qualification.py \
+            --output output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+            > output/rq1c-live12-runtime.log 2>&1
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-live12-runtime.log
+          exit 0
+
+      - name: Run deterministic protocol probes bound to runtime artifact
+        id: protocol
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json ]; then
+            python tools/run_rq1c_protocol_probes.py \
+              --runtime output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+              --output output/RQ1C_BOUNDED_PROTOCOL_PROBES.json \
+              > output/rq1c-live12-protocol.log 2>&1
+            status=$?
+          else
+            echo 'runtime artifact missing; protocol probes not run' > output/rq1c-live12-protocol.log
+            status=3
+          fi
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-live12-protocol.log
+          exit 0
+
+      - name: Write structural execution summary
+        if: always()
+        shell: python
+        env:
+          RUNTIME_EXIT: ${{ steps.runtime.outputs.exit_code }}
+          PROTOCOL_EXIT: ${{ steps.protocol.outputs.exit_code }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          runtime_path = Path('output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json')
+          protocol_path = Path('output/RQ1C_BOUNDED_PROTOCOL_PROBES.json')
+          summary = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'runtime_exit_code': os.environ.get('RUNTIME_EXIT', ''),
+              'protocol_exit_code': os.environ.get('PROTOCOL_EXIT', ''),
+              'runtime_artifact_present': runtime_path.is_file(),
+              'protocol_artifact_present': protocol_path.is_file(),
+          }
+          if runtime_path.is_file():
+              runtime = json.loads(runtime_path.read_text(encoding='utf-8'))
+              summary['runtime_summary'] = runtime.get('summary')
+          if protocol_path.is_file():
+              protocol = json.loads(protocol_path.read_text(encoding='utf-8'))
+              summary['protocol_summary'] = protocol.get('summary')
+          Path('output/rq1c-live12-execution-summary.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(summary, sort_keys=True))
+
+      - name: Upload live 12 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rq1c-live12-evidence
+          path: |
+            output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+            output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
+            output/rq1c-live12-environment.json
+            output/rq1c-live12-execution-summary.json
+            output/rq1c-live12-runtime.log
+            output/rq1c-live12-protocol.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce evidence presence only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+          test -f output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
