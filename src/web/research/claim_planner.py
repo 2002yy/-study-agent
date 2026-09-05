@@ -361,46 +361,87 @@ def _parse_claim_plan(raw: Any, *, question: str) -> tuple[ProposedClaim, ...]:
     if not isinstance(supporting_raw, list) or len(supporting_raw) > MAX_RUNTIME_CLAIMS - 1:
         raise ValueError("runtime claim plan must contain zero to five supporting claims")
 
-    raw_claims = [(data.get("critical_claim"), "critical")]
-    raw_claims.extend((item, "major") for item in supporting_raw)
-
     proposals: list[ProposedClaim] = []
     seen: set[str] = set()
-    for raw_claim, priority in raw_claims:
+
+    # The critical claim is indispensable and remains fully fail-closed. A bad
+    # critical anchor, schema, kind, or policy profile invalidates the plan.
+    critical = _parse_claim_candidate(
+        data.get("critical_claim"),
+        priority="critical",
+        question=question,
+    )
+    critical_key = " ".join(critical.surface.casefold().split())
+    seen.add(critical_key)
+    proposals.append(critical)
+
+    # Supporting claims are explicitly optional. If the model violates the
+    # prompt's anchor-only rules for one optional supporting claim (non-verbatim
+    # or duplicate anchor), excluding that claim enforces the contract rather
+    # than letting optional noise invalidate an otherwise sound critical plan.
+    # Schema/kind/profile/policy validation remains strict for every supporting
+    # claim that has a usable, distinct anchor and could enter ResearchState.
+    for raw_claim in supporting_raw:
         claim = _strict_mapping(
             raw_claim,
             {"question_anchor", "kind", "policy_profile"},
             "runtime claim",
         )
-        surface = _canonical_question_anchor(
-            claim.get("question_anchor"),
-            question=question,
-        )
+        try:
+            surface = _canonical_question_anchor(
+                claim.get("question_anchor"),
+                question=question,
+            )
+        except ValueError:
+            continue
         dedupe_key = " ".join(surface.casefold().split())
         if dedupe_key in seen:
-            raise ValueError("runtime claim plan contains duplicate anchors")
+            continue
+        candidate = _parse_claim_candidate(
+            claim,
+            priority="major",
+            question=question,
+            prevalidated_surface=surface,
+        )
         seen.add(dedupe_key)
-        kind = _enum(claim.get("kind"), _CLAIM_KINDS, "claim kind")
-        profile = _enum(
-            claim.get("policy_profile"), _POLICY_PROFILES, "evidence policy profile"
-        )
-        # Semantic compatibility remains a hard code-owned validation even when
-        # the provider honors JSON Schema. A provider that only guarantees JSON
-        # syntax therefore cannot silently weaken evidence policy.
-        evidence_policy_for_claim(
-            kind=kind,  # type: ignore[arg-type]
-            priority=priority,  # type: ignore[arg-type]
-            profile=profile,  # type: ignore[arg-type]
-        )
-        proposals.append(
-            ProposedClaim(
-                surface=surface,
-                kind=kind,
-                priority=priority,
-                policy_profile=profile,
-            )
-        )
+        proposals.append(candidate)
     return tuple(proposals)
+
+
+def _parse_claim_candidate(
+    raw_claim: Any,
+    *,
+    priority: str,
+    question: str,
+    prevalidated_surface: str | None = None,
+) -> ProposedClaim:
+    claim = _strict_mapping(
+        raw_claim,
+        {"question_anchor", "kind", "policy_profile"},
+        "runtime claim",
+    )
+    surface = prevalidated_surface or _canonical_question_anchor(
+        claim.get("question_anchor"),
+        question=question,
+    )
+    kind = _enum(claim.get("kind"), _CLAIM_KINDS, "claim kind")
+    profile = _enum(
+        claim.get("policy_profile"), _POLICY_PROFILES, "evidence policy profile"
+    )
+    # Semantic compatibility remains a hard code-owned validation even when
+    # the provider honors JSON Schema. A provider that only guarantees JSON
+    # syntax therefore cannot silently weaken evidence policy.
+    evidence_policy_for_claim(
+        kind=kind,  # type: ignore[arg-type]
+        priority=priority,  # type: ignore[arg-type]
+        profile=profile,  # type: ignore[arg-type]
+    )
+    return ProposedClaim(
+        surface=surface,
+        kind=kind,
+        priority=priority,
+        policy_profile=profile,
+    )
 
 
 def _canonical_question_anchor(value: Any, *, question: str) -> str:
