@@ -60,6 +60,80 @@ def _dependencies() -> ChatDependencies:
     )
 
 
+def _answer_generation_calls(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    policy = snapshot.get("external_data_policy")
+    if not isinstance(policy, dict):
+        return []
+    return [
+        item
+        for item in policy.get("external_calls", [])
+        if isinstance(item, dict) and item.get("purpose") == "answer_generation"
+    ]
+
+
+def _start_policy_turn(runtime_test_context, *, suffix: str):
+    service = ExternalDataPolicyChatService(
+        runtime_test_context.repository,
+        _dependencies(),
+    )
+    prepared = service.start_turn(
+        PolicyChatCommand(
+            user_input="继续回答这个问题。",
+            thread_id=f"policy-egress-session-{suffix}",
+            turn_id=f"policy-egress-turn-{suffix}",
+            web_policy="off",
+            memory_policy="off",
+        )
+    )
+    return service, prepared
+
+
+def test_policy_generation_egress_commits_with_start_reservation(
+    runtime_test_context,
+) -> None:
+    service, prepared = _start_policy_turn(runtime_test_context, suffix="commit")
+
+    service._record_answer_call(prepared, "attempted")
+    before = runtime_test_context.repository.get_chat_turn(prepared.turn.id)
+    assert before is not None
+    assert before.route_snapshot["answer_generation_calls"] == 0
+    assert _answer_generation_calls(before.route_snapshot) == []
+    assert _answer_generation_calls(before.rag_snapshot) == []
+
+    assert service._begin_generation_call(prepared) is True
+
+    durable = runtime_test_context.repository.get_chat_turn(prepared.turn.id)
+    assert durable is not None
+    assert durable.route_snapshot["answer_generation_calls"] == 1
+    route_calls = _answer_generation_calls(durable.route_snapshot)
+    rag_calls = _answer_generation_calls(durable.rag_snapshot)
+    assert len(route_calls) == 1
+    assert len(rag_calls) == 1
+    assert route_calls[0]["status"] == "attempted"
+    assert rag_calls[0]["status"] == "attempted"
+
+
+def test_policy_cancel_before_generation_reservation_records_no_egress(
+    runtime_test_context,
+) -> None:
+    service, prepared = _start_policy_turn(runtime_test_context, suffix="cancel")
+
+    service._record_answer_call(prepared, "attempted")
+    outcome, _turn = runtime_test_context.repository.request_turn_cancel(
+        prepared.turn.id,
+        expected_operation_id=prepared.turn.operation_id or "",
+    )
+    assert outcome == "accepted"
+
+    assert service._begin_generation_call(prepared) is False
+
+    durable = runtime_test_context.repository.get_chat_turn(prepared.turn.id)
+    assert durable is not None
+    assert durable.route_snapshot["answer_generation_calls"] == 0
+    assert _answer_generation_calls(durable.route_snapshot) == []
+    assert _answer_generation_calls(durable.rag_snapshot) == []
+
+
 def test_policy_continuation_carries_prior_generation_calls(runtime_test_context) -> None:
     service = ExternalDataPolicyChatService(
         runtime_test_context.repository,
