@@ -14,21 +14,22 @@ concurrency:
 
 jobs:
   live12:
-    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-auto' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       PYTHONPATH: .
-      LLM_PROVIDER_PROFILE: deepseek
-      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
-      DEEPSEEK_MODEL_FLASH_NAME: deepseek-v4-flash
-      DEEPSEEK_MODEL_PRO_NAME: deepseek-v4-flash
       DEFAULT_MODEL_PROFILE: flash
-      DEEPSEEK_DEFAULT_MODEL_PROFILE: flash
       LLM_MAX_RETRIES: '0'
+      OPENAI_MAX_RETRIES: '0'
       DEEPSEEK_MAX_RETRIES: '0'
+      OPENROUTER_MAX_RETRIES: '0'
+      SILICONFLOW_MAX_RETRIES: '0'
       LLM_TIMEOUT_SECONDS: '20'
+      OPENAI_TIMEOUT_SECONDS: '20'
       DEEPSEEK_TIMEOUT_SECONDS: '20'
+      OPENROUTER_TIMEOUT_SECONDS: '20'
+      SILICONFLOW_TIMEOUT_SECONDS: '20'
       WEB_TOOL_ENABLED: 'true'
       WEB_ENABLE_DUCKDUCKGO: 'true'
       WEB_ENABLE_SEARXNG: 'false'
@@ -51,51 +52,117 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Verify live provider credential and exact head
-        shell: bash
+      - name: Select configured provider and exact model
+        shell: python
         env:
+          KEY_OPENAI: ${{ secrets.OPENAI_API_KEY }}
           KEY_DEEPSEEK: ${{ secrets.DEEPSEEK_API_KEY }}
+          KEY_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY }}
+          KEY_SILICONFLOW: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
-          set -euo pipefail
-          if [ -z "$KEY_DEEPSEEK" ]; then
-            echo 'DEEPSEEK_API_KEY is not configured for this repository.' >&2
-            exit 2
-          fi
-          export DEEPSEEK_API_KEY="$KEY_DEEPSEEK"
-          export OPENAI_API_KEY="$KEY_DEEPSEEK"
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain=v1 --untracked-files=no)"
-          python - <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
-          from src.llm_client import get_provider_settings
+          from openai import OpenAI
 
-          settings = get_provider_settings()
+          root = Path.cwd()
+          output = root / 'output'
+          output.mkdir(parents=True, exist_ok=True)
+
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if head != os.environ['GITHUB_SHA']:
+              raise SystemExit('checkout HEAD does not match GITHUB_SHA')
+          dirty = subprocess.check_output(
+              ['git', 'status', '--porcelain=v1', '--untracked-files=no'], text=True
+          ).strip()
+          if dirty:
+              raise SystemExit('tracked checkout is dirty before qualification')
+
+          choices = [
+              ('openai', os.environ.get('KEY_OPENAI', ''), 'https://api.openai.com/v1'),
+              ('deepseek', os.environ.get('KEY_DEEPSEEK', ''), 'https://api.deepseek.com/v1'),
+              ('openrouter', os.environ.get('KEY_OPENROUTER', ''), 'https://openrouter.ai/api/v1'),
+              ('siliconflow', os.environ.get('KEY_SILICONFLOW', ''), 'https://api.siliconflow.cn/v1'),
+          ]
+          selected = next(((p, k, u) for p, k, u in choices if k.strip()), None)
+          if selected is None:
+              presence = {p: False for p, _, _ in choices}
+              (output / 'rq1c-live12-environment.json').write_text(
+                  json.dumps({'git_sha': head, 'configured_provider_secrets': presence}, indent=2) + '\n',
+                  encoding='utf-8',
+              )
+              raise SystemExit('no supported LLM provider credential is configured')
+
+          provider, key, base_url = selected
+          client = OpenAI(api_key=key, base_url=base_url, timeout=15, max_retries=0)
+          model_ids = sorted({str(item.id) for item in client.models.list().data if getattr(item, 'id', None)})
+          preferences = {
+              'openai': ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1'],
+              'deepseek': ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-v4'],
+              'openrouter': [
+                  'deepseek/deepseek-v4-flash',
+                  'openai/gpt-5-mini',
+                  'openai/gpt-5',
+                  'deepseek/deepseek-chat',
+                  'openai/gpt-4.1-mini',
+              ],
+              'siliconflow': [
+                  'deepseek-ai/DeepSeek-V4',
+                  'deepseek-ai/DeepSeek-V3.1',
+                  'Qwen/Qwen3-30B-A3B-Instruct-2507',
+              ],
+          }[provider]
+          model = next((item for item in preferences if item in model_ids), None)
+          if model is None:
+              excluded = ('embed', 'audio', 'image', 'moderation', 'realtime', 'tts', 'whisper')
+              candidates = [
+                  item for item in model_ids
+                  if not any(token in item.lower() for token in excluded)
+                  and any(token in item.lower() for token in ('gpt', 'deepseek', 'qwen', 'chat', 'instruct'))
+              ]
+              if not candidates:
+                  raise SystemExit(f'no suitable chat model found for configured provider {provider}')
+              model = candidates[0]
+
           metadata = {
-              'git_sha': os.environ['GITHUB_SHA'],
-              'provider_profile': settings.profile_name,
-              'base_url': settings.base_url,
-              'flash_model': settings.flash_model,
-              'pro_model': settings.pro_model,
-              'default_profile': settings.default_profile,
-              'sdk_max_retries': settings.max_retries,
-              'timeout_seconds': settings.timeout_seconds,
+              'git_sha': head,
+              'provider_profile': provider,
+              'base_url': base_url,
+              'model': model,
+              'model_selection': 'provider_models_list_fixed_preference_then_deterministic_fallback',
+              'sdk_max_retries': 0,
+              'timeout_seconds': 20,
+              'configured_provider_secrets': {
+                  p: bool(k.strip()) for p, k, _ in choices
+              },
           }
-          Path('output').mkdir(parents=True, exist_ok=True)
-          Path('output/rq1c-live12-environment.json').write_text(
-              json.dumps(metadata, indent=2, sort_keys=True) + '\n',
-              encoding='utf-8',
+          (output / 'rq1c-live12-environment.json').write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
-          print(json.dumps(metadata, sort_keys=True))
-          PY
-          echo "DEEPSEEK_API_KEY=$KEY_DEEPSEEK" >> "$GITHUB_ENV"
-          echo "OPENAI_API_KEY=$KEY_DEEPSEEK" >> "$GITHUB_ENV"
+          print(json.dumps({k: v for k, v in metadata.items() if k != 'configured_provider_secrets'}, sort_keys=True))
+
+          env_lines = {
+              'LLM_PROVIDER_PROFILE': provider,
+              'OPENAI_API_KEY': key,
+              'OPENAI_BASE_URL': base_url,
+              'MODEL_FLASH_NAME': model,
+              'MODEL_PRO_NAME': model,
+              f'{provider.upper()}_API_KEY': key,
+              f'{provider.upper()}_BASE_URL': base_url,
+              f'{provider.upper()}_MODEL_FLASH_NAME': model,
+              f'{provider.upper()}_MODEL_PRO_NAME': model,
+              f'{provider.upper()}_DEFAULT_MODEL_PROFILE': 'flash',
+          }
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for name, value in env_lines.items():
+                  handle.write(f'{name}={value}\n')
 
       - name: Run bounded live 12 runtime
         id: runtime
         shell: bash
         run: |
+          mkdir -p output
           set +e
           python tools/run_rq1c_bounded_qualification.py \
             --output output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
@@ -111,6 +178,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          mkdir -p output
           set +e
           if [ -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json ]; then
             python tools/run_rq1c_protocol_probes.py \
@@ -138,8 +206,10 @@ jobs:
           import os
           from pathlib import Path
 
-          runtime_path = Path('output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json')
-          protocol_path = Path('output/RQ1C_BOUNDED_PROTOCOL_PROBES.json')
+          output = Path('output')
+          output.mkdir(parents=True, exist_ok=True)
+          runtime_path = output / 'RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json'
+          protocol_path = output / 'RQ1C_BOUNDED_PROTOCOL_PROBES.json'
           summary = {
               'git_sha': os.environ['GITHUB_SHA'],
               'runtime_exit_code': os.environ.get('RUNTIME_EXIT', ''),
@@ -153,9 +223,8 @@ jobs:
           if protocol_path.is_file():
               protocol = json.loads(protocol_path.read_text(encoding='utf-8'))
               summary['protocol_summary'] = protocol.get('summary')
-          Path('output/rq1c-live12-execution-summary.json').write_text(
-              json.dumps(summary, indent=2, sort_keys=True) + '\n',
-              encoding='utf-8',
+          (output / 'rq1c-live12-execution-summary.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
           print(json.dumps(summary, sort_keys=True))
 
