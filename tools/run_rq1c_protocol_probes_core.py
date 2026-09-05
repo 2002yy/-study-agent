@@ -1,8 +1,8 @@
 """Guarded loader for the reviewed deterministic RQ1-C protocol core.
 
-The immutable core source is stored as a repository payload and verified against
-its Git blob id before execution. Direct script execution always returns through
-the public exact-head entrypoint before the core payload is loaded.
+The immutable reviewed source is stored as a plain-text repository payload and
+verified against its Git blob id before execution. Direct script execution always
+returns through the public exact-head entrypoint before the core payload is loaded.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
     raise SystemExit(guarded_main())
 
-_PAYLOAD = Path(__file__).with_name("rq1c_protocol_probes_core_source.zip")
+_PAYLOAD = Path(__file__).with_name("rq1c_protocol_probes_core_source.txt")
 _file_sha = "6544ba7428981ac49f65ec1c2815e4320c66bd7d"
 _source = _PAYLOAD.read_bytes()
 _git_blob = b"blob " + str(len(_source)).encode("ascii") + b"\0" + _source

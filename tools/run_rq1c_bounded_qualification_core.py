@@ -1,8 +1,8 @@
 """Guarded loader for the previously reviewed RQ1-C qualification core.
 
-The immutable core source is stored as a repository payload and verified against
-its Git blob id before execution. Direct script execution always returns through
-the public bounded entrypoint before the core payload is loaded.
+The immutable reviewed source is stored as a plain-text repository payload and
+verified against its Git blob id before execution. Direct script execution always
+returns through the public bounded entrypoint before the core payload is loaded.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
     raise SystemExit(guarded_main())
 
-_PAYLOAD = Path(__file__).with_name("rq1c_bounded_qualification_core_source.zip")
+_PAYLOAD = Path(__file__).with_name("rq1c_bounded_qualification_core_source.txt")
 _file_sha = "ca2e3924abaf2c5cf825ce60720d77dff0c37942"
 _source = _PAYLOAD.read_bytes()
 _git_blob = b"blob " + str(len(_source)).encode("ascii") + b"\0" + _source
