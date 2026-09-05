@@ -8,7 +8,7 @@ import pytest
 
 import src.web.research.claim_planner as claim_planner_module
 from src.web.research.claim_planner import (
-    CLAIM_PLANNER_MAX_ATTEMPTS,
+    CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION,
     CLAIM_PLANNER_MAX_TOKENS,
     RuntimeClaimPlanner,
 )
@@ -89,7 +89,7 @@ def _plan(planner: RuntimeClaimPlanner, *, attempt_start: int = 1) -> Any:
     )
 
 
-def test_planner_has_small_output_budget_and_does_not_mutate_shared_retry_budget() -> None:
+def test_planner_has_small_output_budget_schema_and_does_not_mutate_shared_retry_budget() -> None:
     client = _StructuredClient(_valid_plan(fenced=True))
     shared = ResearchModelGateway(
         client=client,
@@ -103,12 +103,15 @@ def test_planner_has_small_output_budget_and_does_not_mutate_shared_retry_budget
     assert result.completed
     assert len(client.calls) == 1
     assert client.calls[0]["max_tokens"] == CLAIM_PLANNER_MAX_TOKENS == 320
-    assert client.calls[0]["response_format"] == {"type": "json_object"}
-    assert planner.model_gateway.max_attempts == CLAIM_PLANNER_MAX_ATTEMPTS == 1
+    response_format = client.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["additionalProperties"] is False
+    assert planner.model_gateway.max_attempts == CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION == 1
     assert shared.max_attempts == 2
 
 
-def test_planner_parse_failure_is_unavailable_without_retry_or_fabricated_claim() -> None:
+def test_planner_parse_failure_is_unavailable_without_immediate_retry_or_fabricated_claim() -> None:
     client = _StructuredClient("not-json")
     shared = ResearchModelGateway(
         client=client,
@@ -126,7 +129,7 @@ def test_planner_parse_failure_is_unavailable_without_retry_or_fabricated_claim(
     assert len(client.calls) == 1
 
 
-def test_planner_recovery_after_attempt_one_fails_closed_without_second_model_call() -> None:
+def test_planner_durable_recovery_attempt_two_spends_exactly_one_model_call() -> None:
     client = _StructuredClient(_valid_plan())
     planner = RuntimeClaimPlanner(
         ResearchModelGateway(
@@ -137,6 +140,24 @@ def test_planner_recovery_after_attempt_one_fails_closed_without_second_model_ca
     )
 
     result = _plan(planner, attempt_start=2)
+
+    assert result.completed
+    assert len(result.audits) == 1
+    assert result.audits[0].attempt == 2
+    assert len(client.calls) == 1
+
+
+def test_planner_attempt_beyond_shared_durable_budget_fails_closed_without_call() -> None:
+    client = _StructuredClient(_valid_plan())
+    planner = RuntimeClaimPlanner(
+        ResearchModelGateway(
+            client=client,
+            model_name="shared-model",
+            timeout_seconds=20,
+        )
+    )
+
+    result = _plan(planner, attempt_start=3)
 
     assert result.status == "unavailable"
     assert result.reason == "claim_plan_attempts_exhausted"
@@ -180,6 +201,7 @@ def test_dedicated_planner_endpoint_routes_only_planner_model(
     ]
     assert len(dedicated.calls) == 1
     assert dedicated.calls[0]["model"] == "fast-planner"
+    assert dedicated.calls[0]["response_format"]["type"] == "json_schema"
     assert shared_client.calls == []
     assert shared.max_attempts == 2
 
