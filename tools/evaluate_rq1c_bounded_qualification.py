@@ -16,6 +16,7 @@ RUNTIME_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
 REVIEW_SCHEMA_VERSION = "rq1c-bounded-independent-review-v1"
 PROTOCOL_SCHEMA_VERSION = "rq1c-bounded-protocol-probes-v1"
 REPORT_SCHEMA_VERSION = "rq1c-bounded-qualification-report-v1"
+ANSWER_AUDIT_SCHEMA_VERSION = "answer-validation-audit-v1"
 DEFAULT_RUBRIC = (
     REPO_ROOT
     / "tests"
@@ -33,6 +34,14 @@ _REQUIRED_PROBES = {
     "provider_http_503",
     "unreadable_page",
     "duplicate_republication",
+}
+_REQUIRED_ANSWER_PHASES = {"answer_generation", "answer_claim_binding"}
+_ANSWER_PHASE_OUTCOMES = {
+    "completed",
+    "passed",
+    "rejected",
+    "budget_exhausted",
+    "interrupted",
 }
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -91,6 +100,56 @@ def _validate_rubric(rubric: dict[str, Any]) -> tuple[set[str], dict[str, int]]:
     return ids, frozen
 
 
+def _bounded_nonnegative(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _answer_validation_is_reviewable(
+    answer: Mapping[str, Any], expected_answer_sha: str
+) -> bool:
+    validation = answer.get("validation")
+    if not isinstance(validation, Mapping):
+        return False
+    if validation.get("schema_version") != ANSWER_AUDIT_SCHEMA_VERSION:
+        return False
+    candidate_sha = str(validation.get("candidate_answer_sha256") or "").strip().lower()
+    learner_sha = str(validation.get("learner_answer_sha256") or "").strip().lower()
+    if not _HEX64.fullmatch(candidate_sha):
+        raise ValueError("production answer audit candidate sha256 invalid")
+    if not _HEX64.fullmatch(learner_sha):
+        raise ValueError("production answer audit learner sha256 invalid")
+    if learner_sha != expected_answer_sha:
+        raise ValueError("production answer audit learner sha256 mismatch")
+    phases = validation.get("phases")
+    if not isinstance(phases, Mapping):
+        return False
+    if not _REQUIRED_ANSWER_PHASES.issubset(phases):
+        return False
+    for phase_name in _REQUIRED_ANSWER_PHASES:
+        detail = phases.get(phase_name)
+        if not isinstance(detail, Mapping):
+            return False
+        if detail.get("attempted") is not True:
+            return False
+        model_calls = _bounded_nonnegative(detail.get("model_calls"))
+        attempts = _bounded_nonnegative(detail.get("attempts"))
+        if model_calls is None or attempts is None or attempts > model_calls:
+            raise ValueError(f"invalid production answer phase counts: {phase_name}")
+        if str(detail.get("outcome") or "") not in _ANSWER_PHASE_OUTCOMES:
+            return False
+    generation = phases.get("answer_generation")
+    if not isinstance(generation, Mapping):
+        return False
+    generation_calls = _bounded_nonnegative(generation.get("model_calls"))
+    return generation_calls is not None and generation_calls >= 1
+
+
 def _answer_surface_is_reviewable(record: Mapping[str, Any]) -> bool:
     answer = record.get("answer")
     if not isinstance(answer, Mapping):
@@ -99,6 +158,10 @@ def _answer_surface_is_reviewable(record: Mapping[str, Any]) -> bool:
     if status != "available":
         return False
     if str(answer.get("source") or "").strip() != "production_chat":
+        return False
+    if str(answer.get("turn_id") or "").strip() == "":
+        return False
+    if str(answer.get("turn_status") or "").strip() != "completed":
         return False
     text = str(answer.get("text") or "")
     if not text.strip():
@@ -109,11 +172,33 @@ def _answer_surface_is_reviewable(record: Mapping[str, Any]) -> bool:
     expected_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if supplied_hash != expected_hash:
         raise ValueError("reviewable final answer content sha256 mismatch")
-    return True
+    return _answer_validation_is_reviewable(answer, expected_hash)
+
+
+def _runtime_budget_is_valid(record: Mapping[str, Any], gate: Mapping[str, int]) -> bool:
+    observed = record.get("budget_observed")
+    if not isinstance(observed, Mapping):
+        return False
+    candidates = _bounded_nonnegative(observed.get("candidate_count"))
+    reads = _bounded_nonnegative(observed.get("read_count"))
+    model_calls = _bounded_nonnegative(observed.get("model_call_count"))
+    elapsed = observed.get("elapsed_seconds")
+    try:
+        elapsed_seconds = float(elapsed)
+    except (TypeError, ValueError):
+        return False
+    if candidates is None or reads is None or model_calls is None or elapsed_seconds < 0:
+        return False
+    return (
+        candidates <= gate["max_candidates"]
+        and reads <= gate["max_reads"]
+        and model_calls <= gate["max_model_calls"]
+        and elapsed_seconds <= gate["hard_timeout_seconds"]
+    )
 
 
 def _validate_runtime(
-    runtime: dict[str, Any], rubric_ids: set[str]
+    runtime: dict[str, Any], rubric_ids: set[str], gate: Mapping[str, int]
 ) -> tuple[int, int, int, str]:
     if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
         raise ValueError("unsupported RQ1-C runtime artifact schema")
@@ -125,6 +210,10 @@ def _validate_runtime(
         raise ValueError("runtime runner loaded evaluation rubric")
     if leakage.get("stores_research_query_text") is not False:
         raise ValueError("runtime artifact may not store research query text")
+    if leakage.get("captures_production_final_answer") is not True:
+        raise ValueError("runtime runner did not capture production final answers")
+    if leakage.get("second_web_acquisition_during_synthesis") is not False:
+        raise ValueError("runtime synthesis started an unbudgeted second web acquisition")
     records = runtime.get("cases")
     runtime_ids = set(_case_ids(records))
     if runtime_ids != rubric_ids:
@@ -136,7 +225,8 @@ def _validate_runtime(
         if record.get("runner_error_type"):
             runner_errors += 1
         violations = record.get("budget_contract_violations")
-        if isinstance(violations, list) and violations:
+        marker_violation = isinstance(violations, list) and bool(violations)
+        if marker_violation or not _runtime_budget_is_valid(record, gate):
             budget_violations += 1
         reviewable_answers += int(_answer_surface_is_reviewable(record))
         for audit in ((record.get("search") or {}).get("audits") or []):
@@ -242,7 +332,7 @@ def evaluate(
         budget_violations,
         reviewable_answers,
         runtime_git_sha,
-    ) = _validate_runtime(runtime, ids)
+    ) = _validate_runtime(runtime, ids, gate)
     truthful, quality, hard_failures = _validate_review(review, runtime_path, ids)
     probe_count, failed_probes = _validate_protocol(
         protocol, runtime_path, runtime_git_sha
