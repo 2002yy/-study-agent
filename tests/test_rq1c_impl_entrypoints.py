@@ -6,10 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-QUALIFICATION_IMPL = REPO_ROOT / "tools" / "run_rq1c_bounded_qualification_impl.py"
-PROTOCOL_IMPL = REPO_ROOT / "tools" / "run_rq1c_protocol_probes_impl.py"
 MANIFEST = (
     REPO_ROOT
     / "tests"
@@ -27,13 +27,23 @@ def _stale_sha_env() -> dict[str, str]:
     return env
 
 
-def test_direct_qualification_impl_execution_cannot_bypass_guard(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "run_rq1c_bounded_qualification_impl.py",
+        "run_rq1c_bounded_qualification_core.py",
+    ],
+)
+def test_direct_qualification_internal_execution_cannot_bypass_guard(
+    tmp_path: Path,
+    script_name: str,
+) -> None:
     output = tmp_path / "runtime.json"
 
     completed = subprocess.run(
         [
             sys.executable,
-            str(QUALIFICATION_IMPL),
+            str(REPO_ROOT / "tools" / script_name),
             "--manifest",
             str(MANIFEST),
             "--output",
@@ -52,8 +62,16 @@ def test_direct_qualification_impl_execution_cannot_bypass_guard(tmp_path: Path)
     assert not output.exists()
 
 
-def test_direct_protocol_impl_execution_cannot_bypass_exact_head_guard(
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "run_rq1c_protocol_probes_impl.py",
+        "run_rq1c_protocol_probes_core.py",
+    ],
+)
+def test_direct_protocol_internal_execution_cannot_bypass_exact_head_guard(
     tmp_path: Path,
+    script_name: str,
 ) -> None:
     runtime = tmp_path / "runtime.json"
     output = tmp_path / "protocol.json"
@@ -71,7 +89,7 @@ def test_direct_protocol_impl_execution_cannot_bypass_exact_head_guard(
     completed = subprocess.run(
         [
             sys.executable,
-            str(PROTOCOL_IMPL),
+            str(REPO_ROOT / "tools" / script_name),
             "--runtime",
             str(runtime),
             "--output",

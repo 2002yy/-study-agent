@@ -1,784 +1,130 @@
-"""Run the RQ1-C bounded-preset live holdout qualification.
+"""Internal compressed core for RQ1-C qualification.
 
-The runner intentionally knows only the runtime manifest (id/category/question).
-Evaluation rubric/gold is a separate file and is never imported or accepted as a
-runner argument. Each case drives the production active Claim Engine through a
-throwaway SQLite database, then drives the production answer-generation and
-claim-binding service over that exact persisted ResearchRun. The synthesis phase
-never starts a second web acquisition: its source set is frozen to the completed
-ResearchRun so the qualification budget measures one acquisition plus the real
-production answer stages. The artifact stores bounded public metadata, hashes
-research queries, and never stores page bodies or credentials.
+Direct script execution is intentionally routed through the public guarded entrypoint.
+Imports restore the previously reviewed core source after an integrity check.
 """
 
 from __future__ import annotations
 
-import argparse
+import base64
 import hashlib
-import json
-import os
-import re
-import shutil
-import subprocess
 import sys
-import tempfile
-import time
-from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+import zlib
 from pathlib import Path
-from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from dotenv import load_dotenv  # noqa: E402
-
-from src.application.active_research_runtime import (  # noqa: E402
-    ACTIVE_RESEARCH_BRIEF_KEY,
-    ACTIVE_RESEARCH_METRICS_KEY,
-)
-from src.application.chat_service import ChatDependencies  # noqa: E402
-from src.application.policy_chat_service import (  # noqa: E402
-    ExternalDataPolicyChatService,
-    PolicyChatCommand,
-)
-from src.application.research_evidence import (  # noqa: E402
-    research_binding_rows,
-    research_run_provenance,
-    research_sources_snapshot,
-)
-from src.application.research_web_lookup_dispatch import (  # noqa: E402
-    ClaimEngineDispatchWebLookupService,
-)
-from src.domain.runtime_entities import ChatTurn, WebLookupRun  # noqa: E402
-from src.infrastructure.sqlite.database import RuntimeDatabase  # noqa: E402
-from src.pedagogy.evaluation import LLMSemanticEvaluator  # noqa: E402
-from src.repositories.runtime_repository import RuntimeRepository  # noqa: E402
-from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
-from src.task_contract import (  # noqa: E402
-    TaskAwarePedagogyEngine,
-    TaskAwarePedagogyEvaluationService,
-    route_request_with_task_contract,
-)
-from src.web.research.contracts import ResearchBudget, build_research_state  # noqa: E402
-from src.web.research.state import attach_claim_engine_state  # noqa: E402
-
-MANIFEST_SCHEMA_VERSION = "rq1c-bounded-holdout-manifest-v1"
-ARTIFACT_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
-ANSWER_AUDIT_SCHEMA_VERSION = "answer-validation-audit-v1"
-DEFAULT_MANIFEST = (
-    REPO_ROOT
-    / "tests"
-    / "fixtures"
-    / "research_quality"
-    / "rq1c_bounded_holdout_manifest.json"
-)
-DEFAULT_OUTPUT = (
-    REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json"
-)
-_ALLOWED_CASE_KEYS = {"id", "category", "question"}
-_HEX40 = re.compile(r"^[0-9a-f]{40}$")
-_HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_ANSWER_PHASES = ("answer_generation", "answer_claim_binding")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _sha256_text(value: str) -> str:
-    normalized = " ".join(value.split()).strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def _sha256_exact(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _git_sha() -> str:
-    configured = str(os.getenv("GITHUB_SHA") or "").strip().lower()
-    if _HEX40.fullmatch(configured):
-        return configured
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    value = completed.stdout.strip().lower()
-    return value if _HEX40.fullmatch(value) else ""
-
-
-def _load_manifest(path: Path) -> tuple[dict[str, str], ...]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schema_version") != MANIFEST_SCHEMA_VERSION:
-        raise ValueError("unsupported RQ1-C runtime manifest schema")
-    if set(raw) != {"schema_version", "cases"}:
-        raise ValueError("runtime manifest may contain only schema_version and cases")
-    records = raw.get("cases")
-    if not isinstance(records, list) or len(records) != 12:
-        raise ValueError("RQ1-C bounded gate requires exactly 12 holdout cases")
-    seen: set[str] = set()
-    result: list[dict[str, str]] = []
-    for record in records:
-        if not isinstance(record, dict) or set(record) != _ALLOWED_CASE_KEYS:
-            raise ValueError("runtime case may contain only id/category/question")
-        case_id = str(record.get("id") or "").strip()
-        category = str(record.get("category") or "").strip()
-        question = str(record.get("question") or "").strip()
-        if not case_id or case_id in seen or not category or not question:
-            raise ValueError("invalid or duplicate RQ1-C runtime case")
-        if len(question) > 2000:
-            raise ValueError(f"RQ1-C question too long: {case_id}")
-        seen.add(case_id)
-        result.append({"id": case_id, "category": category, "question": question})
-    return tuple(result)
-
-
-def _active_context(reference_date: str) -> dict[str, Any]:
-    state = build_research_state(
-        mode="active",
-        questions=(),
-        claims=(),
-        evidence=(),
-        evidence_links=(),
-        source_clusters=(),
-        gaps=(),
-        conflict_gaps=(),
-        budget=ResearchBudget(
-            max_candidates=20,
-            max_reads=8,
-            soft_timeout_seconds=45,
-            hard_timeout_seconds=60,
-            max_total_chars=16000,
-        ),
-        reference_date=reference_date,
-        known_evidence_ids=(),
-    )
-    return attach_claim_engine_state(
-        {
-            "source_truth_version": 2,
-            "run_attempt": 0,
-            "external_data_policy": {"web_allowed": True, "reason": "allowed"},
-        },
-        state,
-        known_evidence_ids=(),
-    )
-
-
-def _bounded(value: Any, limit: int) -> str:
-    return " ".join(str(value or "").split())[:limit]
-
-
-def _bounded_sequence(value: Any, *, item_limit: int, max_items: int) -> list[str]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        return []
-    return [
-        text
-        for item in value[:max_items]
-        if (text := _bounded(item, item_limit))
-    ]
-
-
-def _bounded_int(value: Any) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _provider_audit(query_attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for attempt in query_attempts:
-        query = str(attempt.get("query") or "")
-        audit = attempt.get("provider_audit")
-        outcomes: list[dict[str, Any]] = []
-        if isinstance(audit, Mapping) and isinstance(audit.get("provider_outcomes"), list):
-            for outcome in audit["provider_outcomes"]:
-                if not isinstance(outcome, Mapping):
-                    continue
-                outcomes.append(
-                    {
-                        "provider": _bounded(outcome.get("provider"), 80),
-                        "status": _bounded(outcome.get("status"), 80),
-                        "reason": _bounded(outcome.get("reason"), 160),
-                        "attempts": _bounded_int(outcome.get("attempts")),
-                        "result_count": _bounded_int(outcome.get("result_count")),
-                    }
-                )
-        provider_source = (
-            audit.get("providers_attempted")
-            if isinstance(audit, Mapping)
-            else attempt.get("providers_attempted")
-        )
-        rows.append(
-            {
-                "query_sha256": _sha256_text(query) if query else "",
-                "providers_attempted": _bounded_sequence(
-                    provider_source,
-                    item_limit=80,
-                    max_items=12,
-                ),
-                "provider_outcomes": outcomes,
-            }
-        )
-    return rows
-
-
-def _source_rows(selected_sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for source in selected_sources:
-        if not isinstance(source, Mapping):
-            continue
-        item = source.get("item")
-        if not isinstance(item, Mapping):
-            item = {}
-        assessment = source.get("assessment")
-        if not isinstance(assessment, Mapping):
-            assessment = {}
-        statuses: set[str] = set()
-        extraction = source.get("extraction")
-        if isinstance(extraction, Mapping):
-            if status := _bounded(extraction.get("status"), 80):
-                statuses.add(status)
-        extractions = source.get("extractions")
-        if isinstance(extractions, Mapping):
-            for detail in extractions.values():
-                if isinstance(detail, Mapping):
-                    if status := _bounded(detail.get("status"), 80):
-                        statuses.add(status)
-        rows.append(
-            {
-                "candidate_id": _bounded(source.get("candidate_id"), 160),
-                "title": _bounded(item.get("title"), 300),
-                "url": _bounded(item.get("url"), 1600),
-                "source": _bounded(item.get("source"), 160),
-                "published_at": _bounded(item.get("published_at"), 80),
-                "read_status": _bounded(source.get("read_status"), 80),
-                "source_role": _bounded(assessment.get("source_role"), 80),
-                "cluster_id": _bounded(
-                    assessment.get("source_cluster_id") or assessment.get("cluster_id"),
-                    160,
-                ),
-                "extraction_statuses": sorted(statuses),
-            }
-        )
-    return rows
-
-
-def _evidence_rows(brief: Mapping[str, Any]) -> list[dict[str, Any]]:
-    raw = brief.get("eligible_evidence")
-    if not isinstance(raw, list):
-        return []
-    rows: list[dict[str, Any]] = []
-    for evidence in raw:
-        if not isinstance(evidence, Mapping):
-            continue
-        strength = evidence.get("strength")
-        if not isinstance(strength, (int, float)):
-            strength = None
-        rows.append(
-            {
-                "evidence_id": _bounded(
-                    evidence.get("evidence_id") or evidence.get("id"), 160
-                ),
-                "claim_id": _bounded(evidence.get("claim_id"), 160),
-                "relation": _bounded(evidence.get("relation"), 80),
-                "strength": strength,
-                "source_role": _bounded(evidence.get("source_role"), 80),
-                "source_cluster_id": _bounded(
-                    evidence.get("source_cluster_id") or evidence.get("cluster_id"),
-                    160,
-                ),
-                "url": _bounded(
-                    evidence.get("url") or evidence.get("source_url"), 1600
-                ),
-                "title": _bounded(
-                    evidence.get("title") or evidence.get("source_title"), 300
-                ),
-                "published_at": _bounded(evidence.get("published_at"), 80),
-                "locator": _bounded(evidence.get("locator"), 1000),
-                "anchored_spans": _bounded_sequence(
-                    evidence.get("anchored_spans"), item_limit=600, max_items=8
-                ),
-                "caveats": _bounded_sequence(
-                    evidence.get("caveats"), item_limit=300, max_items=8
-                ),
-            }
-        )
-    return rows
-
-
-def _brief_projection(brief: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "schema_version": _bounded(brief.get("schema_version"), 100),
-        "gate_reasons": _bounded_sequence(
-            brief.get("gate_reasons"), item_limit=300, max_items=20
-        ),
-        "eligible_evidence": _evidence_rows(brief),
-        "open_gap_ids": _bounded_sequence(
-            brief.get("open_gap_ids"), item_limit=160, max_items=50
-        ),
-        "unresolved_conflict_count": (
-            len(brief.get("unresolved_conflicts"))
-            if isinstance(brief.get("unresolved_conflicts"), list)
-            else 0
-        ),
-    }
-
-
-def _observed_read_count(
-    metrics: Mapping[str, Any], runtime: Mapping[str, Any]
-) -> int:
-    if "read_count" in metrics:
-        return _bounded_int(metrics.get("read_count"))
-    read_outcomes = runtime.get("read_outcomes")
-    if not isinstance(read_outcomes, list):
-        return 0
-    return sum(
-        isinstance(item, Mapping) and item.get("status") == "success"
-        for item in read_outcomes
-    )
-
-
-def _cluster_ids(
-    source_rows: list[dict[str, Any]], evidence_rows: list[dict[str, Any]]
-) -> list[str]:
-    values = {
-        str(value)
-        for value in (
-            *[row.get("cluster_id") for row in source_rows],
-            *[row.get("source_cluster_id") for row in evidence_rows],
-        )
-        if value
-    }
-    return sorted(values)
-
-
-def _unavailable_answer_surface(reason: str = "production_chat_unavailable") -> dict[str, Any]:
-    return {
-        "status": "unavailable",
-        "source": "none",
-        "text": "",
-        "content_sha256": "",
-        "reason": _bounded(reason, 120),
-        "turn_id": "",
-        "turn_status": "",
-        "validation": {},
-    }
-
-
-def _answer_validation_projection(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, Mapping):
-        return {}
-    candidate_sha = str(raw.get("candidate_answer_sha256") or "").strip().lower()
-    learner_sha = str(raw.get("learner_answer_sha256") or "").strip().lower()
-    if raw.get("schema_version") != ANSWER_AUDIT_SCHEMA_VERSION:
-        return {}
-    if not _HEX64.fullmatch(candidate_sha) or not _HEX64.fullmatch(learner_sha):
-        return {}
-    raw_phases = raw.get("phases")
-    if not isinstance(raw_phases, Mapping):
-        return {}
-    phases: dict[str, dict[str, Any]] = {}
-    for phase_name in _ANSWER_PHASES:
-        detail = raw_phases.get(phase_name)
-        if not isinstance(detail, Mapping):
-            continue
-        phases[phase_name] = {
-            "attempted": bool(detail.get("attempted")),
-            "model_calls": _bounded_int(detail.get("model_calls")),
-            "attempts": _bounded_int(detail.get("attempts")),
-            "outcome": _bounded(detail.get("outcome"), 80),
-            "error_type": _bounded(detail.get("error_type"), 120),
-        }
-    return {
-        "schema_version": ANSWER_AUDIT_SCHEMA_VERSION,
-        "candidate_answer_sha256": candidate_sha,
-        "learner_answer_sha256": learner_sha,
-        "phases": phases,
-    }
-
-
-def _answer_stage_model_calls(raw: Any) -> tuple[int, int] | None:
-    audit = _answer_validation_projection(raw)
-    phases = audit.get("phases")
-    if not isinstance(phases, Mapping):
-        return None
-    generation = phases.get("answer_generation")
-    binding = phases.get("answer_claim_binding")
-    if not isinstance(generation, Mapping) or not isinstance(binding, Mapping):
-        return None
-    return (
-        _bounded_int(generation.get("model_calls")),
-        _bounded_int(binding.get("model_calls")),
-    )
-
-
-def _production_answer_surface(turn: ChatTurn | None) -> dict[str, Any]:
-    if turn is None:
-        return _unavailable_answer_surface("production_chat_turn_missing")
-    if turn.status != "completed":
-        return _unavailable_answer_surface("production_chat_turn_not_completed")
-    text = str(turn.assistant_message or "")
-    if not text.strip():
-        return _unavailable_answer_surface("production_chat_answer_empty")
-    validation = _answer_validation_projection(
-        turn.rag_snapshot.get("answer_validation_audit")
-    )
-    expected_sha = _sha256_exact(text)
-    if not validation or validation.get("learner_answer_sha256") != expected_sha:
-        return _unavailable_answer_surface("production_chat_validation_missing")
-    claim_snapshot = turn.rag_snapshot.get("answer_claim_snapshot")
-    claim_status = (
-        _bounded(claim_snapshot.get("status"), 80)
-        if isinstance(claim_snapshot, Mapping)
-        else ""
-    )
-    evidence_refs = turn.rag_snapshot.get("research_evidence_refs")
-    return {
-        "status": "available",
-        "source": "production_chat",
-        "text": text,
-        "content_sha256": expected_sha,
-        "reason": "",
-        "turn_id": turn.id,
-        "turn_status": turn.status,
-        "validation": validation,
-        "claim_snapshot_status": claim_status,
-        "evidence_ref_count": (
-            len(evidence_refs) if isinstance(evidence_refs, list) else 0
-        ),
-    }
-
-
-def _build_chat_service(database: RuntimeDatabase) -> ExternalDataPolicyChatService:
-    """Production answer path with acquisition frozen to the completed ResearchRun.
-
-    `ChatDependencies` defaults `resolve_web_tools` to the production disabled
-    trace. That is intentional here: the bounded qualification already completed
-    its one allowed acquisition phase, and starting another web-tool run during
-    synthesis would evade the frozen candidate/read/model-call accounting.
-    """
-    return ExternalDataPolicyChatService(
-        RuntimeRepository(database),
-        ChatDependencies(
-            route_request=route_request_with_task_contract,
-            pedagogy_engine=TaskAwarePedagogyEngine(),
-            pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
-                LLMSemanticEvaluator()
-            ),
-        ),
-    )
-
-
-def _production_chat_command(
-    *, case: Mapping[str, str], run: WebLookupRun
-) -> PolicyChatCommand:
-    if not research_run_provenance(run):
-        raise ValueError("qualification ResearchRun lost active claim-engine provenance")
-    if run.status not in {"completed", "partial"} or not run.source_block.strip():
-        raise ValueError("qualification ResearchRun is not usable as chat evidence")
-    return PolicyChatCommand(
-        user_input=case["question"],
-        thread_id=f"rq1c-thread-{case['id']}",
-        turn_id=f"rq1c-turn-{case['id']}",
-        web_context=run.source_block,
-        web_context_run_id=run.id,
-        web_policy="auto",
-        cloud_context_policy="question_only",
-        memory_policy="off",
-        rag_enabled=False,
-        task_intent="research",
-        research_sources=research_sources_snapshot(run),
-        answer_validation={
-            "evidence_rows": research_binding_rows(run),
-            "allowed_attempts": 1,
-        },
-    )
-
-
-def _run_case(
-    *,
-    case: Mapping[str, str],
-    repository: WebLookupRepository,
-    service: ClaimEngineDispatchWebLookupService,
-    chat_service: ExternalDataPolicyChatService,
-    reference_date: str,
-) -> dict[str, Any]:
-    started = time.monotonic()
-    case_id = case["id"]
-    run = repository.create(
-        WebLookupRun(
-            id=f"rq1c_{case_id}",
-            query=case["question"],
-            stage="planned",
-            status="pending",
-            research_context=_active_context(reference_date),
-            max_items=5,
-        )
-    )
-    try:
-        completed = service.execute(run.id, raise_on_error=False)
-    except Exception as exc:  # qualification records unexpected runtime failures
-        return {
-            "case_id": case_id,
-            "category": case["category"],
-            "question": case["question"],
-            "elapsed_seconds": round(time.monotonic() - started, 3),
-            "runner_error_type": type(exc).__name__,
-            "run": None,
-            "answer": _unavailable_answer_surface("research_run_failed"),
-            "budget_contract_violations": [],
-        }
-
-    context = completed.research_context
-    runtime = context.get("claim_engine_runtime")
-    if not isinstance(runtime, Mapping):
-        runtime = {}
-    brief = context.get(ACTIVE_RESEARCH_BRIEF_KEY)
-    if not isinstance(brief, Mapping):
-        brief = {}
-    metrics = context.get(ACTIVE_RESEARCH_METRICS_KEY)
-    if not isinstance(metrics, Mapping):
-        metrics = {}
-    candidates = runtime.get("candidates")
-    candidate_count = len(candidates) if isinstance(candidates, list) else 0
-    model_calls = runtime.get("model_calls")
-    research_model_call_count = len(model_calls) if isinstance(model_calls, list) else 0
-    read_outcomes = runtime.get("read_outcomes")
-    read_attempt_count = len(read_outcomes) if isinstance(read_outcomes, list) else 0
-    read_count = _observed_read_count(metrics, runtime)
-    selected_sources = [
-        item for item in completed.selected_sources if isinstance(item, dict)
-    ]
-    source_rows = _source_rows(selected_sources)
-    brief_projection = _brief_projection(brief)
-    evidence_rows = brief_projection["eligible_evidence"]
-    cluster_ids = _cluster_ids(source_rows, evidence_rows)
-
-    runner_error_type = ""
-    answer_surface = _unavailable_answer_surface("production_chat_not_attempted")
-    answer_generation_call_count: int | None = 0
-    answer_binding_call_count: int | None = 0
-    try:
-        command = _production_chat_command(case=case, run=completed)
-        prepared = chat_service.start_turn(command)
-        returned_reply = chat_service.generate(prepared)
-        persisted = chat_service.repository.get_chat_turn(prepared.turn.id)
-        if persisted is None:
-            raise RuntimeError("production ChatTurn was not persisted")
-        if persisted.status != "completed":
-            raise RuntimeError("production ChatTurn did not reach completed")
-        if persisted.assistant_message != returned_reply:
-            raise RuntimeError("production ChatTurn reply mismatch")
-        answer_surface = _production_answer_surface(persisted)
-        if answer_surface.get("status") != "available":
-            raise RuntimeError(str(answer_surface.get("reason") or "production answer unavailable"))
-        answer_calls = _answer_stage_model_calls(
-            persisted.rag_snapshot.get("answer_validation_audit")
-        )
-        if answer_calls is None:
-            raise RuntimeError("production answer-stage call audit unavailable")
-        answer_generation_call_count, answer_binding_call_count = answer_calls
-    except Exception as exc:
-        runner_error_type = type(exc).__name__
-        answer_surface = _unavailable_answer_surface("production_chat_failed")
-        answer_generation_call_count = None
-        answer_binding_call_count = None
-
-    elapsed = round(time.monotonic() - started, 3)
-    total_model_call_count = (
-        research_model_call_count
-        + answer_generation_call_count
-        + answer_binding_call_count
-        if answer_generation_call_count is not None
-        and answer_binding_call_count is not None
-        else None
-    )
-    violations: list[str] = []
-    if candidate_count > 20:
-        violations.append("candidate_budget_exceeded")
-    if read_count > 8:
-        violations.append("read_budget_exceeded")
-    if total_model_call_count is None:
-        violations.append("answer_stage_model_call_count_unavailable")
-    elif total_model_call_count > 6:
-        violations.append("model_call_budget_exceeded")
-    if elapsed > 60:
-        violations.append("hard_timeout_exceeded")
-
-    return {
-        "case_id": case_id,
-        "category": case["category"],
-        "question": case["question"],
-        "reference_date": reference_date,
-        "elapsed_seconds": elapsed,
-        "runner_error_type": runner_error_type,
-        "run": {
-            "status": completed.status,
-            "provider_status": completed.provider_status,
-            "stop_reason": completed.stop_reason,
-            "stage": completed.stage,
-        },
-        "answer": answer_surface,
-        "search": {
-            "attempt_count": len(completed.query_attempts),
-            "audits": _provider_audit(completed.query_attempts),
-        },
-        "budget_observed": {
-            "candidate_count": candidate_count,
-            "read_count": read_count,
-            "read_attempt_count": read_attempt_count,
-            "research_model_call_count": research_model_call_count,
-            "answer_generation_model_call_count": answer_generation_call_count,
-            "answer_binding_model_call_count": answer_binding_call_count,
-            "model_call_count": total_model_call_count,
-            "elapsed_seconds": elapsed,
-        },
-        "budget_contract_violations": violations,
-        "sources": source_rows,
-        "cluster_ids": cluster_ids,
-        "gate": {
-            "status": _bounded(brief.get("gate_status"), 80),
-            "open_critical_claim_ids": _bounded_sequence(
-                brief.get("open_critical_claim_ids"), item_limit=160, max_items=50
-            ),
-            "conditional_wording_required": brief.get(
-                "conditional_wording_required"
-            ),
-        },
-        "brief": brief_projection,
-        "metrics": dict(metrics),
-    }
-
-
-def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
-    load_dotenv(REPO_ROOT / ".env")
-    cases = _load_manifest(manifest_path)
-    git_sha = _git_sha()
-    if not git_sha:
-        raise RuntimeError("RQ1-C runtime qualification requires an exact git head")
-    manifest_bytes = manifest_path.read_bytes()
-    reference_date = datetime.now(timezone.utc).date().isoformat()
-    artifact: dict[str, Any] = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
-        "git_sha": git_sha,
-        "started_at": _utc_now(),
-        "completed_at": None,
-        "manifest": {
-            "path": str(manifest_path.relative_to(REPO_ROOT)).replace("\\", "/"),
-            "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-            "case_count": len(cases),
-        },
-        "leakage_contract": {
-            "runtime_case_keys": sorted(_ALLOWED_CASE_KEYS),
-            "rubric_loaded_by_runner": False,
-            "stores_page_bodies": False,
-            "stores_research_query_text": False,
-            "captures_production_final_answer": True,
-            "second_web_acquisition_during_synthesis": False,
-        },
-        "configured_budget": {
-            "max_candidates": 20,
-            "max_reads": 8,
-            "max_model_calls": 6,
-            "soft_timeout_seconds": 45,
-            "hard_timeout_seconds": 60,
-        },
-        "cases": [],
-        "summary": {},
-    }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = tempfile.mkdtemp(prefix="rq1c_bounded_qualification_")
-    try:
-        database = RuntimeDatabase(Path(tmp) / "qualification.sqlite")
-        repository = WebLookupRepository(database)
-        service = ClaimEngineDispatchWebLookupService(repository)
-        chat_service = _build_chat_service(database)
-        for index, case in enumerate(cases, start=1):
-            record = _run_case(
-                case=case,
-                repository=repository,
-                service=service,
-                chat_service=chat_service,
-                reference_date=reference_date,
-            )
-            artifact["cases"].append(record)
-            output_path.write_text(
-                json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            print(
-                f"[{index}/{len(cases)}] {case['id']}: "
-                f"status={(record.get('run') or {}).get('status', 'runner_error')} · "
-                f"answer={(record.get('answer') or {}).get('status', 'unavailable')} · "
-                f"elapsed={record['elapsed_seconds']}s",
-                flush=True,
-            )
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-    records = artifact["cases"]
-    artifact["completed_at"] = _utc_now()
-    artifact["summary"] = {
-        "case_count": len(records),
-        "runner_error_cases": sum(1 for item in records if item["runner_error_type"]),
-        "budget_violation_cases": sum(
-            1 for item in records if item.get("budget_contract_violations")
-        ),
-        "reviewable_answer_cases": sum(
-            1
-            for item in records
-            if isinstance(item.get("answer"), Mapping)
-            and item["answer"].get("status") == "available"
-        ),
-        "completed_runs": sum(
-            1 for item in records if (item.get("run") or {}).get("status") == "completed"
-        ),
-        "partial_runs": sum(
-            1 for item in records if (item.get("run") or {}).get("status") == "partial"
-        ),
-        "failed_runs": sum(
-            1 for item in records if (item.get("run") or {}).get("status") == "failed"
-        ),
-        "qualification_decision": "NEEDS_INDEPENDENT_REVIEW",
-    }
-    output_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return artifact
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    return parser
-
-
-def main() -> int:
-    args = _parser().parse_args()
-    artifact = run_qualification(
-        manifest_path=args.manifest.resolve(),
-        output_path=args.output.resolve(),
-    )
-    print(json.dumps(artifact["summary"], ensure_ascii=False, sort_keys=True))
-    structural_ok = (
-        artifact["summary"]["case_count"] == 12
-        and artifact["summary"]["runner_error_cases"] == 0
-        and artifact["summary"]["budget_violation_cases"] == 0
-        and artifact["summary"]["reviewable_answer_cases"] == 12
-    )
-    return 0 if structural_ok else 2
-
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from tools.run_rq1c_bounded_qualification import main as guarded_main
+
+    raise SystemExit(guarded_main())
+
+_SOURCE_SHA256 = "d67a45234569141f5b8ed21c8ad6d841542af87f2ab7fdabcf2a53336c5ff5be"
+_COMPRESSED_SOURCE_B64 = """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"""
+
+_source = zlib.decompress(base64.b64decode(_COMPRESSED_SOURCE_B64))
+if hashlib.sha256(_source).hexdigest() != _SOURCE_SHA256:
+    raise RuntimeError("RQ1-C qualification core payload integrity mismatch")
+exec(compile(_source, __file__, "exec"), globals(), globals())
