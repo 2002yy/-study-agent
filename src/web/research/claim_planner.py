@@ -17,6 +17,7 @@ from typing import Any, Mapping
 
 from openai import OpenAI
 
+from src.llm_client import get_client
 from src.web.research.contracts import (
     EvidenceGap,
     EvidenceRequirement,
@@ -159,12 +160,26 @@ class _ClaimPlannerChat:
 
 
 class _ClaimPlannerClient:
-    def __init__(self, inner: Any) -> None:
+    """Planner response-format adapter that preserves the gateway's lazy client."""
+
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
         self._inner = inner
-        self.chat = _ClaimPlannerChat(inner.chat)
+        self._provider_profile = provider_profile
+
+    @property
+    def chat(self) -> _ClaimPlannerChat:
+        return _ClaimPlannerChat(self._resolved_inner().chat)
 
     def with_options(self, **kwargs: Any) -> _ClaimPlannerClient:
-        return _ClaimPlannerClient(self._inner.with_options(**kwargs))
+        return _ClaimPlannerClient(
+            self._resolved_inner().with_options(**kwargs),
+            provider_profile=self._provider_profile,
+        )
+
+    def _resolved_inner(self) -> Any:
+        if self._inner is not None:
+            return self._inner
+        return get_client(provider_profile=self._provider_profile)
 
 
 class RuntimeClaimPlanner:
@@ -299,7 +314,10 @@ def _claim_planner_gateway(shared: ResearchModelGateway) -> ResearchModelGateway
     else:
         client = gateway._client  # noqa: SLF001
 
-    gateway._client = _ClaimPlannerClient(client)  # noqa: SLF001
+    gateway._client = _ClaimPlannerClient(  # noqa: SLF001
+        client,
+        provider_profile=gateway.provider_profile,
+    )
     return gateway
 
 
