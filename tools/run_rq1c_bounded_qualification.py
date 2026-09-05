@@ -245,6 +245,22 @@ def _run_case(
     for reason in budget.rejection_reasons:
         if reason not in violations:
             violations.append(reason)
+
+    if budget.phase_calls["other"] > 0:
+        if "unclassified_answer_model_call" not in violations:
+            violations.append("unclassified_answer_model_call")
+
+    answer = record.get("answer")
+    validation = answer.get("validation") if isinstance(answer, Mapping) else None
+    audit_counts = _impl._answer_stage_model_calls(validation)
+    actual_counts = (
+        budget.phase_calls["answer_generation"],
+        budget.phase_calls["answer_claim_binding"],
+    )
+    if audit_counts is not None and audit_counts != actual_counts:
+        if "answer_stage_call_audit_mismatch" not in violations:
+            violations.append("answer_stage_call_audit_mismatch")
+
     if budget.total_model_calls_started > budget.max_model_calls:
         if "model_call_budget_exceeded" not in violations:
             violations.append("model_call_budget_exceeded")
@@ -257,7 +273,7 @@ def _run_case(
 # Patch only the per-case hook used by the reviewed implementation.
 _impl._run_case = _run_case
 
-run_qualification = _impl.run_qualification
+run_qualification = _impl.Run_qualification
 _parser = _impl._parser
 
 
