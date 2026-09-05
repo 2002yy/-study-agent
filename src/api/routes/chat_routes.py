@@ -18,10 +18,18 @@ from src.api.models.chat import (
     CommitTurnResponse,
     TurnStatusResponse,
 )
-from src.application.chat_service import ChatService, TurnCancelled
+from src.application.chat_service import (
+    ChatService,
+    TurnCancelled,
+    answer_validation_active,
+)
 from src.application.helpers import sse_event, stream_usage_payload
 from src.application.policy_chat_service import PolicyChatCommand
-from src.application.research_evidence import research_sources_snapshot
+from src.application.research_evidence import (
+    research_binding_rows,
+    research_run_provenance,
+    research_sources_snapshot,
+)
 from src.application.runtime_repository import (
     get_chat_service,
     get_session_service,
@@ -175,6 +183,16 @@ async def chat_stream_endpoint(
 
         reply_parts: list[str] = []
         stream = service.stream_async(prepared)
+        buffered_validation = answer_validation_active(prepared)
+        cancel_poll = (
+            _make_cancel_poll(
+                service,
+                prepared.turn.id,
+                prepared.turn.operation_id or "",
+            )
+            if prepared.turn.operation_id
+            else None
+        )
 
         try:
             yield sse_event(
@@ -187,6 +205,12 @@ async def chat_stream_endpoint(
             )
             yield sse_event("route", prepared.route)
             yield sse_event("rag", prepared.rag)
+            # RQ1-C answer batch: research-backed turns buffer the whole
+            # candidate until the publication gate passes; nothing is flushed
+            # before complete_turn returns the verified text.  Binding failure
+            # therefore emits zero candidate tokens.  The predicate is the
+            # same one the gate itself uses, so policy-denied turns stream
+            # token-by-token like ordinary chat.
             web_tools = prepared.rag.get("web_tools")
             if (
                 isinstance(web_tools, dict)
@@ -198,26 +222,76 @@ async def chat_stream_endpoint(
                     if web_tools.get("evidence_status") == "candidate_only"
                     else "联网搜索失败，本回答未使用联网来源。\n\n"
                 )
-                reply_parts.append(notice)
-                yield sse_event("token", {"text": notice})
+                # For a research-validation turn, this route-owned UI notice is
+                # not part of the model candidate and must not enter the binder
+                # or its answer hash.  The underlying web-tools truth remains
+                # available in route/RAG metadata.  Ordinary chat keeps the
+                # historical learner-facing notice behavior.
+                if not buffered_validation:
+                    reply_parts.append(notice)
+                    yield sse_event("token", {"text": notice})
             elif isinstance(web_tools, dict) and web_tools.get("used") is True:
                 preview = _web_source_preview(web_tools)
-                if preview:
+                if preview and not buffered_validation:
                     reply_parts.append(preview)
                     yield sse_event("token", {"text": preview})
             async for token in _tokens_until_disconnected(
                 stream,
                 http_request,
-                cancel_poll=(
-                    _make_cancel_poll(service, prepared.turn.id, prepared.turn.operation_id or "")
-                    if prepared.turn.operation_id
-                    else None
-                ),
+                cancel_poll=cancel_poll,
             ):
                 reply_parts.append(token)
-                yield sse_event("token", {"text": token})
+                if not buffered_validation:
+                    yield sse_event("token", {"text": token})
+
+            # A provider stream may end without yielding when cancellation won
+            # the generation-start CAS. Durable cancellation outranks the
+            # transient transport signal so its terminal state can always be
+            # settled through finish_cancelled_turn rather than a fenced
+            # interrupt write.
+            if cancel_poll is not None and cancel_poll():
+                raise _TurnCancelled(
+                    cancel_poll.turn_id,
+                    cancel_poll.operation_id,
+                )
+            if await http_request.is_disconnected():
+                raise _ClientDisconnected
+
             suffix = "".join(reply_parts)
-            completed = service.complete_turn(prepared, suffix)
+
+            def complete_if_active() -> Any:
+                # Second linearization check in the worker immediately before
+                # complete_turn begins. The application service performs the
+                # final checkpoint again immediately before each physical
+                # binder provider attempt.
+                if cancel_poll is not None and cancel_poll():
+                    raise _TurnCancelled(
+                        cancel_poll.turn_id,
+                        cancel_poll.operation_id,
+                    )
+                return service.complete_turn(prepared, suffix)
+
+            try:
+                completed = await asyncio.to_thread(complete_if_active)
+            except TurnCancelled as exc:
+                # Application-level binder checkpoints use TurnCancelled so the
+                # signal cannot be mistaken for a provider failure/retry. Route
+                # it back through the existing streaming cancellation state
+                # machine, which owns durable terminal settlement below.
+                raise _TurnCancelled(exc.turn_id, exc.operation_id) from None
+            except ValueError:
+                # A cancel request can arrive after the binder provider call
+                # started but before its completion write. The repository then
+                # rejects the completion write; preserve cancellation semantics
+                # instead of surfacing a generic stream error.
+                if cancel_poll is not None and cancel_poll():
+                    raise _TurnCancelled(
+                        cancel_poll.turn_id,
+                        cancel_poll.operation_id,
+                    ) from None
+                raise
+            if buffered_validation:
+                yield sse_event("token", {"text": completed.assistant_message})
             yield sse_event("usage", stream_usage_payload(completed.assistant_message))
             yield sse_event(
                 "done",
@@ -230,29 +304,37 @@ async def chat_stream_endpoint(
             )
         except _ClientDisconnected:
             with suppress(ValueError):
-                service.interrupt_turn(prepared, "".join(reply_parts))
+                service.interrupt_turn(
+                    prepared,
+                    _publishable_partial(reply_parts, buffered_validation),
+                )
             return
         except _TurnCancelled as exc:
+            partial = _publishable_partial(reply_parts, buffered_validation)
             with suppress(ValueError):
-                service.finish_cancelled_turn(prepared, "".join(reply_parts))
+                service.finish_cancelled_turn(prepared, partial)
             yield sse_event(
                 "cancelled",
                 {
                     "turn_id": exc.turn_id,
                     "operation_id": exc.operation_id,
                     "stage": "generation",
-                    "partial": "".join(reply_parts),
+                    "partial": partial,
                 },
             )
             return
         except asyncio.CancelledError:
             with suppress(ValueError):
-                service.interrupt_turn(prepared, "".join(reply_parts))
+                service.interrupt_turn(
+                    prepared,
+                    _publishable_partial(reply_parts, buffered_validation),
+                )
             raise
         except Exception as exc:
+            partial = _publishable_partial(reply_parts, buffered_validation)
             with suppress(ValueError):
-                if reply_parts:
-                    service.interrupt_turn(prepared, "".join(reply_parts))
+                if partial:
+                    service.interrupt_turn(prepared, partial)
                 else:
                     service.fail_turn(prepared)
             yield sse_event(
@@ -264,9 +346,10 @@ async def chat_stream_endpoint(
                 await stream.aclose()
             current = service.repository.get_chat_turn(prepared.turn.id)
             if current is not None and current.status == "streaming":
+                partial = _publishable_partial(reply_parts, buffered_validation)
                 with suppress(ValueError):
-                    if reply_parts:
-                        service.interrupt_turn(prepared, "".join(reply_parts))
+                    if partial:
+                        service.interrupt_turn(prepared, partial)
                     else:
                         service.fail_turn(prepared)
             # G12 decision 15: run a queued archive once the operation settled.
@@ -359,6 +442,16 @@ def _web_source_preview(web_tools: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def _publishable_partial(
+    reply_parts: list[str], buffered_validation: bool
+) -> str:
+    """Return only text that was already eligible for learner publication."""
+
+    if buffered_validation:
+        return ""
+    return "".join(reply_parts)
+
+
 def _settle_disconnected_preparation(
     prepare_task: asyncio.Task[Any],
     service: ChatService,
@@ -392,16 +485,16 @@ async def _tokens_until_disconnected(
                 done, _ = await asyncio.wait({next_token}, timeout=poll_interval)
                 if done:
                     break
-                if await request.is_disconnected():
-                    next_token.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await next_token
-                    raise _ClientDisconnected
                 if cancel_poll is not None and cancel_poll():
                     next_token.cancel()
                     with suppress(asyncio.CancelledError):
                         await next_token
                     raise _TurnCancelled(cancel_poll.turn_id, cancel_poll.operation_id)
+                if await request.is_disconnected():
+                    next_token.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await next_token
+                    raise _ClientDisconnected
             try:
                 yield next_token.result()
             except StopAsyncIteration:
@@ -577,6 +670,7 @@ def _chat_command(
     web_context = request.web_context
     web_context_run_id = request.web_context_run_id
     research_sources: dict[str, Any] | None = None
+    answer_validation: dict[str, Any] | None = None
     if web_context_run_id:
         if research_service is None:
             raise ValueError("ResearchRun validation service is required")
@@ -588,6 +682,16 @@ def _chat_command(
         web_context = run.source_block
         web_context_run_id = run.id
         research_sources = research_sources_snapshot(run)
+        # The validation plan is constructed only from the server-resolved
+        # ResearchRun object.  Provenance requires the claim-engine runtime
+        # traces on that object; rows may legitimately be empty (old or
+        # gated-out runs), in which case the gate fails closed instead of
+        # treating the turn as non-research.
+        if research_run_provenance(run):
+            answer_validation = {
+                "evidence_rows": research_binding_rows(run),
+                "allowed_attempts": 1,
+            }
     return PolicyChatCommand(
         user_input=request.user_input,
         selected_role=request.selected_role,
@@ -615,6 +719,7 @@ def _chat_command(
         cloud_context_policy=request.cloud_context_policy,
         task_intent=request.task_intent,
         research_sources=research_sources,
+        answer_validation=answer_validation,
         continuation_of_turn_id=request.continuation_of_turn_id,
         retry_of_turn_id=request.retry_of_turn_id,
         partial_reply=request.partial_reply,

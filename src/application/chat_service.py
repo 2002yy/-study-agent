@@ -7,7 +7,24 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Callable, Iterator
 
+from src.application.answer_claim_binder import (
+    ANSWER_CLAIM_BINDER_PRODUCER,
+    AnswerClaimBindingRequest,
+    AnswerClaimBindingRow,
+    bind_answer_claims,
+    factual_claims_fully_bound,
+)
 from src.context_builder import build_messages
+from src.domain.answer_claims import rejected_answer_claim_snapshot
+from src.domain.answer_validation import (
+    PHASE_ANSWER_CLAIM_BINDING,
+    PHASE_ANSWER_GENERATION,
+    PHASE_OUTCOME_BUDGET_EXHAUSTED,
+    PHASE_OUTCOME_COMPLETED,
+    PHASE_OUTCOME_PASSED,
+    PHASE_OUTCOME_REJECTED,
+    build_answer_validation_audit,
+)
 from src.domain.runtime_entities import ChatThread, ChatTurn, new_id, utc_now
 from src.llm_client import async_stream_chat, chat, stream_chat
 from src.memory import read_memory_bundle
@@ -27,13 +44,29 @@ from src.tools.web_agent import WebToolTrace, web_tools_disabled
 
 PERFORMANCE_MODES = {"fast", "standard", "deep"}
 
+RESEARCH_ANSWER_BLOCKED_COPY = (
+    "联网检索结果未能通过证据核验，本次回答未发布基于联网来源的结论。"
+)
+
+
+def _configured_llm_provider() -> str:
+    import os
+
+    return os.getenv("LLM_PROVIDER_PROFILE", "openai").strip().lower() or "openai"
+
+
+def answer_validation_active(prepared: PreparedChatTurn) -> bool:
+    """True when the publication gate actually runs for this turn."""
+    if prepared.answer_validation is None:
+        return False
+    policy = prepared.route.get("external_data_policy")
+    if isinstance(policy, dict) and policy.get("web_allowed") is False:
+        return False
+    return True
+
 
 class TurnCancelled(Exception):
-    """Raised at a cooperative checkpoint when a turn cancellation was accepted.
-
-    The repository already holds the ``cancel_requested_at`` marker; the worker
-    is expected to settle the durable terminal state before propagating this.
-    """
+    """Raised at a cooperative checkpoint when a turn cancellation was accepted."""
 
     def __init__(self, *, stage: str, turn_id: str, operation_id: str) -> None:
         super().__init__(f"Chat turn cancelled at stage '{stage}': {turn_id}")
@@ -70,6 +103,7 @@ class ChatCommand:
     partial_reply: str = ""
     turn_id: str | None = None
     operation_id: str | None = None
+    answer_validation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -112,11 +146,10 @@ class PreparedChatTurn:
     learning_state_before: LearningState
     disclosure_policy: str
     learner_evaluation: PedagogyEvalRun
+    answer_validation: dict[str, Any] | None = None
 
 
 def _poll_cancel(repository: RuntimeRepository, turn_id: str, operation_id: str):
-    """Build a bool-returning cancel poll for retrieval layers."""
-
     def poll() -> bool:
         return repository.turn_cancel_requested(turn_id, operation_id)
 
@@ -135,14 +168,46 @@ class ChatService:
     def _make_cancel_check(
         self, turn_id: str, operation_id: str
     ) -> Callable[[str], None]:
-        """Build a cooperative checkpoint callable for one operation.
-
-        Each checkpoint call is a repository poll; the first accepted cancel
-        raises :class:`TurnCancelled`. A ``None`` turn/operation pair short
-        circuits to a no-op so legacy requests without a handle remain usable.
-        """
-
         def check(stage: str) -> None:
+            if stage == "answer_claim_binding_pre":
+                current = self.repository.get_chat_turn(turn_id)
+                if current is None:
+                    raise ValueError(f"Chat turn not found: {turn_id}")
+                try:
+                    started = int(
+                        current.route_snapshot.get(
+                            "answer_claim_binding_calls_started", 0
+                        )
+                    )
+                except (TypeError, ValueError):
+                    started = 0
+                reservation_route = {
+                    **current.route_snapshot,
+                    "answer_claim_binding_calls_started": max(
+                        0, min(started, 1000)
+                    )
+                    + 1,
+                }
+                try:
+                    self.repository.update_chat_turn(
+                        turn_id,
+                        assistant_message=current.assistant_message,
+                        status="streaming",
+                        route_snapshot=reservation_route,
+                        expected_operation_id=operation_id,
+                        enforce_operation_owner=True,
+                        expected_status="streaming",
+                        forbid_cancel_requested=True,
+                    )
+                except ValueError:
+                    if self.repository.turn_cancel_requested(turn_id, operation_id):
+                        raise TurnCancelled(
+                            stage=stage,
+                            turn_id=turn_id,
+                            operation_id=operation_id,
+                        ) from None
+                    raise
+                return
             if self.repository.turn_cancel_requested(turn_id, operation_id):
                 raise TurnCancelled(
                     stage=stage, turn_id=turn_id, operation_id=operation_id
@@ -158,34 +223,17 @@ class ChatService:
         stage: str,
         assistant_message: str,
     ) -> None:
-        """Settle a cancellation raised during pre-answer preparation.
-
-        With no visible output the turn settles to ``cancelled``; a continuation
-        carrying a previously persisted partial keeps it as ``interrupted``.
-        The repository releases the thread operation in the same transaction.
-        """
-
-        settled = self.repository.finish_turn_cancel(
+        self.repository.finish_turn_cancel(
             turn_id,
             operation_id=operation_id,
             stage=stage,
             reason="user_cancelled",
             assistant_message=assistant_message,
         )
-        if settled is None:
-            # The operation completed first or already reached a terminal
-            # state; the fence already released the operation.
-            return
 
     def finish_cancelled_turn(
         self, prepared: PreparedChatTurn, partial: str
     ) -> ChatTurn | None:
-        """Settle a cancellation raised during streaming generation.
-
-        Visible partial output becomes ``interrupted`` (preserved), otherwise
-        ``cancelled``. Returns ``None`` when the turn already settled (race
-        with completion); callers must tolerate that outcome.
-        """
         reply = (
             f"{prepared.base_reply}{partial}" if prepared.is_continuation else partial
         )
@@ -204,6 +252,11 @@ class ChatService:
         settings = _session_settings(command, context_mode)
         turn_id = command.turn_id or command.continuation_of_turn_id or new_id("turn")
         is_continuation = bool(command.continuation_of_turn_id)
+        prior_generation_calls = (
+            _persisted_generation_calls(existing)
+            if is_continuation and existing is not None
+            else 0
+        )
         thread_id = command.thread_id or (
             existing.thread_id if existing is not None and is_continuation else ChatThread().id
         )
@@ -219,8 +272,6 @@ class ChatService:
                 "conversationInstruction": command.conversation_instruction,
             },
         )
-        # Reserve the turn before any expensive preparation (G12 decision 2) so a
-        # cancellation request can find it even before retrieval starts.
         reserved_existing = existing
         if existing is None:
             self.repository.add_chat_turn(
@@ -294,6 +345,10 @@ class ChatService:
                 **route,
                 "pedagogy": pedagogy_plan.to_dict(),
                 "learning_state": next_learning_state.to_dict(),
+                # Durable count of generation calls that already contributed to
+                # this turn. The current operation increments only immediately
+                # before its provider call is invoked.
+                "answer_generation_calls": prior_generation_calls,
             }
             role_prompt = self.dependencies.build_role_prompt(
                 route["role"],
@@ -401,7 +456,11 @@ class ChatService:
                 operation_id=operation_id,
                 conversation_instruction=command.conversation_instruction,
             )
-            expected = "pending" if reserved_existing is None or reserved_existing.status == "pending" else "interrupted"
+            expected = (
+                "pending"
+                if reserved_existing is None or reserved_existing.status == "pending"
+                else "interrupted"
+            )
             streaming = self.repository.update_chat_turn(
                 turn_id,
                 assistant_message=base_reply,
@@ -429,9 +488,6 @@ class ChatService:
             )
             raise
         except Exception:
-            # Settlement: ensure a reserved turn does not linger in pending
-            # when preparation failed. The settlement transaction releases the
-            # thread operation; fall back to a bare release when it cannot run.
             settled_failed = False
             with suppress(Exception):
                 lingering = self.repository.get_chat_turn(turn_id)
@@ -472,25 +528,75 @@ class ChatService:
             learning_state_before=learning_state,
             disclosure_policy=disclosed.policy,
             learner_evaluation=learner_evaluation,
+            answer_validation=command.answer_validation,
         )
+
+    def _begin_generation_call(self, prepared: PreparedChatTurn) -> bool:
+        """Durably record one server-initiated generation call before invocation.
+
+        Terminal/partial paths only inherit this counter. A cancellation that won
+        the ownership race prevents this CAS and therefore never invents a model
+        call merely because the turn later settles as interrupted/cancelled.
+        """
+        operation_id = prepared.turn.operation_id or ""
+        next_calls = _route_generation_calls(prepared.route) + 1
+        route_snapshot = {
+            **prepared.route,
+            "answer_generation_calls": next_calls,
+        }
+        try:
+            updated = self.repository.update_chat_turn(
+                prepared.turn.id,
+                assistant_message=prepared.turn.assistant_message,
+                status="streaming",
+                route_snapshot=route_snapshot,
+                expected_operation_id=operation_id,
+                enforce_operation_owner=True,
+                expected_status="streaming",
+                forbid_cancel_requested=True,
+            )
+        except ValueError:
+            if operation_id and self.repository.turn_cancel_requested(
+                prepared.turn.id, operation_id
+            ):
+                return False
+            raise
+        if updated is None:
+            raise RuntimeError(f"Chat turn disappeared: {prepared.turn.id}")
+        prepared.route["answer_generation_calls"] = next_calls
+        return True
 
     def generate(self, prepared: PreparedChatTurn) -> str:
         cancel_check = self._make_cancel_check(
             prepared.turn.id, prepared.turn.operation_id or ""
         )
         cancel_check("generate_pre")
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        if not self._begin_generation_call(prepared):
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage="generate_pre",
+                assistant_message=(
+                    prepared.base_reply if prepared.is_continuation else ""
+                ),
+            )
+            raise TurnCancelled(
+                stage="generate_pre",
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+            )
         try:
             suffix = self.dependencies.chat(
                 prepared.messages,
                 model_profile=prepared.route["model_profile"],
-                max_tokens=self.dependencies.chat_max_tokens(
-                    prepared.runtime_modes.performance_mode
-                ),
+                max_tokens=max_tokens,
                 task_name="single_chat",
+                request_max_retries=0,
             )
         except TurnCancelled:
-            # Fence: settle to a durable terminal state without the model
-            # output; the repository releases the thread operation.
             self._settle_cancelled_preparation(
                 turn_id=prepared.turn.id,
                 operation_id=prepared.turn.operation_id or "",
@@ -504,8 +610,6 @@ class ChatService:
         try:
             cancel_check("generate_post")
         except TurnCancelled:
-            # Decision 9: the synchronous provider call returned naturally but
-            # its output is discarded — the accepted cancel fences completion.
             self._settle_cancelled_preparation(
                 turn_id=prepared.turn.id,
                 operation_id=prepared.turn.operation_id or "",
@@ -513,32 +617,323 @@ class ChatService:
                 assistant_message=prepared.base_reply if prepared.is_continuation else "",
             )
             raise
-        return self.complete_turn(prepared, suffix).assistant_message
+        try:
+            return self.complete_turn(prepared, suffix).assistant_message
+        except TurnCancelled as exc:
+            self._settle_cancelled_preparation(
+                turn_id=prepared.turn.id,
+                operation_id=prepared.turn.operation_id or "",
+                stage=exc.stage,
+                assistant_message=prepared.base_reply if prepared.is_continuation else "",
+            )
+            raise
+        except ValueError:
+            operation_id = prepared.turn.operation_id or ""
+            if operation_id and self.repository.turn_cancel_requested(
+                prepared.turn.id, operation_id
+            ):
+                self._settle_cancelled_preparation(
+                    turn_id=prepared.turn.id,
+                    operation_id=operation_id,
+                    stage="complete_turn",
+                    assistant_message=(
+                        prepared.base_reply if prepared.is_continuation else ""
+                    ),
+                )
+                raise TurnCancelled(
+                    stage="complete_turn",
+                    turn_id=prepared.turn.id,
+                    operation_id=operation_id,
+                ) from None
+            raise
 
     def stream(self, prepared: PreparedChatTurn, *, should_cancel=None) -> Iterator[str]:
-        return self.dependencies.stream_chat(
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        if not self._begin_generation_call(prepared):
+            return
+        yield from self.dependencies.stream_chat(
             prepared.messages,
             model_profile=prepared.route["model_profile"],
-            max_tokens=self.dependencies.chat_max_tokens(
-                prepared.runtime_modes.performance_mode
-            ),
+            max_tokens=max_tokens,
             task_name="single_chat",
             should_cancel=should_cancel,
+            request_max_retries=0,
         )
 
     async def stream_async(self, prepared: PreparedChatTurn) -> AsyncIterator[str]:
+        max_tokens = self.dependencies.chat_max_tokens(
+            prepared.runtime_modes.performance_mode
+        )
+        started = self._begin_generation_call(prepared)
+        if not started:
+            return
         async for token in self.dependencies.async_stream_chat(
             prepared.messages,
             model_profile=prepared.route["model_profile"],
-            max_tokens=self.dependencies.chat_max_tokens(
-                prepared.runtime_modes.performance_mode
-            ),
+            max_tokens=max_tokens,
             task_name="single_chat",
+            request_max_retries=0,
         ):
             yield token
 
+    def _record_claim_binding_call(
+        self,
+        prepared: PreparedChatTurn,
+        *,
+        outcome: str,
+        attempts: int,
+        candidate: str,
+    ) -> None:
+        """Record G16 egress truth for the binder phase.
+
+        One logical phase record carries the exact number of physical outbound
+        attempts; the separate answer-validation audit records the same count.
+        Candidate answer text is never persisted here, only its payload class.
+        """
+        policy = prepared.route.get("external_data_policy")
+        if not isinstance(policy, dict) or attempts < 1:
+            return
+        plan = prepared.answer_validation or {}
+        raw_rows = plan.get("evidence_rows") or ()
+        row_count = sum(1 for row in raw_rows if isinstance(row, dict))
+        calls = [
+            dict(item)
+            for item in policy.get("external_calls", [])
+            if isinstance(item, dict)
+            and item.get("purpose") != "answer_claim_binding"
+        ]
+        status = "completed" if outcome == "validated" else "rejected"
+        calls.append(
+            {
+                "call_id": "answer_claim_binding:1",
+                "purpose": "answer_claim_binding",
+                "provider": _configured_llm_provider(),
+                "data_categories": [
+                    "current_question",
+                    "candidate_answer",
+                    "web_results",
+                ],
+                "data_counts": {
+                    "current_question": 1,
+                    "candidate_answer": 1 if candidate else 0,
+                    "web_results": row_count,
+                },
+                "attempts": attempts,
+                "status": status,
+                "result": status,
+            }
+        )
+        refreshed = {**policy, "external_calls": calls}
+        prepared.route["external_data_policy"] = refreshed
+        prepared.rag["external_data_policy"] = refreshed
+
+    def _gate_research_answer(
+        self,
+        prepared: PreparedChatTurn,
+        candidate: str,
+    ) -> tuple[str, Any | None, dict[str, Any], bool]:
+        generation_calls = _route_generation_calls(prepared.route)
+        generation_phase = {
+            "attempted": generation_calls > 0,
+            "model_calls": generation_calls,
+            "attempts": generation_calls,
+            "outcome": PHASE_OUTCOME_COMPLETED,
+            "error_type": "",
+        }
+        plan = prepared.answer_validation or {}
+        raw_allowed = plan.get("allowed_attempts")
+        try:
+            allowed_attempts = (
+                0 if raw_allowed == 0 else max(1, min(int(raw_allowed or 1), 2))
+            )
+        except (TypeError, ValueError):
+            allowed_attempts = 1
+        if allowed_attempts < 1:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                {
+                    PHASE_ANSWER_GENERATION: generation_phase,
+                    PHASE_ANSWER_CLAIM_BINDING: {
+                        "attempted": True,
+                        "model_calls": 0,
+                        "attempts": 0,
+                        "outcome": PHASE_OUTCOME_BUDGET_EXHAUSTED,
+                        "error_type": "budget_exhausted",
+                    },
+                },
+                True,
+            )
+        raw_rows = plan.get("evidence_rows") or ()
+        rows = tuple(
+            AnswerClaimBindingRow(
+                evidence_id=str(row.get("evidence_id") or "").strip(),
+                claim_id=str(row.get("claim_id") or "").strip(),
+                title=str(row.get("title") or ""),
+                url=str(row.get("url") or ""),
+                source_role=str(row.get("source_role") or ""),
+                source_cluster_id=str(row.get("source_cluster_id") or ""),
+                relation=str(row.get("relation") or ""),
+                strength=str(row.get("strength") or ""),
+                locator=str(row.get("locator") or ""),
+                anchored_spans=tuple(
+                    str(span) for span in row.get("anchored_spans") or ()
+                ),
+                caveats=tuple(str(caveat) for caveat in row.get("caveats") or ()),
+            )
+            for row in raw_rows
+            if isinstance(row, dict)
+        )
+        if not rows:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                self._blocked_audit_phases(generation_phase, "missing_evidence_brief"),
+                True,
+            )
+        question = prepared.turn.user_message
+        answer = candidate.strip()
+        if not answer:
+            return (
+                RESEARCH_ANSWER_BLOCKED_COPY,
+                None,
+                self._blocked_audit_phases(generation_phase, "candidate_unavailable"),
+                True,
+            )
+        cancel_check = self._make_cancel_check(
+            prepared.turn.id, prepared.turn.operation_id or ""
+        )
+        bound = bind_answer_claims(
+            request=AnswerClaimBindingRequest(
+                question=question,
+                final_answer=candidate,
+                evidence_rows=rows,
+            ),
+            model_fn=lambda messages: self.dependencies.chat(
+                list(messages),
+                model_profile=prepared.route["model_profile"],
+                max_tokens=self.dependencies.chat_max_tokens(
+                    prepared.runtime_modes.performance_mode
+                ),
+                task_name="answer_claim_binding",
+                request_max_retries=0,
+            ),
+            max_attempts=allowed_attempts,
+            before_model_call=lambda: cancel_check("answer_claim_binding_pre"),
+        )
+        binding_phase: dict[str, Any] = {
+            "attempted": True,
+            "model_calls": bound.attempt_count,
+            "attempts": bound.attempt_count,
+            "outcome": "",
+            "error_type": "",
+        }
+        snapshot = bound.snapshot
+        self._record_claim_binding_call(
+            prepared,
+            outcome=snapshot.status,
+            attempts=bound.attempt_count,
+            candidate=candidate,
+        )
+        if snapshot.status == "validated" and factual_claims_fully_bound(snapshot):
+            binding_phase["outcome"] = PHASE_OUTCOME_PASSED
+            return (
+                candidate,
+                snapshot,
+                {
+                    PHASE_ANSWER_GENERATION: generation_phase,
+                    PHASE_ANSWER_CLAIM_BINDING: binding_phase,
+                },
+                False,
+            )
+        binding_phase["outcome"] = PHASE_OUTCOME_REJECTED
+        binding_phase["error_type"] = (
+            str(snapshot.reason or "")[:120]
+            if snapshot.status != "validated"
+            else "unbound_factual_claim"
+        )
+        rejected_reason = (
+            str(snapshot.reason or "producer_unavailable")
+            if snapshot.status != "validated"
+            else "unbound_factual_claim"
+        )
+        rejected = rejected_answer_claim_snapshot(
+            answer=RESEARCH_ANSWER_BLOCKED_COPY,
+            producer=ANSWER_CLAIM_BINDER_PRODUCER,
+            reason=rejected_reason,
+        )
+        return (
+            RESEARCH_ANSWER_BLOCKED_COPY,
+            rejected,
+            {
+                PHASE_ANSWER_GENERATION: generation_phase,
+                PHASE_ANSWER_CLAIM_BINDING: binding_phase,
+            },
+            True,
+        )
+
+    def _blocked_audit_phases(
+        self, generation_phase: dict[str, Any], error_type: str
+    ) -> dict[str, Any]:
+        return {
+            PHASE_ANSWER_GENERATION: generation_phase,
+            PHASE_ANSWER_CLAIM_BINDING: {
+                "attempted": True,
+                "model_calls": 0,
+                "attempts": 0,
+                "outcome": PHASE_OUTCOME_REJECTED,
+                "error_type": error_type,
+            },
+        }
+
     def complete_turn(self, prepared: PreparedChatTurn, suffix: str) -> ChatTurn:
         reply = f"{prepared.base_reply}{suffix}" if prepared.is_continuation else suffix
+        gate_blocked_pedagogy = False
+        if answer_validation_active(prepared):
+            reply, claims_snapshot, audit_phases, gate_blocked_pedagogy = (
+                self._gate_research_answer(prepared, reply)
+            )
+            audit = build_answer_validation_audit(
+                candidate_answer=(
+                    f"{prepared.base_reply}{suffix}"
+                    if prepared.is_continuation
+                    else suffix
+                ),
+                published_answer=reply,
+                phases=audit_phases,
+            )
+            published_rag = {
+                **deepcopy(prepared.rag),
+                "answer_validation_audit": audit,
+            }
+            if claims_snapshot is not None:
+                published_rag["answer_claim_snapshot"] = claims_snapshot.to_dict()
+            if claims_snapshot is not None and claims_snapshot.status == "validated":
+                linked_evidence_ids = {
+                    link.evidence_id
+                    for link in claims_snapshot.claim_links
+                    if link.evidence_id
+                }
+                published_rag["research_evidence_refs"] = [
+                    {
+                        "evidence_id": str(row.get("evidence_id") or ""),
+                        "claim_id": str(row.get("claim_id") or ""),
+                        "title": str(row.get("title") or ""),
+                        "url": str(row.get("url") or ""),
+                        "source_cluster_id": str(row.get("source_cluster_id") or ""),
+                        "published_at": str(row.get("published_at") or ""),
+                    }
+                    for row in (prepared.answer_validation or {}).get(
+                        "evidence_rows"
+                    )
+                    or ()
+                    if isinstance(row, dict)
+                    and str(row.get("evidence_id") or "") in linked_evidence_ids
+                ]
+        else:
+            published_rag = deepcopy(prepared.rag)
         evaluation = self.dependencies.pedagogy_engine.evaluate_response(
             reply,
             plan=prepared.pedagogy_plan,
@@ -560,6 +955,8 @@ class ChatService:
                         },
                     }
                 )
+        if gate_blocked_pedagogy:
+            committed_state = prepared.learning_state_before
         pedagogy_snapshot = {
             **prepared.turn.pedagogy_snapshot,
             "assistant_evaluation": {
@@ -580,7 +977,7 @@ class ChatService:
             mode=prepared.route["mode"],
             model=prepared.route["model_profile"],
             route_snapshot=prepared.route,
-            rag_snapshot=prepared.rag,
+            rag_snapshot=published_rag,
             pedagogy_snapshot=pedagogy_snapshot,
             parent_turn_id=prepared.turn.parent_turn_id,
             operation_id=prepared.turn.operation_id,
@@ -596,6 +993,7 @@ class ChatService:
                 "web_context_used": prepared.web_context_used,
                 "is_continuation": prepared.is_continuation,
                 "is_continuation_resolved": prepared.is_continuation,
+                "answer_generation_calls": _route_generation_calls(prepared.route),
             },
             rag_snapshot=completed_truth.rag_snapshot,
             operation_id=prepared.turn.operation_id or "",
@@ -617,7 +1015,11 @@ class ChatService:
             role=prepared.route["role"],
             mode=prepared.route["mode"],
             model=prepared.route["model_profile"],
-            route_snapshot={**prepared.route, "interrupted": True},
+            route_snapshot={
+                **prepared.route,
+                "interrupted": True,
+                "answer_generation_calls": _route_generation_calls(prepared.route),
+            },
             rag_snapshot=prepared.rag,
             pedagogy_snapshot=prepared.turn.pedagogy_snapshot,
             parent_turn_id=prepared.turn.parent_turn_id,
@@ -768,6 +1170,7 @@ class ChatService:
             )
         if existing.status == "interrupted" and existing.assistant_message == stored_reply:
             return existing, False
+        route_truth = deepcopy(existing.route_snapshot)
         partial_truth = _normalized_turn_truth(
             turn=existing,
             fallback_turn_id=turn_id,
@@ -778,7 +1181,7 @@ class ChatService:
             role=existing.role,
             mode=existing.mode,
             model=existing.model,
-            route_snapshot=existing.route_snapshot,
+            route_snapshot=route_truth,
             rag_snapshot=existing.rag_snapshot,
             pedagogy_snapshot=existing.pedagogy_snapshot,
             parent_turn_id=existing.parent_turn_id,
@@ -876,6 +1279,27 @@ def _normalized_turn_truth(
     )
 
 
+def _route_generation_calls(route_snapshot: dict[str, Any]) -> int:
+    try:
+        calls = int(route_snapshot.get("answer_generation_calls", 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(calls, 1000))
+
+
+def _persisted_generation_calls(turn: ChatTurn) -> int:
+    """Recover durable generation truth for a continuation.
+
+    New interrupted turns carry an explicit server-owned count in the route
+    snapshot. Legacy interrupted turns predate that marker; reaching the
+    interrupted state itself proves at least one physical generation attempt,
+    so they conservatively resume from one instead of silently undercounting.
+    """
+    if "answer_generation_calls" in turn.route_snapshot:
+        return _route_generation_calls(turn.route_snapshot)
+    return 1 if turn.status == "interrupted" else 0
+
+
 def _requires_mastery_evidence(plan: PedagogyTurnPlan) -> bool:
     return (
         plan.phase in {"transfer", "complete", "deliver"}
@@ -908,7 +1332,6 @@ def _web_context_provenance(
 
 
 def _tool_context(history: list[dict[str, Any]]) -> str:
-    """Keep the planner aware of the immediate thread without leaking a full log."""
     recent = history[-6:]
     return "\n".join(
         f"{str(message.get('role', 'user'))}: {str(message.get('content', ''))[:500]}"

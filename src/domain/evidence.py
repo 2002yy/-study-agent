@@ -141,6 +141,7 @@ def build_evidence_snapshot(
     _add_local_refs(refs, rag=rag, selected_ids=selected_ids, policy=disclosure_policy)
     _add_web_tool_refs(refs, rag=rag)
     _add_research_run_refs(refs, rag=rag)
+    _add_claim_binding_refs(refs, rag=rag)
 
     projected = refs.values()
     known_ids = {ref.id for ref in projected}
@@ -281,6 +282,44 @@ def _add_web_tool_refs(
                     ),
                 )
             )
+
+
+def _add_claim_binding_refs(
+    accumulator: _EvidenceAccumulator,
+    *,
+    rag: dict[str, Any],
+) -> None:
+    """Add server-owned evidence ids validated by the answer-claim binder.
+
+    The binder accepted claim links only against rows projected from the
+    ResearchRun Evidence Brief (``rag["research_evidence_refs"]``); persisting
+    those bounded rows lets later reads re-validate the claim links instead of
+    demoting a validated snapshot to rejected because the id space of the
+    research-run extraction differs from web source ids.
+    """
+    for raw in rag.get("research_evidence_refs") or ():
+        if not isinstance(raw, dict):
+            continue
+        evidence_id = _text(raw.get("evidence_id"))
+        title = _text(raw.get("title"))
+        url = _text(raw.get("url"))
+        source_cluster_id = _text(raw.get("source_cluster_id"))
+        if not evidence_id or not (title or url or source_cluster_id):
+            continue
+        accumulator.add(
+            EvidenceRefV1(
+                id=evidence_id,
+                type="research",
+                title=title,
+                source=source_cluster_id,
+                url=url,
+                domain=_domain(url),
+                published_at=_published_at(raw),
+                lifecycle_status="selected",
+                provider_status="structured_evidence",
+                selection_reason="answer_claim_binding:validated",
+            )
+        )
 
 
 def _add_research_run_refs(
