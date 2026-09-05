@@ -14,17 +14,17 @@ concurrency:
 
 jobs:
   planner-benchmark:
-    if: "${{ github.event.head_commit.message == 'rq1c-planner-benchmark-local-qwen4b' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-planner-benchmark-local-qwen15b' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       PYTHONPATH: .
       LLAMA_CPP_TAG: b10809
       LLAMA_CPP_ARCHIVE_SHA256: 5e34434ddc6d03cd1584f403201aff0d4bd1a5793a72ff7e286532dfd1e4b941
-      HF_MODEL_REPO: unsloth/Qwen3-4B-Instruct-2507-GGUF
-      HF_MODEL_FILE: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-      MODEL_SHA256_EXPECTED: 3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597
-      MODEL_ALIAS: rq1c-qwen3-4b-instruct-2507-q4km
+      HF_MODEL_REPO: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+      HF_MODEL_FILE: qwen2.5-1.5b-instruct-q4_k_m.gguf
+      MODEL_SHA256_EXPECTED: 6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e
+      MODEL_ALIAS: rq1c-qwen25-15b-instruct-q4km
 
     steps:
       - name: Check out exact benchmark head
@@ -56,7 +56,7 @@ jobs:
           echo "LLAMA_SERVER=$server" >> "$GITHUB_ENV"
           "$server" --version | tee output/llama-server-version.log
 
-      - name: Download pinned Qwen3 4B GGUF
+      - name: Download pinned Qwen2.5 1.5B GGUF
         shell: bash
         run: |
           set -euo pipefail
@@ -81,6 +81,7 @@ jobs:
             --host 127.0.0.1 \
             --port 8000 \
             -c 8192 \
+            -np 1 \
             -t "$(nproc)" \
             --jinja \
             > output/llama-server.log 2>&1 &
@@ -98,7 +99,7 @@ jobs:
           cat output/llama-server.log >&2
           exit 1
 
-      - name: Benchmark claim-planner prompt and output caps
+      - name: Benchmark exact production claim-planner request
         shell: python
         run: |
           import json
@@ -114,7 +115,7 @@ jobs:
           client = OpenAI(
               api_key='local',
               base_url='http://127.0.0.1:8000/v1',
-              timeout=30,
+              timeout=20,
               max_retries=0,
           )
           questions = [
@@ -131,15 +132,6 @@ jobs:
                   'Which exact vulnerabilities will be fixed in the next Python security release before the Python Security Response Team publicly announces them?',
               ),
           ]
-          tightened = _CLAIM_SYSTEM_PROMPT + (
-              '\nUse the fewest claims needed to answer the question, normally one to three. '
-              'Keep each claim surface concise (at most 160 characters). Do not restate the same fact.'
-          )
-          variants = [
-              ('current_256', _CLAIM_SYSTEM_PROMPT, 256),
-              ('tight_256', tightened, 256),
-              ('tight_320', tightened, 320),
-          ]
           records = []
           for question_name, question in questions:
               payload = _claim_user_payload(
@@ -150,58 +142,68 @@ jobs:
                       'freshness_days': None,
                   }
               )
-              for variant_name, system_prompt, cap in variants:
-                  started = time.monotonic()
+              started = time.monotonic()
+              record = {
+                  'question': question_name,
+                  'max_tokens': 4000,
+                  'timeout_seconds': 20,
+                  'elapsed_seconds': None,
+                  'finish_reason': None,
+                  'prompt_tokens': None,
+                  'completion_tokens': None,
+                  'total_tokens': None,
+                  'json_valid': False,
+                  'parser_valid': False,
+                  'claims_count': None,
+                  'surfaces': [],
+                  'error': '',
+              }
+              try:
                   response = client.chat.completions.create(
-                      model='rq1c-qwen3-4b-instruct-2507-q4km',
+                      model='rq1c-qwen25-15b-instruct-q4km',
                       messages=[
-                          {'role': 'system', 'content': system_prompt},
+                          {'role': 'system', 'content': _CLAIM_SYSTEM_PROMPT},
                           {'role': 'user', 'content': payload},
                       ],
                       temperature=0,
-                      max_tokens=cap,
+                      max_tokens=4000,
                       response_format={'type': 'json_object'},
                   )
-                  elapsed = time.monotonic() - started
+                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
+                  record['finish_reason'] = response.choices[0].finish_reason
+                  record['prompt_tokens'] = getattr(response.usage, 'prompt_tokens', None)
+                  record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
+                  record['total_tokens'] = getattr(response.usage, 'total_tokens', None)
                   text = response.choices[0].message.content or ''
-                  record = {
-                      'question': question_name,
-                      'variant': variant_name,
-                      'cap': cap,
-                      'elapsed_seconds': round(elapsed, 6),
-                      'finish_reason': response.choices[0].finish_reason,
-                      'prompt_tokens': getattr(response.usage, 'prompt_tokens', None),
-                      'completion_tokens': getattr(response.usage, 'completion_tokens', None),
-                      'total_tokens': getattr(response.usage, 'total_tokens', None),
-                      'json_valid': False,
-                      'parser_valid': False,
-                      'claims_count': None,
-                      'surfaces': [],
-                      'error': '',
-                  }
-                  try:
-                      parsed = json.loads(text)
-                      record['json_valid'] = True
-                      proposals = _parse_claim_plan(parsed)
-                      record['parser_valid'] = True
-                      record['claims_count'] = len(proposals)
-                      record['surfaces'] = [item.surface for item in proposals]
-                  except Exception as exc:
-                      record['error'] = f'{type(exc).__name__}:{exc}'[:500]
-                  records.append(record)
-                  print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+                  parsed = json.loads(text)
+                  record['json_valid'] = True
+                  proposals = _parse_claim_plan(parsed)
+                  record['parser_valid'] = True
+                  record['claims_count'] = len(proposals)
+                  record['surfaces'] = [item.surface for item in proposals]
+              except Exception as exc:
+                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
+                  record['error'] = f'{type(exc).__name__}:{exc}'[:500]
+                  time.sleep(1)
+              records.append(record)
+              print(json.dumps(record, ensure_ascii=False, sort_keys=True))
 
           summary = {
               'kind': 'non_qualification_claim_planner_benchmark',
               'git_sha': __import__('subprocess').check_output(
                   ['git', 'rev-parse', 'HEAD'], text=True
               ).strip(),
+              'model_repo': 'Qwen/Qwen2.5-1.5B-Instruct-GGUF',
+              'model_file': 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+              'model_sha256': '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
               'records': records,
           }
           Path('output/rq1c-planner-benchmark.json').write_text(
               json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + '\n',
               encoding='utf-8',
           )
+          if not all(item['parser_valid'] for item in records):
+              raise SystemExit('one or more exact production planner requests failed')
 
       - name: Upload planner benchmark
         if: always()
