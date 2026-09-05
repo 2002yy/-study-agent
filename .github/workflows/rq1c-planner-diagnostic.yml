@@ -8,11 +8,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: rq1c-planner-live12-diagnostic
+  cancel-in-progress: false
+
 jobs:
   planner-diagnostic:
-    if: "${{ github.event.head_commit.message == 'rq1c-planner-diagnostic-strict-schema' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-planner-diagnostic-live12' }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PYTHONPATH: .
       LLM_PROVIDER_PROFILE: local
@@ -37,151 +41,109 @@ jobs:
       MODEL_ALIAS: rq1c-qwen25-15b-instruct-q4km
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out exact diagnostic head
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-      - name: Install dependencies
+
+      - name: Install Study Agent dependencies
         run: pip install -r requirements.txt
-      - name: Install pinned llama.cpp and planner model
+
+      - name: Install pinned llama.cpp CPU server
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .local-llama .local-model output
-          curl -fsSL --retry 4 --retry-delay 2 \
+          archive=.local-llama/llama.tar.gz
+          curl -fL --retry 4 --retry-delay 2 \
             "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-ubuntu-x64.tar.gz" \
-            -o .local-llama/llama.tar.gz
-          echo "${LLAMA_CPP_ARCHIVE_SHA256}  .local-llama/llama.tar.gz" | sha256sum -c -
-          tar -xzf .local-llama/llama.tar.gz -C .local-llama
+            -o "$archive"
+          echo "${LLAMA_CPP_ARCHIVE_SHA256}  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C .local-llama
           server="$(find .local-llama -type f -name llama-server -print -quit)"
           test -n "$server"
           chmod +x "$server"
           echo "LLAMA_SERVER=$server" >> "$GITHUB_ENV"
-          model=.local-model/${HF_MODEL_FILE}
-          curl -fsSL --retry 5 --retry-delay 3 \
-            "https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}?download=true" \
-            -o "$model"
-          actual="$(sha256sum "$model" | awk '{print $1}')"
-          test "$actual" = "$MODEL_SHA256_EXPECTED"
-          echo "MODEL_PATH=$model" >> "$GITHUB_ENV"
-      - name: Start planner server
+
+      - name: Download pinned planner GGUF
         shell: bash
         run: |
           set -euo pipefail
-          "$LLAMA_SERVER" -m "$MODEL_PATH" --alias "$MODEL_ALIAS" \
-            --host 127.0.0.1 --port 8001 -c 4096 -np 1 -t "$(nproc)" --jinja \
+          model=.local-model/${HF_MODEL_FILE}
+          curl -fL --retry 5 --retry-delay 3 \
+            "https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}?download=true" \
+            -o "$model"
+          test -s "$model"
+          actual="$(sha256sum "$model" | awk '{print $1}')"
+          test "$actual" = "$MODEL_SHA256_EXPECTED"
+          echo "MODEL_PATH=$model" >> "$GITHUB_ENV"
+
+      - name: Start pinned planner server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$LLAMA_SERVER" \
+            -m "$MODEL_PATH" \
+            --alias "$MODEL_ALIAS" \
+            --host 127.0.0.1 \
+            --port 8001 \
+            -c 4096 \
+            -np 1 \
+            -t "$(nproc)" \
+            --jinja \
             > output/planner-server.log 2>&1 &
           echo $! > output/planner-server.pid
           for attempt in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then exit 0; fi
-            if ! kill -0 "$(cat output/planner-server.pid)" 2>/dev/null; then cat output/planner-server.log; exit 1; fi
+            if curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat output/planner-server.pid)" 2>/dev/null; then
+              cat output/planner-server.log >&2
+              exit 1
+            fi
             sleep 2
           done
-          cat output/planner-server.log
+          cat output/planner-server.log >&2
           exit 1
-      - name: Test question-anchor contract at 320 tokens
+
+      - name: Run untouched live-12 planner-only diagnostic
+        shell: bash
+        run: |
+          set -o pipefail
+          python tools/run_rq1c_planner_diagnostic.py \
+            --manifest tests/fixtures/research_quality/rq1c_bounded_holdout_manifest.json \
+            --reference-date 2026-09-05 \
+            --output output/rq1c-planner-live12-diagnostic.json \
+            | tee output/rq1c-planner-live12-diagnostic.log
+
+      - name: Enforce diagnostic evidence shape only
         shell: python
         run: |
           import json
-          import time
-          from openai import OpenAI
-          import src.web.research.claim_planner as cp
+          from pathlib import Path
 
-          def claim_schema(kind, profiles):
-              return {
-                  'type': 'object',
-                  'additionalProperties': False,
-                  'required': ['question_anchor', 'kind', 'policy_profile'],
-                  'properties': {
-                      'question_anchor': {'type': 'string', 'minLength': 1, 'maxLength': 160},
-                      'kind': {'type': 'string', 'enum': [kind]},
-                      'policy_profile': {'type': 'string', 'enum': list(profiles)},
-                  },
-              }
+          path = Path('output/rq1c-planner-live12-diagnostic.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          assert data['summary']['case_count'] == 12
+          assert len(data['cases']) == 12
+          assert data['planner']['stores_raw_model_text'] is False
+          for case in data['cases']:
+              assert 'raw' not in case
+              assert 'response_text' not in case
+              assert 'prompt' not in case
 
-          claim_union = {'anyOf': [claim_schema(kind, profiles) for kind, profiles in cp._POLICY_PROFILES_BY_KIND.items()]}
-          response_format = {
-              'type': 'json_schema',
-              'json_schema': {
-                  'name': 'research_runtime_claim_plan_anchored',
-                  'strict': True,
-                  'schema': {
-                      'type': 'object',
-                      'additionalProperties': False,
-                      'required': ['schema_version', 'critical_claim', 'supporting_claims'],
-                      'properties': {
-                          'schema_version': {'type': 'string', 'enum': [cp.RUNTIME_CLAIM_PLAN_SCHEMA_VERSION]},
-                          'critical_claim': claim_union,
-                          'supporting_claims': {'type': 'array', 'minItems': 0, 'maxItems': 5, 'items': claim_union},
-                      },
-                  },
-              },
-          }
-          system_prompt = (
-              'You are a research claim planner. Return one JSON object and no prose. '
-              'For every claim, question_anchor MUST be copied verbatim as one contiguous substring of the supplied question. '
-              'Never write an answer, inferred value, new entity, or paraphrase into question_anchor. Choose an evidence-bearing '
-              'span that includes the subject and requested attribute, not an isolated word. critical_claim is the single '
-              'indispensable verification target. supporting_claims are optional and may be empty. Add a supporting claim ONLY '
-              'when the question itself contains a distinct contiguous evidence-bearing span different from the critical anchor. '
-              'If no distinct span exists, supporting_claims MUST be empty, even for a comparison. Never reuse an anchor. '
-              'Choose exactly one compatible kind/policy_profile pair. factual supports official_statement, current_fact, '
-              'quantitative_claim, or community_sentiment; analytical supports quantitative_claim, causal_analysis, or '
-              'community_sentiment; research_question or hypothesis supports exploratory_hypothesis only.'
-          )
-          questions = [
-              'What is the current stable Python release?',
-              'Compare the current official support status of two software releases.',
-              'What can be verified about an announced feature if independent confirmation is limited?',
-          ]
-          client = OpenAI(api_key='local', base_url='http://127.0.0.1:8001/v1', timeout=20, max_retries=0)
-          records = []
-          for index, question in enumerate(questions, start=1):
-              payload = cp._claim_user_payload({'question': question, 'reference_date': '2026-09-05', 'freshness_requested': False, 'freshness_days': None})
-              started = time.monotonic()
-              record = {'case': index, 'elapsed_seconds': None, 'finish_reason': None, 'completion_tokens': None, 'parsed_json': None, 'anchors_valid': False, 'claims_count': 0, 'error': ''}
-              try:
-                  response = client.chat.completions.create(
-                      model='rq1c-qwen25-15b-instruct-q4km',
-                      messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': payload}],
-                      temperature=0,
-                      max_tokens=320,
-                      response_format=response_format,
-                  )
-                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
-                  record['finish_reason'] = response.choices[0].finish_reason
-                  record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
-                  parsed = json.loads(response.choices[0].message.content or '')
-                  record['parsed_json'] = parsed
-                  claims = [parsed['critical_claim'], *parsed['supporting_claims']]
-                  anchors = [item['question_anchor'] for item in claims]
-                  folded_question = question.casefold()
-                  valid = all(anchor.casefold() in folded_question for anchor in anchors)
-                  valid = valid and len({anchor.casefold() for anchor in anchors}) == len(anchors)
-                  if not valid:
-                      raise ValueError('model emitted a non-question or duplicate anchor')
-                  for offset, raw_claim in enumerate(claims):
-                      cp.evidence_policy_for_claim(kind=raw_claim['kind'], priority='critical' if offset == 0 else 'major', profile=raw_claim['policy_profile'])
-                  record['anchors_valid'] = True
-                  record['claims_count'] = len(anchors)
-              except Exception as exc:
-                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
-                  record['error'] = f'{type(exc).__name__}:{exc}'[:500]
-              records.append(record)
-              print(json.dumps(record, ensure_ascii=False, sort_keys=True))
-          with open('output/planner-diagnostic.json', 'w', encoding='utf-8') as fh:
-              json.dump(records, fh, ensure_ascii=False, indent=2, sort_keys=True)
-              fh.write('\n')
-          if not all(item['anchors_valid'] and item['finish_reason'] == 'stop' and item['elapsed_seconds'] < 20.0 for item in records):
-              raise SystemExit('question-anchor contract did not pass all cases')
-      - name: Upload diagnostic
+      - name: Upload planner diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rq1c-planner-diagnostic
+          name: rq1c-planner-live12-diagnostic
           path: |
-            output/planner-diagnostic.json
+            output/rq1c-planner-live12-diagnostic.json
+            output/rq1c-planner-live12-diagnostic.log
             output/planner-server.log
-          if-no-files-found: warn
-          retention-days: 3
+          if-no-files-found: error
+          retention-days: 7
