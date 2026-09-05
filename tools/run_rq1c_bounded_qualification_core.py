@@ -16,10 +16,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -68,6 +66,8 @@ from src.task_contract import (  # noqa: E402
 )
 from src.web.research.contracts import ResearchBudget, build_research_state  # noqa: E402
 from src.web.research.state import attach_claim_engine_state  # noqa: E402
+from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
+from tools.rq1c_qualification_guardrails import make_guarded_run_case  # noqa: E402
 
 MANIFEST_SCHEMA_VERSION = "rq1c-bounded-holdout-manifest-v1"
 ARTIFACT_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
@@ -83,7 +83,6 @@ DEFAULT_OUTPUT = (
     REPO_ROOT / "docs" / "research_quality" / "RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json"
 )
 _ALLOWED_CASE_KEYS = {"id", "category", "question"}
-_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ANSWER_PHASES = ("answer_generation", "answer_claim_binding")
 
@@ -102,22 +101,7 @@ def _sha256_exact(value: str) -> str:
 
 
 def _git_sha() -> str:
-    configured = str(os.getenv("GITHUB_SHA") or "").strip().lower()
-    if _HEX40.fullmatch(configured):
-        return configured
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    value = completed.stdout.strip().lower()
-    return value if _HEX40.fullmatch(value) else ""
+    return exact_checkout_git_sha(REPO_ROOT)
 
 
 def _load_manifest(path: Path) -> tuple[dict[str, str], ...]:
@@ -662,6 +646,15 @@ def _run_case(
         "brief": brief_projection,
         "metrics": dict(metrics),
     }
+
+
+_run_case = make_guarded_run_case(
+    raw_run_case=_run_case,
+    build_chat_service=_build_chat_service,
+    binding_rows_provider=research_binding_rows,
+    answer_stage_model_calls=_answer_stage_model_calls,
+    exact_git_check=_git_sha,
+)
 
 
 def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
