@@ -14,22 +14,22 @@ concurrency:
 
 jobs:
   live12:
-    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-volcengine' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-local-qwen4b' }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PYTHONPATH: .
+      LLM_PROVIDER_PROFILE: local
+      LOCAL_API_KEY: local
+      LOCAL_BASE_URL: http://127.0.0.1:8000/v1
+      LOCAL_MODEL_FLASH_NAME: rq1c-qwen3-4b-instruct-2507-q4km
+      LOCAL_MODEL_PRO_NAME: rq1c-qwen3-4b-instruct-2507-q4km
+      LOCAL_DEFAULT_MODEL_PROFILE: flash
       DEFAULT_MODEL_PROFILE: flash
+      LOCAL_MAX_RETRIES: '0'
       LLM_MAX_RETRIES: '0'
-      OPENAI_MAX_RETRIES: '0'
-      DEEPSEEK_MAX_RETRIES: '0'
-      OPENROUTER_MAX_RETRIES: '0'
-      SILICONFLOW_MAX_RETRIES: '0'
+      LOCAL_TIMEOUT_SECONDS: '20'
       LLM_TIMEOUT_SECONDS: '20'
-      OPENAI_TIMEOUT_SECONDS: '20'
-      DEEPSEEK_TIMEOUT_SECONDS: '20'
-      OPENROUTER_TIMEOUT_SECONDS: '20'
-      SILICONFLOW_TIMEOUT_SECONDS: '20'
       WEB_TOOL_ENABLED: 'true'
       WEB_ENABLE_DUCKDUCKGO: 'true'
       WEB_ENABLE_SEARXNG: 'false'
@@ -38,6 +38,11 @@ jobs:
       WEB_SEARCH_TOTAL_TIMEOUT_SECONDS: '8'
       NEWS_ENABLE_FIRECRAWL_READER: 'false'
       NEWS_ENABLE_JINA_READER: 'false'
+      LLAMA_CPP_TAG: b10809
+      LLAMA_CPP_ARCHIVE_SHA256: 5e34434ddc6d03cd1584f403201aff0d4bd1a5793a72ff7e286532dfd1e4b941
+      HF_MODEL_REPO: unsloth/Qwen3-4B-Instruct-2507-GGUF
+      HF_MODEL_FILE: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+      MODEL_ALIAS: rq1c-qwen3-4b-instruct-2507-q4km
 
     steps:
       - name: Check out exact qualification head
@@ -49,188 +54,172 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      - name: Install dependencies
+      - name: Install Study Agent dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Select configured provider and exact model
+      - name: Install pinned llama.cpp CPU server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-llama output
+          archive=.local-llama/llama.tar.gz
+          curl -fL --retry 4 --retry-delay 2 \
+            "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-ubuntu-x64.tar.gz" \
+            -o "$archive"
+          echo "${LLAMA_CPP_ARCHIVE_SHA256}  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C .local-llama
+          server="$(find .local-llama -type f -name llama-server -print -quit)"
+          test -n "$server"
+          chmod +x "$server"
+          echo "LLAMA_SERVER=$server" >> "$GITHUB_ENV"
+          "$server" --version | tee output/llama-server-version.log
+
+      - name: Download pinned Qwen3 4B GGUF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-model output
+          model=.local-model/${HF_MODEL_FILE}
+          curl -fL --retry 5 --retry-delay 3 \
+            "https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}?download=true" \
+            -o "$model"
+          test -s "$model"
+          model_sha="$(sha256sum "$model" | awk '{print $1}')"
+          model_bytes="$(stat -c '%s' "$model")"
+          echo "MODEL_PATH=$model" >> "$GITHUB_ENV"
+          echo "MODEL_SHA256=$model_sha" >> "$GITHUB_ENV"
+          echo "MODEL_BYTES=$model_bytes" >> "$GITHUB_ENV"
+          printf '%s  %s\n' "$model_sha" "$HF_MODEL_FILE" | tee output/model-sha256.txt
+
+      - name: Start local OpenAI-compatible model server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$LLAMA_SERVER" \
+            -m "$MODEL_PATH" \
+            --alias "$MODEL_ALIAS" \
+            --host 127.0.0.1 \
+            --port 8000 \
+            -c 8192 \
+            -t "$(nproc)" \
+            --jinja \
+            > output/llama-server.log 2>&1 &
+          echo $! > output/llama-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8000/health > output/llama-health.json 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat output/llama-server.pid)" 2>/dev/null; then
+              cat output/llama-server.log >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          cat output/llama-server.log >&2
+          exit 1
+
+      - name: Run non-qualification local-model smoke
         shell: python
-        env:
-          KEY_OPENAI: ${{ secrets.OPENAI_API_KEY }}
-          KEY_DEEPSEEK: ${{ secrets.DEEPSEEK_API_KEY }}
-          KEY_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY }}
-          KEY_SILICONFLOW: ${{ secrets.SILICONFLOW_API_KEY }}
-          KEY_VOLCENGINE: ${{ secrets.VOLCENGINE_API_KEY }}
-          KEY_ARK: ${{ secrets.ARK_API_KEY }}
         run: |
           import json
-          import os
-          import subprocess
+          import time
           from pathlib import Path
           from openai import OpenAI
 
-          output = Path('output')
-          output.mkdir(parents=True, exist_ok=True)
+          client = OpenAI(
+              api_key='local',
+              base_url='http://127.0.0.1:8000/v1',
+              timeout=60,
+              max_retries=0,
+          )
+          evidence = (
+              'A bounded research system must distinguish retrieved candidates, successful reads, '
+              'eligible evidence, and final supported claims. It must not upgrade unread snippets into '
+              'evidence, and it must report uncertainty when support is insufficient. '
+          ) * 12
+          started = time.monotonic()
+          response = client.chat.completions.create(
+              model='rq1c-qwen3-4b-instruct-2507-q4km',
+              messages=[
+                  {
+                      'role': 'system',
+                      'content': 'Return one JSON object only with keys summary, risks, ready.',
+                  },
+                  {
+                      'role': 'user',
+                      'content': evidence + '\nSummarize this into 4 concise risks and set ready=true.',
+                  },
+              ],
+              temperature=0,
+              max_tokens=256,
+              response_format={'type': 'json_object'},
+          )
+          elapsed = time.monotonic() - started
+          text = response.choices[0].message.content or ''
+          parsed = json.loads(text)
+          if parsed.get('ready') is not True:
+              raise SystemExit('local model smoke did not return ready=true')
+          if elapsed >= 60.0:
+              raise SystemExit(f'local model smoke exceeded 60s: {elapsed:.3f}s')
+          usage = response.usage
+          record = {
+              'kind': 'non_qualification_local_model_smoke',
+              'elapsed_seconds': round(elapsed, 6),
+              'prompt_tokens': getattr(usage, 'prompt_tokens', None),
+              'completion_tokens': getattr(usage, 'completion_tokens', None),
+              'total_tokens': getattr(usage, 'total_tokens', None),
+              'json_valid': True,
+              'ready': True,
+          }
+          Path('output/rq1c-local-model-smoke.json').write_text(
+              json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(record, sort_keys=True))
+
+      - name: Record exact local-provider environment
+        shell: python
+        run: |
+          import json
+          import os
+          import platform
+          import subprocess
+          from pathlib import Path
+
           head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          if head != os.environ['GITHUB_SHA']:
-              raise SystemExit('checkout HEAD does not match GITHUB_SHA')
           dirty = subprocess.check_output(
               ['git', 'status', '--porcelain=v1', '--untracked-files=no'], text=True
           ).strip()
+          if head != os.environ['GITHUB_SHA']:
+              raise SystemExit('checkout HEAD does not match GITHUB_SHA')
           if dirty:
               raise SystemExit('tracked checkout is dirty before qualification')
-
-          secrets_present = {
-              'openai': bool(os.environ.get('KEY_OPENAI', '').strip()),
-              'deepseek': bool(os.environ.get('KEY_DEEPSEEK', '').strip()),
-              'openrouter': bool(os.environ.get('KEY_OPENROUTER', '').strip()),
-              'siliconflow': bool(os.environ.get('KEY_SILICONFLOW', '').strip()),
-              'volcengine': bool(os.environ.get('KEY_VOLCENGINE', '').strip()),
-              'ark': bool(os.environ.get('KEY_ARK', '').strip()),
-          }
-
-          standard = [
-              ('openai', os.environ.get('KEY_OPENAI', ''), 'https://api.openai.com/v1',
-               ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1']),
-              ('deepseek', os.environ.get('KEY_DEEPSEEK', ''), 'https://api.deepseek.com/v1',
-               ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-v4']),
-              ('openrouter', os.environ.get('KEY_OPENROUTER', ''), 'https://openrouter.ai/api/v1',
-               ['deepseek/deepseek-v4-flash', 'openai/gpt-5-mini', 'openai/gpt-5',
-                'deepseek/deepseek-chat', 'openai/gpt-4.1-mini']),
-              ('siliconflow', os.environ.get('KEY_SILICONFLOW', ''), 'https://api.siliconflow.cn/v1',
-               ['deepseek-ai/DeepSeek-V4', 'deepseek-ai/DeepSeek-V3.1',
-                'Qwen/Qwen3-30B-A3B-Instruct-2507']),
-          ]
-
-          provider_label = ''
-          llm_profile = ''
-          key = ''
-          base_url = ''
-          model = ''
-          selection_notes = []
-
-          def list_models(candidate_key, candidate_base):
-              client = OpenAI(
-                  api_key=candidate_key,
-                  base_url=candidate_base,
-                  timeout=15,
-                  max_retries=0,
-              )
-              return sorted({
-                  str(item.id) for item in client.models.list().data
-                  if getattr(item, 'id', None)
-              })
-
-          for profile, candidate_key, candidate_base, preferences in standard:
-              if not candidate_key.strip():
-                  continue
-              try:
-                  ids = list_models(candidate_key, candidate_base)
-              except Exception as exc:
-                  selection_notes.append(f'{profile}_models_list_failed:{type(exc).__name__}')
-                  continue
-              chosen = next((item for item in preferences if item in ids), None)
-              if chosen is None:
-                  excluded = ('embed', 'audio', 'image', 'moderation', 'realtime', 'tts', 'whisper')
-                  candidates = [
-                      item for item in ids
-                      if not any(token in item.lower() for token in excluded)
-                      and any(token in item.lower() for token in ('gpt', 'deepseek', 'qwen', 'chat', 'instruct'))
-                  ]
-                  chosen = candidates[0] if candidates else None
-              if chosen:
-                  provider_label = profile
-                  llm_profile = profile
-                  key = candidate_key
-                  base_url = candidate_base
-                  model = chosen
-                  break
-
-          if not model:
-              ark_key = os.environ.get('KEY_VOLCENGINE', '').strip() or os.environ.get('KEY_ARK', '').strip()
-              if ark_key:
-                  ark_endpoints = [
-                      (
-                          'volcengine_coding_plan',
-                          'https://ark.cn-beijing.volces.com/api/coding/v3',
-                          ['doubao-seed-2.0-pro', 'ark-code-latest', 'doubao-seed-2.0-code',
-                           'deepseek-v3.2', 'kimi-k2.5', 'glm-4.7'],
-                      ),
-                      (
-                          'volcengine_online_inference',
-                          'https://ark.cn-beijing.volces.com/api/v3',
-                          [],
-                      ),
-                  ]
-                  for label, candidate_base, preferences in ark_endpoints:
-                      try:
-                          ids = list_models(ark_key, candidate_base)
-                      except Exception as exc:
-                          selection_notes.append(f'{label}_models_list_failed:{type(exc).__name__}')
-                          continue
-                      chosen = next((item for item in preferences if item in ids), None)
-                      if chosen is None:
-                          candidates = [
-                              item for item in ids
-                              if any(token in item.lower() for token in ('doubao', 'deepseek', 'qwen', 'kimi', 'glm', 'code'))
-                              and not any(token in item.lower() for token in ('embed', 'image', 'vision', 'audio'))
-                          ]
-                          pro_like = [item for item in candidates if 'pro' in item.lower()]
-                          chosen = (pro_like or candidates or [None])[0]
-                      if chosen:
-                          provider_label = label
-                          llm_profile = 'openai'
-                          key = ark_key
-                          base_url = candidate_base
-                          model = chosen
-                          break
-
           metadata = {
               'git_sha': head,
-              'configured_provider_secrets': secrets_present,
-              'selection_notes': selection_notes,
-              'provider_label': provider_label or None,
-              'llm_provider_profile': llm_profile or None,
-              'base_url': base_url or None,
-              'model': model or None,
-              'model_selection': 'authenticated_models_list_fixed_preference_then_deterministic_fallback',
+              'provider_profile': 'local',
+              'base_url': 'http://127.0.0.1:8000/v1',
+              'model_alias': os.environ['MODEL_ALIAS'],
+              'model_repo': os.environ['HF_MODEL_REPO'],
+              'model_file': os.environ['HF_MODEL_FILE'],
+              'model_sha256': os.environ['MODEL_SHA256'],
+              'model_bytes': int(os.environ['MODEL_BYTES']),
+              'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
+              'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],
+              'runner_arch': platform.machine(),
+              'runner_cpu_count': os.cpu_count(),
+              'server_context_tokens': 8192,
               'sdk_max_retries': 0,
-              'timeout_seconds': 20,
+              'provider_timeout_seconds': 20,
+              'smoke_is_qualification_evidence': False,
           }
-          (output / 'rq1c-live12-environment.json').write_text(
+          Path('output/rq1c-live12-environment.json').write_text(
               json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
-          print(json.dumps({k: v for k, v in metadata.items() if k != 'configured_provider_secrets'}, sort_keys=True))
-          if not model:
-              raise SystemExit('no configured provider produced a usable authenticated model list')
-
-          env_lines = {
-              'LLM_PROVIDER_PROFILE': llm_profile,
-              'OPENAI_API_KEY': key,
-              'OPENAI_BASE_URL': base_url,
-              'MODEL_FLASH_NAME': model,
-              'MODEL_PRO_NAME': model,
-              'OPENAI_MODEL_FLASH_NAME': model,
-              'OPENAI_MODEL_PRO_NAME': model,
-              'OPENAI_DEFAULT_MODEL_PROFILE': 'flash',
-          }
-          if llm_profile != 'openai':
-              prefix = llm_profile.upper()
-              env_lines.update({
-                  f'{prefix}_API_KEY': key,
-                  f'{prefix}_BASE_URL': base_url,
-                  f'{prefix}_MODEL_FLASH_NAME': model,
-                  f'{prefix}_MODEL_PRO_NAME': model,
-                  f'{prefix}_DEFAULT_MODEL_PROFILE': 'flash',
-              })
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
-              for name, value in env_lines.items():
-                  handle.write(f'{name}={value}\n')
+          print(json.dumps(metadata, sort_keys=True))
 
       - name: Run bounded live 12 runtime
         id: runtime
         shell: bash
         run: |
-          mkdir -p output
           set +e
           python tools/run_rq1c_bounded_qualification.py \
             --output output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
@@ -246,7 +235,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p output
           set +e
           if [ -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json ]; then
             python tools/run_rq1c_protocol_probes.py \
@@ -275,7 +263,6 @@ jobs:
           from pathlib import Path
 
           output = Path('output')
-          output.mkdir(parents=True, exist_ok=True)
           runtime_path = output / 'RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json'
           protocol_path = output / 'RQ1C_BOUNDED_PROTOCOL_PROBES.json'
           summary = {
@@ -308,6 +295,11 @@ jobs:
             output/rq1c-live12-execution-summary.json
             output/rq1c-live12-runtime.log
             output/rq1c-live12-protocol.log
+            output/rq1c-local-model-smoke.json
+            output/model-sha256.txt
+            output/llama-server-version.log
+            output/llama-server.log
+            output/llama-health.json
           if-no-files-found: warn
           retention-days: 14
 
