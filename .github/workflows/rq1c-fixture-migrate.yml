@@ -81,7 +81,7 @@ jobs:
               '                anchored_spans = ["release date"]',
           ])
           new_extract = "\n".join([
-              '            if claim_text in {"verified current release date", "current release date", "release date"}:',
+              '            if claim_text == "current release date":',
               '                locator = "2026-08-01"',
               '                anchored_spans = ["2026-08-01"]',
               '            else:',
@@ -91,6 +91,20 @@ jobs:
           if text.count(old_extract) != 1:
               raise SystemExit("expected extraction fixture branch exactly once")
           text = text.replace(old_extract, new_extract, 1)
+
+          old_h7 = "\n".join([
+              '        if "official project" in claim.text:',
+              '            assert row["locator"] == "2026-08-01"',
+              '            assert row["anchored_spans"] == ["2026-08-01"]',
+          ])
+          new_h7 = "\n".join([
+              '        if claim.text == "current release date":',
+              '            assert row["locator"] == "2026-08-01"',
+              '            assert row["anchored_spans"] == ["2026-08-01"]',
+          ])
+          if text.count(old_h7) != 1:
+              raise SystemExit("expected H7 claim-local anchor assertion exactly once")
+          text = text.replace(old_h7, new_h7, 1)
           active.write_text(text, encoding="utf-8")
 
           budget = Path("tests/test_claim_planner_execution_budget.py")
