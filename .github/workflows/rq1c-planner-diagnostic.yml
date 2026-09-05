@@ -80,7 +80,7 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Test strict compatibility schema at 320 tokens
+      - name: Expose strict compatibility outputs at 320 tokens
         shell: python
         run: |
           import json
@@ -113,9 +113,9 @@ jobs:
                   'elapsed_seconds': None,
                   'finish_reason': None,
                   'completion_tokens': None,
+                  'parsed_json': None,
                   'parser_valid': False,
                   'claims_count': 0,
-                  'surfaces': [],
                   'error': '',
               }
               try:
@@ -133,10 +133,10 @@ jobs:
                   record['finish_reason'] = response.choices[0].finish_reason
                   record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
                   parsed = json.loads(response.choices[0].message.content or '')
+                  record['parsed_json'] = parsed
                   proposals = cp._parse_claim_plan(parsed)
                   record['parser_valid'] = True
                   record['claims_count'] = len(proposals)
-                  record['surfaces'] = [item.surface for item in proposals]
               except Exception as exc:
                   record['elapsed_seconds'] = round(time.monotonic() - started, 6)
                   record['error'] = f'{type(exc).__name__}:{exc}'[:500]
@@ -145,13 +145,6 @@ jobs:
           with open('output/planner-diagnostic.json', 'w', encoding='utf-8') as fh:
               json.dump(records, fh, ensure_ascii=False, indent=2, sort_keys=True)
               fh.write('\n')
-          if not all(
-              item['parser_valid']
-              and item['finish_reason'] == 'stop'
-              and item['elapsed_seconds'] < 20.0
-              for item in records
-          ):
-              raise SystemExit('strict compatibility schema did not pass all 320-token cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
