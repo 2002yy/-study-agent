@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 from src.llm_client import _resolve_timeout, chat as _production_chat
 from tools import run_rq1c_bounded_qualification_impl as _impl
+from tools.rq1c_git_identity import exact_checkout_git_sha
 
 MAX_MODEL_CALLS = 6
 HARD_TIMEOUT_SECONDS = 60.0
@@ -36,7 +37,12 @@ _answer_stage_model_calls = _impl._answer_stage_model_calls
 _production_answer_surface = _impl._production_answer_surface
 _production_chat_command = _impl._production_chat_command
 _active_context = _impl._active_context
-_git_sha = _impl._git_sha
+def _git_sha() -> str:
+    return exact_checkout_git_sha(_impl.REPO_ROOT)
+
+
+# The implementation resolves git identity through its module global at call time.
+_impl._git_sha = _git_sha
 
 _ORIGINAL_RUN_CASE = _impl._run_case
 
