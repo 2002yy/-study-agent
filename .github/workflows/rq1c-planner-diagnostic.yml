@@ -80,26 +80,72 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Test critical and uniqueness schema constraints at 320 tokens
+      - name: Test positional critical-claim contract at 320 tokens
         shell: python
         run: |
-          from copy import deepcopy
           import json
           import time
           from openai import OpenAI
           import src.web.research.claim_planner as cp
 
-          response_format = deepcopy(cp._CLAIM_PLAN_RESPONSE_FORMAT)
-          claims_schema = response_format['json_schema']['schema']['properties']['claims']
-          claims_schema['uniqueItems'] = True
-          claims_schema['contains'] = {
-              'type': 'object',
-              'required': ['priority'],
-              'properties': {
-                  'priority': {'type': 'string', 'enum': ['critical']},
+          def claim_schema(kind, profiles):
+              return {
+                  'type': 'object',
+                  'additionalProperties': False,
+                  'required': ['surface', 'kind', 'policy_profile'],
+                  'properties': {
+                      'surface': {
+                          'type': 'string',
+                          'minLength': 1,
+                          'maxLength': 160,
+                      },
+                      'kind': {'type': 'string', 'enum': [kind]},
+                      'policy_profile': {'type': 'string', 'enum': list(profiles)},
+                  },
+              }
+
+          claim_union = {
+              'anyOf': [
+                  claim_schema(kind, profiles)
+                  for kind, profiles in cp._POLICY_PROFILES_BY_KIND.items()
+              ]
+          }
+          response_format = {
+              'type': 'json_schema',
+              'json_schema': {
+                  'name': 'research_runtime_claim_plan_positional',
+                  'strict': True,
+                  'schema': {
+                      'type': 'object',
+                      'additionalProperties': False,
+                      'required': ['schema_version', 'critical_claim', 'supporting_claims'],
+                      'properties': {
+                          'schema_version': {
+                              'type': 'string',
+                              'enum': [cp.RUNTIME_CLAIM_PLAN_SCHEMA_VERSION],
+                          },
+                          'critical_claim': claim_union,
+                          'supporting_claims': {
+                              'type': 'array',
+                              'minItems': 0,
+                              'maxItems': 5,
+                              'items': claim_union,
+                          },
+                      },
+                  },
               },
           }
-          claims_schema['minContains'] = 1
+          system_prompt = '''You are a research claim planner.
+Return one JSON object and no prose. The critical_claim is the single indispensable verification target needed to answer the supplied question. supporting_claims are optional and may be empty; add them only for genuinely distinct evidence-testable parts. A simple single-fact question should normally have no supporting claims; a comparison normally needs one or two. Never repeat or paraphrase the same target.
+Do not answer the question from memory and do not insert an unverified value into a claim. Write neutral verification targets.
+BAD: "The current stable Python release is 3.11.0."
+GOOD: "Identify the current stable Python release from an official source."
+BAD: "Release A is currently active."
+GOOD: "Verify the current official support status of release A."
+Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence thresholds. Choose exactly one compatible kind/policy_profile pair for each target:
+- factual: official_statement, current_fact, quantitative_claim, or community_sentiment
+- analytical: quantitative_claim, causal_analysis, or community_sentiment
+- research_question or hypothesis: exploratory_hypothesis only.'''
 
           questions = [
               'What is the current stable Python release?',
@@ -135,7 +181,7 @@ jobs:
                   response = client.chat.completions.create(
                       model='rq1c-qwen25-15b-instruct-q4km',
                       messages=[
-                          {'role': 'system', 'content': cp._CLAIM_SYSTEM_PROMPT},
+                          {'role': 'system', 'content': system_prompt},
                           {'role': 'user', 'content': payload},
                       ],
                       temperature=0,
@@ -147,7 +193,18 @@ jobs:
                   record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
                   parsed = json.loads(response.choices[0].message.content or '')
                   record['parsed_json'] = parsed
-                  proposals = cp._parse_claim_plan(parsed)
+                  claims = []
+                  critical = dict(parsed['critical_claim'])
+                  critical['priority'] = 'critical'
+                  claims.append(critical)
+                  for supporting in parsed['supporting_claims']:
+                      item = dict(supporting)
+                      item['priority'] = 'major'
+                      claims.append(item)
+                  proposals = cp._parse_claim_plan({
+                      'schema_version': parsed['schema_version'],
+                      'claims': claims,
+                  })
                   record['parser_valid'] = True
                   record['claims_count'] = len(proposals)
               except Exception as exc:
@@ -164,7 +221,7 @@ jobs:
               and item['elapsed_seconds'] < 20.0
               for item in records
           ):
-              raise SystemExit('critical/uniqueness schema constraints did not pass all cases')
+              raise SystemExit('positional claim contract did not pass all cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
