@@ -80,7 +80,7 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Expose synthetic strict-schema response and semantic parser result
+      - name: Test strict compatibility schema at 320 tokens
         shell: python
         run: |
           import json
@@ -88,51 +88,70 @@ jobs:
           from openai import OpenAI
           import src.web.research.claim_planner as cp
 
-          prompt = cp._CLAIM_SYSTEM_PROMPT + (
-              '\nUse the minimum number of claims needed. A simple single-fact question should '
-              'normally produce one claim; a comparison normally two or three. Use four to six '
-              'claims only when the question has genuinely distinct evidence-testable parts.'
+          questions = [
+              'What is the current stable Python release?',
+              'Compare the current official support status of two software releases.',
+              'What can be verified about an announced feature if independent confirmation is limited?',
+          ]
+          client = OpenAI(
+              api_key='local',
+              base_url='http://127.0.0.1:8001/v1',
+              timeout=20,
+              max_retries=0,
           )
-          question = 'What is the current stable Python release?'
-          payload = cp._claim_user_payload({
-              'question': question,
-              'reference_date': '2026-09-05',
-              'freshness_requested': False,
-              'freshness_days': None,
-          })
-          client = OpenAI(api_key='local', base_url='http://127.0.0.1:8001/v1', timeout=20, max_retries=0)
-          started = time.monotonic()
-          response = client.chat.completions.create(
-              model='rq1c-qwen25-15b-instruct-q4km',
-              messages=[
-                  {'role': 'system', 'content': prompt},
-                  {'role': 'user', 'content': payload},
-              ],
-              temperature=0,
-              max_tokens=448,
-              response_format=cp._CLAIM_PLAN_RESPONSE_FORMAT,
-          )
-          text = response.choices[0].message.content or ''
-          parsed = json.loads(text)
-          parser_error = ''
-          proposals = []
-          try:
-              proposals = cp._parse_claim_plan(parsed)
-          except Exception as exc:
-              parser_error = f'{type(exc).__name__}:{exc}'
-          record = {
-              'elapsed_seconds': round(time.monotonic() - started, 6),
-              'finish_reason': response.choices[0].finish_reason,
-              'completion_tokens': getattr(response.usage, 'completion_tokens', None),
-              'parsed_json': parsed,
-              'parser_error': parser_error,
-              'parser_valid': not parser_error,
-              'claims_count': len(proposals),
-          }
-          print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+          records = []
+          for index, question in enumerate(questions, start=1):
+              payload = cp._claim_user_payload({
+                  'question': question,
+                  'reference_date': '2026-09-05',
+                  'freshness_requested': False,
+                  'freshness_days': None,
+              })
+              started = time.monotonic()
+              record = {
+                  'case': index,
+                  'elapsed_seconds': None,
+                  'finish_reason': None,
+                  'completion_tokens': None,
+                  'parser_valid': False,
+                  'claims_count': 0,
+                  'surfaces': [],
+                  'error': '',
+              }
+              try:
+                  response = client.chat.completions.create(
+                      model='rq1c-qwen25-15b-instruct-q4km',
+                      messages=[
+                          {'role': 'system', 'content': cp._CLAIM_SYSTEM_PROMPT},
+                          {'role': 'user', 'content': payload},
+                      ],
+                      temperature=0,
+                      max_tokens=320,
+                      response_format=cp._CLAIM_PLAN_RESPONSE_FORMAT,
+                  )
+                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
+                  record['finish_reason'] = response.choices[0].finish_reason
+                  record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
+                  parsed = json.loads(response.choices[0].message.content or '')
+                  proposals = cp._parse_claim_plan(parsed)
+                  record['parser_valid'] = True
+                  record['claims_count'] = len(proposals)
+                  record['surfaces'] = [item.surface for item in proposals]
+              except Exception as exc:
+                  record['elapsed_seconds'] = round(time.monotonic() - started, 6)
+                  record['error'] = f'{type(exc).__name__}:{exc}'[:500]
+              records.append(record)
+              print(json.dumps(record, ensure_ascii=False, sort_keys=True))
           with open('output/planner-diagnostic.json', 'w', encoding='utf-8') as fh:
-              json.dump(record, fh, ensure_ascii=False, indent=2, sort_keys=True)
+              json.dump(records, fh, ensure_ascii=False, indent=2, sort_keys=True)
               fh.write('\n')
+          if not all(
+              item['parser_valid']
+              and item['finish_reason'] == 'stop'
+              and item['elapsed_seconds'] < 20.0
+              for item in records
+          ):
+              raise SystemExit('strict compatibility schema did not pass all 320-token cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
