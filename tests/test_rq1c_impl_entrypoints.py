@@ -27,6 +27,29 @@ def _stale_sha_env() -> dict[str, str]:
     return env
 
 
+def _run_imported_call(
+    *,
+    module_name: str,
+    call_source: str,
+    args: list[str],
+) -> subprocess.CompletedProcess[str]:
+    code = (
+        "import importlib, sys\n"
+        "from pathlib import Path\n"
+        "target = importlib.import_module(sys.argv[1])\n"
+        f"{call_source}\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code, module_name, *args],
+        cwd=REPO_ROOT,
+        env=_stale_sha_env(),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+
 @pytest.mark.parametrize(
     "script_name",
     [
@@ -60,6 +83,55 @@ def test_direct_qualification_internal_execution_cannot_bypass_guard(
     assert completed.returncode != 0
     assert _GIT_MISMATCH in completed.stderr
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "tools.run_rq1c_bounded_qualification_impl",
+        "tools.run_rq1c_bounded_qualification_core",
+    ],
+)
+def test_imported_qualification_run_cannot_bypass_exact_head_guard(
+    tmp_path: Path,
+    module_name: str,
+) -> None:
+    output = tmp_path / "runtime.json"
+    completed = _run_imported_call(
+        module_name=module_name,
+        call_source=(
+            "target.run_qualification("
+            "manifest_path=Path(sys.argv[2]), output_path=Path(sys.argv[3]))"
+        ),
+        args=[str(MANIFEST), str(output)],
+    )
+
+    assert completed.returncode != 0
+    assert _GIT_MISMATCH in completed.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "tools.run_rq1c_bounded_qualification_impl",
+        "tools.run_rq1c_bounded_qualification_core",
+    ],
+)
+def test_imported_qualification_case_hook_cannot_bypass_exact_head_guard(
+    module_name: str,
+) -> None:
+    completed = _run_imported_call(
+        module_name=module_name,
+        call_source=(
+            "target._run_case(case={}, repository=None, service=None, "
+            "chat_service=None, reference_date='2026-09-05')"
+        ),
+        args=[],
+    )
+
+    assert completed.returncode != 0
+    assert _GIT_MISMATCH in completed.stderr
 
 
 @pytest.mark.parametrize(
@@ -101,6 +173,44 @@ def test_direct_protocol_internal_execution_cannot_bypass_exact_head_guard(
         text=True,
         timeout=15,
         check=False,
+    )
+
+    assert completed.returncode != 0
+    assert _GIT_MISMATCH in completed.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "tools.run_rq1c_protocol_probes_impl",
+        "tools.run_rq1c_protocol_probes_core",
+    ],
+)
+def test_imported_protocol_run_cannot_bypass_exact_head_guard(
+    tmp_path: Path,
+    module_name: str,
+) -> None:
+    runtime = tmp_path / "runtime.json"
+    output = tmp_path / "protocol.json"
+    runtime.write_text(
+        json.dumps(
+            {
+                "schema_version": "rq1c-bounded-qualification-runtime-v1",
+                "cases": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    completed = _run_imported_call(
+        module_name=module_name,
+        call_source=(
+            "target.run_protocol_probes("
+            "runtime_path=Path(sys.argv[2]), output_path=Path(sys.argv[3]))"
+        ),
+        args=[str(runtime), str(output)],
     )
 
     assert completed.returncode != 0
