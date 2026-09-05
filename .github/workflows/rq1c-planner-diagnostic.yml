@@ -80,48 +80,67 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Run production planner diagnostic
+      - name: Run bounded production-planner candidate diagnostic
         shell: python
         run: |
           import json
           import time
+          import src.web.research.claim_planner as claim_planner_module
           from src.web.research.claim_planner import RuntimeClaimPlanner
           from src.web.research.contracts import ResearchBudget
           from src.web.research.model_gateway import ResearchModelGateway
 
-          budget = ResearchBudget(max_candidates=20, max_reads=8, soft_timeout_seconds=45, hard_timeout_seconds=60, max_total_chars=16000)
-          planner = RuntimeClaimPlanner(ResearchModelGateway(timeout_seconds=20.0))
-          started = time.monotonic()
-          result = planner.plan(
-              run_id='planner_diagnostic_1',
-              question='What is the current stable Python release?',
-              reference_date='2026-09-05',
-              budget=budget,
-              mode='active',
-              timeout_seconds=20.0,
+          claim_planner_module.CLAIM_PLANNER_MAX_TOKENS = 448
+          claim_planner_module._CLAIM_SYSTEM_PROMPT += (
+              '\nUse the minimum number of claims needed. A simple single-fact question should '
+              'normally produce one claim; a comparison normally two or three. Use four to six '
+              'claims only when the question has genuinely distinct evidence-testable parts.'
           )
-          audit = result.audits[0] if result.audits else None
-          record = {
-              'completed': result.completed,
-              'reason': result.reason,
-              'elapsed_seconds': round(time.monotonic() - started, 6),
-              'audit_count': len(result.audits),
-              'audit': None if audit is None else {
-                  'status': audit.status,
-                  'error_type': audit.error_type,
-                  'finish_reason': audit.finish_reason,
-                  'response_chars': audit.response_chars,
-                  'response_sha256': audit.response_sha256,
-                  'input_tokens': audit.input_tokens,
-                  'output_tokens': audit.output_tokens,
-                  'total_tokens': audit.total_tokens,
-                  'elapsed_seconds': audit.elapsed_seconds,
-              },
-          }
-          print(json.dumps(record, sort_keys=True))
+          budget = ResearchBudget(max_candidates=20, max_reads=8, soft_timeout_seconds=45, hard_timeout_seconds=60, max_total_chars=16000)
+          questions = [
+              'What is the current stable Python release?',
+              'Compare the current official support status of two software releases.',
+              'What can be verified about an announced feature if independent confirmation is limited?',
+          ]
+          records = []
+          for index, question in enumerate(questions, start=1):
+              planner = RuntimeClaimPlanner(ResearchModelGateway(timeout_seconds=20.0))
+              started = time.monotonic()
+              result = planner.plan(
+                  run_id=f'planner_candidate_{index}',
+                  question=question,
+                  reference_date='2026-09-05',
+                  budget=budget,
+                  mode='active',
+                  timeout_seconds=20.0,
+              )
+              audit = result.audits[0] if result.audits else None
+              record = {
+                  'case': index,
+                  'completed': result.completed,
+                  'reason': result.reason,
+                  'elapsed_seconds': round(time.monotonic() - started, 6),
+                  'claim_count': len(result.state.claims) if result.state is not None else 0,
+                  'audit_count': len(result.audits),
+                  'audit': None if audit is None else {
+                      'status': audit.status,
+                      'error_type': audit.error_type,
+                      'finish_reason': audit.finish_reason,
+                      'response_chars': audit.response_chars,
+                      'response_sha256': audit.response_sha256,
+                      'input_tokens': audit.input_tokens,
+                      'output_tokens': audit.output_tokens,
+                      'total_tokens': audit.total_tokens,
+                      'elapsed_seconds': audit.elapsed_seconds,
+                  },
+              }
+              records.append(record)
+              print(json.dumps(record, sort_keys=True))
           with open('output/planner-diagnostic.json', 'w', encoding='utf-8') as fh:
-              json.dump(record, fh, indent=2, sort_keys=True)
+              json.dump(records, fh, indent=2, sort_keys=True)
               fh.write('\n')
+          if not all(item['completed'] and item['elapsed_seconds'] < 20.0 and item['audit_count'] == 1 for item in records):
+              raise SystemExit('bounded planner candidate did not pass all diagnostic cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
