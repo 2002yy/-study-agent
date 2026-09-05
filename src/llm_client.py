@@ -424,11 +424,17 @@ def stream_chat(
     response_format: ResponseFormat | None = None,
     provider_profile: str | None = None,
     task_name: str | None = None,
+    request_max_retries: int | None = None,
 ) -> Iterator[str]:
     if not messages:
         return
 
     client = get_client(provider_profile=provider_profile)
+    request_client = (
+        client.with_options(max_retries=max(0, request_max_retries))
+        if request_max_retries is not None
+        else client
+    )
     request_kwargs = _build_request_kwargs(
         messages=messages,
         temperature=temperature,
@@ -441,7 +447,7 @@ def stream_chat(
         stream=True,
     )
     try:
-        response = client.chat.completions.create(**request_kwargs)
+        response = request_client.chat.completions.create(**request_kwargs)
     except Exception as e:
         raise RuntimeError(_classify_error(e)) from e
 
@@ -475,6 +481,7 @@ async def async_stream_chat(
     response_format: ResponseFormat | None = None,
     provider_profile: str | None = None,
     task_name: str | None = None,
+    request_max_retries: int | None = None,
 ) -> AsyncIterator[str]:
     """Stream provider output without blocking the server event loop."""
 
@@ -482,6 +489,11 @@ async def async_stream_chat(
         return
 
     client = get_async_client(provider_profile=provider_profile)
+    request_client = (
+        client.with_options(max_retries=max(0, request_max_retries))
+        if request_max_retries is not None
+        else client
+    )
     request_kwargs = _build_request_kwargs(
         messages=messages,
         temperature=temperature,
@@ -494,7 +506,7 @@ async def async_stream_chat(
         stream=True,
     )
     try:
-        response = await client.chat.completions.create(**request_kwargs)
+        response = await request_client.chat.completions.create(**request_kwargs)
     except Exception as e:
         raise RuntimeError(_classify_error(e)) from e
 
@@ -527,11 +539,17 @@ def chat(
     response_format: ResponseFormat | None = None,
     provider_profile: str | None = None,
     task_name: str | None = None,
+    request_max_retries: int | None = None,
 ) -> str:
     if not messages:
         return ""
 
     client = get_client(provider_profile=provider_profile)
+    request_client = (
+        client.with_options(max_retries=max(0, request_max_retries))
+        if request_max_retries is not None
+        else client
+    )
     request_kwargs = _build_request_kwargs(
         messages=messages,
         temperature=temperature,
@@ -544,7 +562,7 @@ def chat(
         stream=False,
     )
     try:
-        response = client.chat.completions.create(**request_kwargs)
+        response = request_client.chat.completions.create(**request_kwargs)
         return response.choices[0].message.content or ""
     except Exception as e:
         raise RuntimeError(_classify_error(e)) from e

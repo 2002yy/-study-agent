@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
+
+from src.web.research.evidence_gate import STRONG_EVIDENCE_THRESHOLD
+from src.web.research.steering import is_active_claim_engine_context
 
 _ITEM_FIELDS = (
     "title",
@@ -44,7 +47,6 @@ def research_sources_snapshot(run: Any) -> dict[str, Any]:
     Full snippets, extracted article content, query attempts, tokens, credentials
     and arbitrary provider payloads are intentionally excluded from ChatTurn truth.
     """
-
     context = getattr(run, "research_context", None)
     context = context if isinstance(context, dict) else {}
     read_summary = context.get("read_summary")
@@ -69,11 +71,7 @@ def research_sources_snapshot(run: Any) -> dict[str, Any]:
 
 
 def _safe_records(records: Iterable[Any]) -> list[dict[str, Any]]:
-    return [
-        safe
-        for record in records
-        if (safe := _safe_record(record)) is not None
-    ]
+    return [safe for record in records if (safe := _safe_record(record)) is not None]
 
 
 def _safe_record(record: Any) -> dict[str, Any] | None:
@@ -122,3 +120,134 @@ def _nonnegative_int(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+_BINDING_ROW_FIELDS = (
+    "evidence_id",
+    "claim_id",
+    "relation",
+    "strength",
+    "source_role",
+    "source_cluster_id",
+    "title",
+    "url",
+    "locator",
+    "published_at",
+)
+_BINDING_SEQUENCE_FIELDS = ("anchored_spans", "caveats")
+_MAX_BINDING_ROWS = 24
+_MAX_BINDING_SEQUENCE_ITEMS = 6
+_MAX_BINDING_ITEM_CHARS = 300
+_BINDING_CONTEXT_KEY = "claim_engine_evidence_brief"
+_BINDING_EVIDENCE_KEY = "eligible_evidence"
+def research_run_provenance(run: Any) -> bool:
+    """True when the server-side run object is a claim-engine ResearchRun."""
+    context = getattr(run, "research_context", None)
+    if not isinstance(context, dict):
+        return False
+    return is_active_claim_engine_context(context)
+
+
+def research_binding_rows(run: Any) -> list[dict[str, Any]]:
+    """Project claim-specific positive strong support from an Evidence Brief.
+
+    The Evidence Brief is broader than the binder support surface: it may carry
+    contradictions, qualifying evidence and partial/block gate state so the
+    synthesis model can explain uncertainty. Publication validation must not
+    convert those rows into support. This projection therefore requires an
+    explicit fully-passed Evidence Gate and retains the claim_id on every row.
+
+    Dedupe is by ``(claim_id, evidence_id)`` rather than evidence id alone: one
+    physical source can participate differently in multiple research claims,
+    and answer validation must never collapse those relations into one global
+    support truth.
+    """
+    context = getattr(run, "research_context", None)
+    context = context if isinstance(context, dict) else {}
+    brief = context.get(_BINDING_CONTEXT_KEY)
+    if not isinstance(brief, Mapping):
+        return []
+    if not _brief_allows_full_publication(brief):
+        return []
+    eligible = brief.get(_BINDING_EVIDENCE_KEY)
+    if not isinstance(eligible, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_row in eligible:
+        if not isinstance(raw_row, Mapping):
+            continue
+        if not _row_is_positive_strong_support(raw_row):
+            continue
+        evidence_id = _scalar_text(raw_row.get("evidence_id"))
+        claim_id = _scalar_text(raw_row.get("claim_id"))
+        if not evidence_id or not claim_id:
+            continue
+        key = (claim_id, evidence_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                field: _scalar_text(raw_row.get(field))
+                for field in _BINDING_ROW_FIELDS
+            }
+            | {
+                field: tuple(
+                    text
+                    for item in _sequence(raw_row.get(field))[
+                        : _MAX_BINDING_SEQUENCE_ITEMS
+                    ]
+                    if (text := _scalar_text(item)[:_MAX_BINDING_ITEM_CHARS])
+                )
+                for field in _BINDING_SEQUENCE_FIELDS
+            }
+        )
+        if len(rows) >= _MAX_BINDING_ROWS:
+            break
+    return rows
+
+
+def _brief_allows_full_publication(brief: Mapping[str, Any]) -> bool:
+    if _scalar_text(brief.get("schema_version")) != "research-evidence-brief-v1":
+        return False
+    if _scalar_text(brief.get("gate_status")) != "pass":
+        return False
+    if brief.get("conditional_wording_required") is not False:
+        return False
+    for key in ("unresolved_conflicts", "open_critical_claim_ids", "open_gap_ids"):
+        value = brief.get(key)
+        if not isinstance(value, (list, tuple)) or value:
+            return False
+    return True
+
+
+def _row_is_positive_strong_support(row: Mapping[str, Any]) -> bool:
+    if _scalar_text(row.get("relation")) != "supports":
+        return False
+    strength = _support_strength(row.get("strength"))
+    return strength is not None and strength >= STRONG_EVIDENCE_THRESHOLD
+
+
+def _support_strength(value: Any) -> float | None:
+    if isinstance(value, str) and value.strip().lower() == "strong":
+        return 1.0
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed > 1:
+        return None
+    return parsed
+
+
+def _sequence(value: Any) -> tuple[Any, ...]:
+    return tuple(value) if isinstance(value, (list, tuple)) else ()
+
+
+def _scalar_text(value: Any) -> str:
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return ""

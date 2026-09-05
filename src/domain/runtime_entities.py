@@ -9,6 +9,9 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from src.domain.answer_claims import normalize_answer_claim_snapshot_for_turn
+from src.domain.answer_validation import (
+    normalize_answer_validation_audit_for_turn,
+)
 from src.domain.evidence import ClaimEvidenceLinkV1, build_evidence_snapshot
 
 # G14 decision 1: first-version temporary attachment types. Text types reuse
@@ -91,6 +94,17 @@ class ChatTurn:
         self.rag_snapshot["evidence_snapshot"] = self._project_evidence_snapshot(
             claim_links=claim_snapshot.claim_links
         )
+        # Server-owned answer-stage model audit: rebuilt against the assistant
+        # message actually kept, so a client-shaped or stale audit never
+        # survives with forged fields.
+        audit = normalize_answer_validation_audit_for_turn(
+            raw=self.rag_snapshot.get("answer_validation_audit"),
+            assistant_message=self.assistant_message,
+        )
+        if audit is None:
+            self.rag_snapshot.pop("answer_validation_audit", None)
+        else:
+            self.rag_snapshot["answer_validation_audit"] = audit
 
     @property
     def answer_claim_snapshot(self) -> dict[str, Any]:
