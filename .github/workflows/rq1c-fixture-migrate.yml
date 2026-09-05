@@ -33,81 +33,88 @@ jobs:
         run: |
           from pathlib import Path
 
-          active = Path('tests/test_active_research_runtime.py')
-          text = active.read_text(encoding='utf-8')
+          active = Path("tests/test_active_research_runtime.py")
+          text = active.read_text(encoding="utf-8")
           start_marker = '        if "claim planner" in system:\n'
           end_marker = '        elif "search candidates" in system:\n'
           start = text.index(start_marker)
           end = text.index(end_marker, start)
-          replacement = '''        if "claim planner" in system:
-              question = str(request["question"])
-              critical_anchor = question if len(question) <= 160 else question[:160].rstrip()
-              supporting_claims: list[dict[str, str]] = []
-              if self.claims_count > 1:
-                  supporting_anchor = next(
-                      (
-                          anchor
-                          for anchor in ("verified current release date", "release date")
-                          if anchor in question and anchor != critical_anchor
-                      ),
-                      None,
-                  )
-                  if supporting_anchor is None:
-                      raise AssertionError(
-                          "multi-claim fixture requires a distinct question anchor"
-                      )
-                  supporting_claims.append(
-                      {
-                          "question_anchor": supporting_anchor,
-                          "kind": "factual",
-                          "policy_profile": "current_fact",
-                      }
-                  )
-              payload = {
-                  "schema_version": "research-runtime-claim-plan-v1",
-                  "critical_claim": {
-                      "question_anchor": critical_anchor,
-                      "kind": "factual",
-                      "policy_profile": "current_fact",
-                  },
-                  "supporting_claims": supporting_claims,
-              }
-'''
+          replacement = "\n".join([
+              '        if "claim planner" in system:',
+              '            question = str(request["question"])',
+              '            critical_anchor = question if len(question) <= 160 else question[:160].rstrip()',
+              '            supporting_claims: list[dict[str, str]] = []',
+              '            if self.claims_count > 1:',
+              '                supporting_anchor = next(',
+              '                    (',
+              '                        anchor',
+              '                        for anchor in ("verified current release date", "release date")',
+              '                        if anchor in question and anchor != critical_anchor',
+              '                    ),',
+              '                    None,',
+              '                )',
+              '                if supporting_anchor is None:',
+              '                    raise AssertionError(',
+              '                        "multi-claim fixture requires a distinct question anchor"',
+              '                    )',
+              '                supporting_claims.append(',
+              '                    {',
+              '                        "question_anchor": supporting_anchor,',
+              '                        "kind": "factual",',
+              '                        "policy_profile": "current_fact",',
+              '                    }',
+              '                )',
+              '            payload = {',
+              '                "schema_version": "research-runtime-claim-plan-v1",',
+              '                "critical_claim": {',
+              '                    "question_anchor": critical_anchor,',
+              '                    "kind": "factual",',
+              '                    "policy_profile": "current_fact",',
+              '                },',
+              '                "supporting_claims": supporting_claims,',
+              '            }',
+              '',
+          ])
           text = text[:start] + replacement + text[end:]
-          old_extract = '''            if "official project" in claim_text:
-                  locator = "2026-08-01"
-                  anchored_spans = ["2026-08-01"]
-              else:
-                  locator = "release date"
-                  anchored_spans = ["release date"]
-'''
-          new_extract = '''            if claim_text in {"verified current release date", "release date"}:
-                  locator = "2026-08-01"
-                  anchored_spans = ["2026-08-01"]
-              else:
-                  locator = "release date"
-                  anchored_spans = ["release date"]
-'''
-          if text.count(old_extract) != 1:
-              raise SystemExit('expected extraction fixture branch exactly once')
-          text = text.replace(old_extract, new_extract, 1)
-          active.write_text(text, encoding='utf-8')
 
-          budget = Path('tests/test_claim_planner_execution_budget.py')
-          text = budget.read_text(encoding='utf-8')
-          old_assert = '''    assert [(claim.text, claim.priority) for claim in result.state.claims] == [
-              ("verified current release date", "critical"),
-              ("release date", "major"),
-          ]
-'''
-          new_assert = '''    assert {(claim.text, claim.priority) for claim in result.state.claims} == {
-              ("verified current release date", "critical"),
-              ("release date", "major"),
-          }
-'''
+          old_extract = "\n".join([
+              '            if "official project" in claim_text:',
+              '                locator = "2026-08-01"',
+              '                anchored_spans = ["2026-08-01"]',
+              '            else:',
+              '                locator = "release date"',
+              '                anchored_spans = ["release date"]',
+          ])
+          new_extract = "\n".join([
+              '            if claim_text in {"verified current release date", "release date"}:',
+              '                locator = "2026-08-01"',
+              '                anchored_spans = ["2026-08-01"]',
+              '            else:',
+              '                locator = "release date"',
+              '                anchored_spans = ["release date"]',
+          ])
+          if text.count(old_extract) != 1:
+              raise SystemExit("expected extraction fixture branch exactly once")
+          text = text.replace(old_extract, new_extract, 1)
+          active.write_text(text, encoding="utf-8")
+
+          budget = Path("tests/test_claim_planner_execution_budget.py")
+          text = budget.read_text(encoding="utf-8")
+          old_assert = "\n".join([
+              '    assert [(claim.text, claim.priority) for claim in result.state.claims] == [',
+              '        ("verified current release date", "critical"),',
+              '        ("release date", "major"),',
+              '    ]',
+          ])
+          new_assert = "\n".join([
+              '    assert {(claim.text, claim.priority) for claim in result.state.claims} == {',
+              '        ("verified current release date", "critical"),',
+              '        ("release date", "major"),',
+              '    }',
+          ])
           if text.count(old_assert) != 1:
-              raise SystemExit('expected priority assertion exactly once')
-          budget.write_text(text.replace(old_assert, new_assert, 1), encoding='utf-8')
+              raise SystemExit("expected priority assertion exactly once")
+          budget.write_text(text.replace(old_assert, new_assert, 1), encoding="utf-8")
       - name: Run focused planner/runtime tests
         run: pytest -q tests/test_claim_planner_execution_budget.py tests/test_active_research_runtime.py
       - name: Run focused Ruff
