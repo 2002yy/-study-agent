@@ -24,6 +24,7 @@ from src.application.chat_service import (
     _poll_cancel,
     _preferred_partial_reply,
     _previous_assistant_role,
+    _route_generation_calls,
     _session_settings,
     _tool_context,
     _web_context_provenance,
@@ -334,7 +335,8 @@ class ExternalDataPolicyChatService(ChatService):
         reserved_existing = existing
         if existing is None:
             self.repository.add_chat_turn(
-                ChatTurn(                    id=turn_id,
+                ChatTurn(
+                    id=turn_id,
                     thread_id=thread.id,
                     user_message=command.user_input,
                     assistant_message="",
@@ -789,6 +791,12 @@ class ExternalDataPolicyChatService(ChatService):
         refreshed = _refresh_execution_truth({**current, "external_calls": calls})
         prepared.route["external_data_policy"] = refreshed
         prepared.rag["external_data_policy"] = refreshed
+        if status == "attempted":
+            # Stage the outbound audit in memory only. The generation-start CAS
+            # below persists this snapshot together with the physical call count,
+            # so cancellation and provider-start accounting share one linearization
+            # point instead of reporting egress before a call actually starts.
+            return
         self.repository.update_chat_turn(
             prepared.turn.id,
             assistant_message=prepared.turn.assistant_message,
@@ -801,6 +809,37 @@ class ExternalDataPolicyChatService(ChatService):
             expected_status="streaming",
             forbid_cancel_requested=True,
         )
+
+    def _begin_generation_call(self, prepared: PreparedChatTurn) -> bool:
+        """Atomically reserve provider start and persist G16 answer egress truth."""
+        operation_id = prepared.turn.operation_id or ""
+        next_calls = _route_generation_calls(prepared.route) + 1
+        route_snapshot = {
+            **prepared.route,
+            "answer_generation_calls": next_calls,
+        }
+        try:
+            updated = self.repository.update_chat_turn(
+                prepared.turn.id,
+                assistant_message=prepared.turn.assistant_message,
+                status="streaming",
+                route_snapshot=route_snapshot,
+                rag_snapshot=prepared.rag,
+                expected_operation_id=operation_id,
+                enforce_operation_owner=True,
+                expected_status="streaming",
+                forbid_cancel_requested=True,
+            )
+        except ValueError:
+            if operation_id and self.repository.turn_cancel_requested(
+                prepared.turn.id, operation_id
+            ):
+                return False
+            raise
+        if updated is None:
+            raise RuntimeError(f"Chat turn disappeared: {prepared.turn.id}")
+        prepared.route["answer_generation_calls"] = next_calls
+        return True
 
     def generate(self, prepared: PreparedChatTurn) -> str:
         self._record_answer_call(prepared, "attempted")
