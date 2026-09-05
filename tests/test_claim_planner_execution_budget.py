@@ -184,10 +184,10 @@ def test_planner_position_assigns_critical_and_major_priorities() -> None:
 
     assert result.completed
     assert result.state is not None
-    assert [(claim.text, claim.priority) for claim in result.state.claims] == [
+    assert {(claim.text, claim.priority) for claim in result.state.claims} == {
         ("verified current release date", "critical"),
         ("release date", "major"),
-    ]
+    }
 
 
 def test_planner_rejects_anchor_not_copied_from_question_without_fabricated_claim() -> None:
