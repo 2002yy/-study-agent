@@ -5,8 +5,28 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.web.research.claim_planner import (
+    RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+    _parse_claim_plan,
+)
 from tools.rq1c_qualification_guardrails import _planner_observability
 from tools.run_rq1c_planner_diagnostic import classify_planner_failure
+
+
+def _claim(anchor: str, *, kind: str = "factual", profile: str = "current_fact") -> dict:
+    return {
+        "question_anchor": anchor,
+        "kind": kind,
+        "policy_profile": profile,
+    }
+
+
+def _plan(critical: dict, supporting: list[dict]) -> dict:
+    return {
+        "schema_version": RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
+        "critical_claim": critical,
+        "supporting_claims": supporting,
+    }
 
 
 def test_planner_observability_projects_only_safe_attempt_metadata() -> None:
@@ -85,3 +105,62 @@ def test_classify_planner_failure_uses_stable_safe_taxonomy(
     exc: BaseException, expected: str
 ) -> None:
     assert classify_planner_failure(exc) == expected
+
+
+def test_duplicate_optional_supporting_anchor_is_discarded() -> None:
+    question = "What is the current Bank Rate?"
+    raw = _plan(
+        _claim(question, profile="quantitative_claim"),
+        [_claim(question, profile="quantitative_claim")],
+    )
+
+    proposals = _parse_claim_plan(raw, question=question)
+
+    assert len(proposals) == 1
+    assert proposals[0].priority == "critical"
+    assert proposals[0].surface == question
+
+
+def test_nonverbatim_optional_supporting_anchor_is_discarded() -> None:
+    question = "Which PostgreSQL releases are currently supported?"
+    raw = _plan(
+        _claim(question),
+        [_claim("PostgreSQL end-of-life policy")],
+    )
+
+    proposals = _parse_claim_plan(raw, question=question)
+
+    assert len(proposals) == 1
+    assert proposals[0].surface == question
+
+
+def test_critical_anchor_remains_fail_closed() -> None:
+    question = "Which PostgreSQL releases are currently supported?"
+    raw = _plan(_claim("PostgreSQL support table"), [])
+
+    with pytest.raises(ValueError, match="copied from user question"):
+        _parse_claim_plan(raw, question=question)
+
+
+def test_distinct_valid_supporting_claim_is_retained() -> None:
+    question = "Compare Python 3.13 and Python 3.14 support."
+    raw = _plan(
+        _claim("Python 3.13"),
+        [_claim("Python 3.14")],
+    )
+
+    proposals = _parse_claim_plan(raw, question=question)
+
+    assert [proposal.surface for proposal in proposals] == ["Python 3.13", "Python 3.14"]
+    assert [proposal.priority for proposal in proposals] == ["critical", "major"]
+
+
+def test_valid_supporting_anchor_does_not_bypass_policy_validation() -> None:
+    question = "Compare Python 3.13 and Python 3.14 support."
+    raw = _plan(
+        _claim("Python 3.13"),
+        [_claim("Python 3.14", profile="causal_analysis")],
+    )
+
+    with pytest.raises(ValueError):
+        _parse_claim_plan(raw, question=question)
