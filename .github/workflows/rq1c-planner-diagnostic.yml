@@ -80,13 +80,26 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Expose strict compatibility outputs at 320 tokens
+      - name: Test critical and uniqueness schema constraints at 320 tokens
         shell: python
         run: |
+          from copy import deepcopy
           import json
           import time
           from openai import OpenAI
           import src.web.research.claim_planner as cp
+
+          response_format = deepcopy(cp._CLAIM_PLAN_RESPONSE_FORMAT)
+          claims_schema = response_format['json_schema']['schema']['properties']['claims']
+          claims_schema['uniqueItems'] = True
+          claims_schema['contains'] = {
+              'type': 'object',
+              'required': ['priority'],
+              'properties': {
+                  'priority': {'type': 'string', 'enum': ['critical']},
+              },
+          }
+          claims_schema['minContains'] = 1
 
           questions = [
               'What is the current stable Python release?',
@@ -127,7 +140,7 @@ jobs:
                       ],
                       temperature=0,
                       max_tokens=320,
-                      response_format=cp._CLAIM_PLAN_RESPONSE_FORMAT,
+                      response_format=response_format,
                   )
                   record['elapsed_seconds'] = round(time.monotonic() - started, 6)
                   record['finish_reason'] = response.choices[0].finish_reason
@@ -145,6 +158,13 @@ jobs:
           with open('output/planner-diagnostic.json', 'w', encoding='utf-8') as fh:
               json.dump(records, fh, ensure_ascii=False, indent=2, sort_keys=True)
               fh.write('\n')
+          if not all(
+              item['parser_valid']
+              and item['finish_reason'] == 'stop'
+              and item['elapsed_seconds'] < 20.0
+              for item in records
+          ):
+              raise SystemExit('critical/uniqueness schema constraints did not pass all cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
