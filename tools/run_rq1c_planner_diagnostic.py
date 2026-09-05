@@ -115,6 +115,67 @@ def classify_planner_failure(exc: BaseException) -> str:
     return f"other:{error_type}"[:120]
 
 
+def _anchor_structure(decoded: Any, *, question: str) -> dict[str, Any]:
+    """Describe anchor validity without exposing model-selected anchor text."""
+
+    if not isinstance(decoded, Mapping):
+        return {"claims": [], "critical_valid": False}
+    critical = decoded.get("critical_claim")
+    supporting = decoded.get("supporting_claims")
+    raw_claims: list[tuple[str, Any]] = [("critical", critical)]
+    if isinstance(supporting, list):
+        raw_claims.extend((f"supporting:{index}", item) for index, item in enumerate(supporting))
+
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for role, raw in raw_claims:
+        if not isinstance(raw, Mapping):
+            rows.append(
+                {
+                    "role": role,
+                    "object": False,
+                    "anchor_length": None,
+                    "anchor_sha256": "",
+                    "verbatim": False,
+                    "duplicate": False,
+                }
+            )
+            continue
+        anchor = " ".join(str(raw.get("question_anchor") or "").split())
+        dedupe_key = " ".join(anchor.casefold().split())
+        duplicate = bool(dedupe_key and dedupe_key in seen)
+        if dedupe_key:
+            seen.add(dedupe_key)
+        rows.append(
+            {
+                "role": role,
+                "object": True,
+                "anchor_length": len(anchor),
+                "anchor_sha256": _sha256(anchor) if anchor else "",
+                "verbatim": bool(anchor and anchor in question),
+                "duplicate": duplicate,
+            }
+        )
+    critical_row = rows[0] if rows else {}
+    return {
+        "claims": rows,
+        "critical_valid": bool(
+            critical_row.get("object")
+            and critical_row.get("verbatim")
+            and not critical_row.get("duplicate")
+        ),
+        "supporting_count": max(0, len(rows) - 1),
+        "invalid_verbatim_roles": [
+            str(row["role"])
+            for row in rows
+            if row.get("object") and not row.get("verbatim")
+        ],
+        "duplicate_roles": [
+            str(row["role"]) for row in rows if row.get("duplicate")
+        ],
+    }
+
+
 def _planner_client() -> tuple[OpenAI, str]:
     base_url = (os.getenv("RESEARCH_CLAIM_PLANNER_BASE_URL") or "").strip()
     model_name = (os.getenv("RESEARCH_CLAIM_PLANNER_MODEL_NAME") or "").strip()
@@ -147,6 +208,7 @@ def _run_case(
     error_type = ""
     claim_count = 0
     status = "failed"
+    structure: dict[str, Any] = {"claims": [], "critical_valid": False}
     try:
         response = client.chat.completions.create(
             model=model_name,
@@ -172,6 +234,7 @@ def _run_case(
         output_tokens = _usage_value(usage, "completion_tokens")
         total_tokens = _usage_value(usage, "total_tokens")
         decoded = json.loads(_strip_json_fence(raw))
+        structure = _anchor_structure(decoded, question=case["question"])
         proposals = claim_planner._parse_claim_plan(decoded, question=case["question"])
         claim_count = len(proposals)
         status = "completed"
@@ -191,6 +254,7 @@ def _run_case(
         "response_chars": response_chars,
         "response_sha256": response_sha256,
         "claim_count": claim_count,
+        "anchor_structure": structure,
         "elapsed_seconds": round(max(0.0, time.monotonic() - started), 6),
     }
 
