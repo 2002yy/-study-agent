@@ -135,17 +135,24 @@ jobs:
                   },
               },
           }
-          system_prompt = '''You are a research claim planner.
-Return one JSON object and no prose. The critical_claim is the single indispensable verification target needed to answer the supplied question. supporting_claims are optional and may be empty; add them only for genuinely distinct evidence-testable parts. A simple single-fact question should normally have no supporting claims; a comparison normally needs one or two. Never repeat or paraphrase the same target.
-Do not answer the question from memory and do not insert an unverified value into a claim. Write neutral verification targets.
-BAD: "The current stable Python release is 3.11.0."
-GOOD: "Identify the current stable Python release from an official source."
-BAD: "Release A is currently active."
-GOOD: "Verify the current official support status of release A."
-Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence thresholds. Choose exactly one compatible kind/policy_profile pair for each target:
-- factual: official_statement, current_fact, quantitative_claim, or community_sentiment
-- analytical: quantitative_claim, causal_analysis, or community_sentiment
-- research_question or hypothesis: exploratory_hypothesis only.'''
+          system_prompt = (
+              'You are a research claim planner. Return one JSON object and no prose. '
+              'critical_claim is the single indispensable verification target needed to answer '
+              'the supplied question. supporting_claims are optional and may be empty; add them '
+              'only for genuinely distinct evidence-testable parts. A simple single-fact question '
+              'should normally have no supporting claims; a comparison normally needs one or two. '
+              'Never repeat or paraphrase the same target. Do not answer the question from memory '
+              'and do not insert an unverified value into a claim. Write neutral verification targets. '
+              'BAD: The current stable Python release is 3.11.0. '
+              'GOOD: Identify the current stable Python release from an official source. '
+              'BAD: Release A is currently active. '
+              'GOOD: Verify the current official support status of release A. '
+              'Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence thresholds. '
+              'Choose exactly one compatible kind/policy_profile pair for each target. '
+              'factual supports official_statement, current_fact, quantitative_claim, or community_sentiment; '
+              'analytical supports quantitative_claim, causal_analysis, or community_sentiment; '
+              'research_question or hypothesis supports exploratory_hypothesis only.'
+          )
 
           questions = [
               'What is the current stable Python release?',
