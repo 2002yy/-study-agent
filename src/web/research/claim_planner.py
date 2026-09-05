@@ -39,7 +39,7 @@ from src.web.research.policy import evidence_policy_for_claim
 
 RUNTIME_CLAIM_PLAN_SCHEMA_VERSION = "research-runtime-claim-plan-v1"
 MAX_RUNTIME_CLAIMS = 6
-CLAIM_PLANNER_MAX_TOKENS = 448
+CLAIM_PLANNER_MAX_TOKENS = 320
 CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION = 1
 
 _CLAIM_KINDS = {"research_question", "hypothesis", "factual", "analytical"}
@@ -66,17 +66,18 @@ _POLICY_PROFILES = {
 }
 
 _CLAIM_SYSTEM_PROMPT = """You are a research claim planner.
-Return one JSON object and no prose. Decompose only the supplied user question
-into independently evidence-testable claims. Use the minimum number of claims
-needed: a simple single-fact question should normally produce one claim, a
-comparison normally two or three, and four to six only when the question has
-genuinely distinct evidence-testable parts. Never repeat or paraphrase the same
-claim to fill the plan. At least one claim must be critical. Keep every claim
-surface concise (at most 160 characters). Do not guess or pre-answer unknown
-facts; express unknowns as neutral verification targets. Do not invent evidence,
-sources, URLs, identifiers, freshness rules, or evidence thresholds. The
-runtime will assign identifiers and evidence policy. Choose exactly one
-compatible policy_profile for each claim.
+Return one JSON object and no prose. For every claim, question_anchor MUST be
+copied verbatim as one contiguous substring of the supplied question. Never
+write an answer, inferred value, new entity, or paraphrase into question_anchor.
+Choose an evidence-bearing span that includes the subject and requested
+attribute, not an isolated word. critical_claim is the single indispensable
+verification target. supporting_claims are optional and may be empty. Add a
+supporting claim ONLY when the question itself contains a distinct contiguous
+evidence-bearing span different from the critical anchor. If no distinct span
+exists, supporting_claims MUST be empty, even for a comparison. Never reuse an
+anchor. Do not invent evidence, sources, URLs, identifiers, freshness rules, or
+evidence thresholds. Choose exactly one compatible kind/policy_profile pair for
+each claim.
 Compatibility rules:
 - factual: official_statement, current_fact, quantitative_claim, or community_sentiment
 - analytical: quantitative_claim, causal_analysis, or community_sentiment
@@ -89,13 +90,12 @@ def _claim_item_schema(*, kind: str, profiles: tuple[str, ...]) -> dict[str, Any
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "surface",
+            "question_anchor",
             "kind",
-            "priority",
             "policy_profile",
         ],
         "properties": {
-            "surface": {
+            "question_anchor": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 160,
@@ -103,10 +103,6 @@ def _claim_item_schema(*, kind: str, profiles: tuple[str, ...]) -> dict[str, Any
             "kind": {
                 "type": "string",
                 "enum": [kind],
-            },
-            "priority": {
-                "type": "string",
-                "enum": sorted(_CLAIM_PRIORITIES),
             },
             "policy_profile": {
                 "type": "string",
@@ -116,6 +112,13 @@ def _claim_item_schema(*, kind: str, profiles: tuple[str, ...]) -> dict[str, Any
     }
 
 
+_CLAIM_ITEM_UNION_SCHEMA: dict[str, Any] = {
+    "anyOf": [
+        _claim_item_schema(kind=kind, profiles=profiles)
+        for kind, profiles in _POLICY_PROFILES_BY_KIND.items()
+    ]
+}
+
 _CLAIM_PLAN_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
@@ -124,22 +127,22 @@ _CLAIM_PLAN_RESPONSE_FORMAT: dict[str, Any] = {
         "schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["schema_version", "claims"],
+            "required": [
+                "schema_version",
+                "critical_claim",
+                "supporting_claims",
+            ],
             "properties": {
                 "schema_version": {
                     "type": "string",
                     "enum": [RUNTIME_CLAIM_PLAN_SCHEMA_VERSION],
                 },
-                "claims": {
+                "critical_claim": _CLAIM_ITEM_UNION_SCHEMA,
+                "supporting_claims": {
                     "type": "array",
-                    "minItems": 1,
-                    "maxItems": MAX_RUNTIME_CLAIMS,
-                    "items": {
-                        "anyOf": [
-                            _claim_item_schema(kind=kind, profiles=profiles)
-                            for kind, profiles in _POLICY_PROFILES_BY_KIND.items()
-                        ]
-                    },
+                    "minItems": 0,
+                    "maxItems": MAX_RUNTIME_CLAIMS - 1,
+                    "items": _CLAIM_ITEM_UNION_SCHEMA,
                 },
             },
         },
@@ -276,7 +279,7 @@ class RuntimeClaimPlanner:
             ],
             audit_payload=audit_payload,
             response_schema_version=RUNTIME_CLAIM_PLAN_SCHEMA_VERSION,
-            parse=_parse_claim_plan,
+            parse=lambda raw: _parse_claim_plan(raw, question=normalized_question),
             data_categories=("user_question", "research_time_context"),
             data_counts={
                 "user_question": 1,
@@ -345,33 +348,39 @@ def _claim_planner_gateway(shared: ResearchModelGateway) -> ResearchModelGateway
     return gateway
 
 
-def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
+def _parse_claim_plan(raw: Any, *, question: str) -> tuple[ProposedClaim, ...]:
     data = _strict_mapping(
         raw,
-        {"schema_version", "claims"},
+        {"schema_version", "critical_claim", "supporting_claims"},
         "runtime claim plan",
     )
     if data.get("schema_version") != RUNTIME_CLAIM_PLAN_SCHEMA_VERSION:
         raise ValueError("unsupported runtime claim plan schema")
-    claims_raw = data.get("claims")
-    if not isinstance(claims_raw, list) or not 1 <= len(claims_raw) <= MAX_RUNTIME_CLAIMS:
-        raise ValueError("runtime claim plan must contain one to six claims")
+
+    supporting_raw = data.get("supporting_claims")
+    if not isinstance(supporting_raw, list) or len(supporting_raw) > MAX_RUNTIME_CLAIMS - 1:
+        raise ValueError("runtime claim plan must contain zero to five supporting claims")
+
+    raw_claims = [(data.get("critical_claim"), "critical")]
+    raw_claims.extend((item, "major") for item in supporting_raw)
 
     proposals: list[ProposedClaim] = []
     seen: set[str] = set()
-    for raw_claim in claims_raw:
+    for raw_claim, priority in raw_claims:
         claim = _strict_mapping(
             raw_claim,
-            {"surface", "kind", "priority", "policy_profile"},
+            {"question_anchor", "kind", "policy_profile"},
             "runtime claim",
         )
-        surface = _required_text(claim.get("surface"), 160, "claim surface")
+        surface = _canonical_question_anchor(
+            claim.get("question_anchor"),
+            question=question,
+        )
         dedupe_key = " ".join(surface.casefold().split())
         if dedupe_key in seen:
-            raise ValueError("runtime claim plan contains duplicate claims")
+            raise ValueError("runtime claim plan contains duplicate anchors")
         seen.add(dedupe_key)
         kind = _enum(claim.get("kind"), _CLAIM_KINDS, "claim kind")
-        priority = _enum(claim.get("priority"), _CLAIM_PRIORITIES, "claim priority")
         profile = _enum(
             claim.get("policy_profile"), _POLICY_PROFILES, "evidence policy profile"
         )
@@ -391,9 +400,18 @@ def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
                 policy_profile=profile,
             )
         )
-    if not any(item.priority == "critical" for item in proposals):
-        raise ValueError("runtime claim plan requires at least one critical claim")
     return tuple(proposals)
+
+
+def _canonical_question_anchor(value: Any, *, question: str) -> str:
+    anchor = " ".join(str(value or "").split())
+    if not anchor:
+        raise ValueError("question anchor must be non-empty")
+    if len(anchor) > 160:
+        raise ValueError("question anchor exceeds 160 characters")
+    if anchor not in question:
+        raise ValueError("question anchor must be copied from user question")
+    return anchor
 
 
 def _build_initial_state(
