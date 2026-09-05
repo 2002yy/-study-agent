@@ -129,9 +129,10 @@ def _budget() -> ResearchBudget:
 
 def _valid_claim_payload() -> str:
     return (
-        '{"schema_version":"research-runtime-claim-plan-v1","claims":['
-        '{"surface":"What is the current API rate limit?","kind":"factual",'
-        '"priority":"critical","policy_profile":"current_fact"}]}'
+        '{"schema_version":"research-runtime-claim-plan-v1",'
+        '"critical_claim":{"question_anchor":"What is the current API rate limit?",'
+        '"kind":"factual","policy_profile":"current_fact"},'
+        '"supporting_claims":[]}'
     )
 
 
@@ -309,19 +310,20 @@ def test_claim_planner_requests_bounded_completion_budget() -> None:
     "payload",
     [
         (
-            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
-            '{"surface":"Explain the cause","kind":"factual",'
-            '"priority":"critical","policy_profile":"causal_analysis"}]}'
+            '{"schema_version":"research-runtime-claim-plan-v1",'
+            '"critical_claim":{"question_anchor":"Question","kind":"factual",'
+            '"policy_profile":"causal_analysis"},"supporting_claims":[]}'
         ),
         (
-            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
-            '{"surface":"A fact","kind":"factual","priority":"major",'
-            '"policy_profile":"current_fact"}]}'
+            '{"schema_version":"research-runtime-claim-plan-v1",'
+            '"critical_claim":{"question_anchor":"Not in question","kind":"factual",'
+            '"policy_profile":"current_fact"},"supporting_claims":[]}'
         ),
         (
-            '{"schema_version":"research-runtime-claim-plan-v1","claims":['
-            '{"surface":"A fact","kind":"factual","priority":"critical",'
-            '"policy_profile":"current_fact","evidence_id":"model-owned"}]}'
+            '{"schema_version":"research-runtime-claim-plan-v1",'
+            '"critical_claim":{"question_anchor":"Question","kind":"factual",'
+            '"policy_profile":"current_fact","evidence_id":"model-owned"},'
+            '"supporting_claims":[]}'
         ),
     ],
 )
