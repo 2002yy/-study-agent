@@ -14,6 +14,7 @@ from src.web.research.claim_planner import (
 )
 from src.web.research.contracts import ResearchBudget
 from src.web.research.model_gateway import ResearchModelGateway
+from src.web.research.policy import evidence_policy_for_claim
 
 
 class _StructuredClient:
@@ -58,20 +59,26 @@ def _budget() -> ResearchBudget:
     )
 
 
+def _plan_payload(
+    *,
+    critical_anchor: str = "verified current release date",
+    critical_kind: str = "factual",
+    critical_profile: str = "current_fact",
+    supporting: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "research-runtime-claim-plan-v1",
+        "critical_claim": {
+            "question_anchor": critical_anchor,
+            "kind": critical_kind,
+            "policy_profile": critical_profile,
+        },
+        "supporting_claims": supporting or [],
+    }
+
+
 def _valid_plan(*, fenced: bool = False) -> str:
-    payload = json.dumps(
-        {
-            "schema_version": "research-runtime-claim-plan-v1",
-            "claims": [
-                {
-                    "surface": "Verify the current official release date",
-                    "kind": "factual",
-                    "priority": "critical",
-                    "policy_profile": "current_fact",
-                }
-            ],
-        }
-    )
+    payload = json.dumps(_plan_payload())
     if fenced:
         return f"```json\n{payload}\n```"
     return payload
@@ -89,7 +96,7 @@ def _plan(planner: RuntimeClaimPlanner, *, attempt_start: int = 1) -> Any:
     )
 
 
-def test_planner_has_small_output_budget_schema_and_does_not_mutate_shared_retry_budget() -> None:
+def test_planner_has_small_anchored_schema_and_does_not_mutate_shared_retry_budget() -> None:
     client = _StructuredClient(_valid_plan(fenced=True))
     shared = ResearchModelGateway(
         client=client,
@@ -106,9 +113,163 @@ def test_planner_has_small_output_budget_schema_and_does_not_mutate_shared_retry
     response_format = client.calls[0]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
-    assert response_format["json_schema"]["schema"]["additionalProperties"] is False
+    schema = response_format["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == [
+        "schema_version",
+        "critical_claim",
+        "supporting_claims",
+    ]
+    critical_branches = schema["properties"]["critical_claim"]["anyOf"]
+    assert all("priority" not in branch["properties"] for branch in critical_branches)
+    assert all("question_anchor" in branch["properties"] for branch in critical_branches)
     assert planner.model_gateway.max_attempts == CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION == 1
     assert shared.max_attempts == 2
+
+    assert result.state is not None
+    assert len(result.state.claims) == 1
+    assert result.state.claims[0].text == "verified current release date"
+    assert result.state.claims[0].priority == "critical"
+
+
+def test_planner_schema_policy_pairs_match_code_owned_policy_validation() -> None:
+    schema = claim_planner_module._CLAIM_PLAN_RESPONSE_FORMAT["json_schema"]["schema"]
+    branches = schema["properties"]["critical_claim"]["anyOf"]
+    schema_pairs = {
+        (branch["properties"]["kind"]["enum"][0], profile)
+        for branch in branches
+        for profile in branch["properties"]["policy_profile"]["enum"]
+    }
+
+    accepted_pairs: set[tuple[str, str]] = set()
+    for kind in claim_planner_module._CLAIM_KINDS:
+        for profile in claim_planner_module._POLICY_PROFILES:
+            try:
+                evidence_policy_for_claim(
+                    kind=kind,  # type: ignore[arg-type]
+                    priority="critical",
+                    profile=profile,  # type: ignore[arg-type]
+                )
+            except ValueError:
+                continue
+            accepted_pairs.add((kind, profile))
+
+    assert schema_pairs == accepted_pairs
+
+
+def test_planner_position_assigns_critical_and_major_priorities() -> None:
+    client = _StructuredClient(
+        json.dumps(
+            _plan_payload(
+                supporting=[
+                    {
+                        "question_anchor": "release date",
+                        "kind": "factual",
+                        "policy_profile": "official_statement",
+                    }
+                ]
+            )
+        )
+    )
+
+    result = _plan(
+        RuntimeClaimPlanner(
+            ResearchModelGateway(
+                client=client,
+                model_name="shared-model",
+                timeout_seconds=20,
+            )
+        )
+    )
+
+    assert result.completed
+    assert result.state is not None
+    assert [(claim.text, claim.priority) for claim in result.state.claims] == [
+        ("verified current release date", "critical"),
+        ("release date", "major"),
+    ]
+
+
+def test_planner_rejects_anchor_not_copied_from_question_without_fabricated_claim() -> None:
+    client = _StructuredClient(
+        json.dumps(_plan_payload(critical_anchor="Python 3.11.0 is the current release"))
+    )
+
+    result = _plan(
+        RuntimeClaimPlanner(
+            ResearchModelGateway(
+                client=client,
+                model_name="shared-model",
+                timeout_seconds=20,
+            )
+        )
+    )
+
+    assert result.status == "unavailable"
+    assert result.state is None
+    assert len(result.audits) == 1
+    assert result.audits[0].status == "attempt_failed"
+    assert result.audits[0].error_type == "ValueError"
+    assert len(client.calls) == 1
+
+
+def test_planner_rejects_duplicate_question_anchors() -> None:
+    client = _StructuredClient(
+        json.dumps(
+            _plan_payload(
+                supporting=[
+                    {
+                        "question_anchor": "verified current release date",
+                        "kind": "factual",
+                        "policy_profile": "official_statement",
+                    }
+                ]
+            )
+        )
+    )
+
+    result = _plan(
+        RuntimeClaimPlanner(
+            ResearchModelGateway(
+                client=client,
+                model_name="shared-model",
+                timeout_seconds=20,
+            )
+        )
+    )
+
+    assert result.status == "unavailable"
+    assert result.state is None
+    assert len(result.audits) == 1
+    assert result.audits[0].error_type == "ValueError"
+    assert len(client.calls) == 1
+
+
+def test_planner_rejects_kind_policy_mismatch_even_if_json_shape_is_valid() -> None:
+    client = _StructuredClient(
+        json.dumps(
+            _plan_payload(
+                critical_kind="analytical",
+                critical_profile="current_fact",
+            )
+        )
+    )
+
+    result = _plan(
+        RuntimeClaimPlanner(
+            ResearchModelGateway(
+                client=client,
+                model_name="shared-model",
+                timeout_seconds=20,
+            )
+        )
+    )
+
+    assert result.status == "unavailable"
+    assert result.state is None
+    assert len(result.audits) == 1
+    assert result.audits[0].error_type == "ValueError"
+    assert len(client.calls) == 1
 
 
 def test_planner_parse_failure_is_unavailable_without_immediate_retry_or_fabricated_claim() -> None:
