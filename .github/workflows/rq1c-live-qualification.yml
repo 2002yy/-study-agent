@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   live12:
-    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-auto' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-volcengine' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -59,6 +59,8 @@ jobs:
           KEY_DEEPSEEK: ${{ secrets.DEEPSEEK_API_KEY }}
           KEY_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY }}
           KEY_SILICONFLOW: ${{ secrets.SILICONFLOW_API_KEY }}
+          KEY_VOLCENGINE: ${{ secrets.VOLCENGINE_API_KEY }}
+          KEY_ARK: ${{ secrets.ARK_API_KEY }}
         run: |
           import json
           import os
@@ -66,10 +68,8 @@ jobs:
           from pathlib import Path
           from openai import OpenAI
 
-          root = Path.cwd()
-          output = root / 'output'
+          output = Path('output')
           output.mkdir(parents=True, exist_ok=True)
-
           head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           if head != os.environ['GITHUB_SHA']:
               raise SystemExit('checkout HEAD does not match GITHUB_SHA')
@@ -79,81 +79,149 @@ jobs:
           if dirty:
               raise SystemExit('tracked checkout is dirty before qualification')
 
-          choices = [
-              ('openai', os.environ.get('KEY_OPENAI', ''), 'https://api.openai.com/v1'),
-              ('deepseek', os.environ.get('KEY_DEEPSEEK', ''), 'https://api.deepseek.com/v1'),
-              ('openrouter', os.environ.get('KEY_OPENROUTER', ''), 'https://openrouter.ai/api/v1'),
-              ('siliconflow', os.environ.get('KEY_SILICONFLOW', ''), 'https://api.siliconflow.cn/v1'),
-          ]
-          selected = next(((p, k, u) for p, k, u in choices if k.strip()), None)
-          if selected is None:
-              presence = {p: False for p, _, _ in choices}
-              (output / 'rq1c-live12-environment.json').write_text(
-                  json.dumps({'git_sha': head, 'configured_provider_secrets': presence}, indent=2) + '\n',
-                  encoding='utf-8',
-              )
-              raise SystemExit('no supported LLM provider credential is configured')
+          secrets_present = {
+              'openai': bool(os.environ.get('KEY_OPENAI', '').strip()),
+              'deepseek': bool(os.environ.get('KEY_DEEPSEEK', '').strip()),
+              'openrouter': bool(os.environ.get('KEY_OPENROUTER', '').strip()),
+              'siliconflow': bool(os.environ.get('KEY_SILICONFLOW', '').strip()),
+              'volcengine': bool(os.environ.get('KEY_VOLCENGINE', '').strip()),
+              'ark': bool(os.environ.get('KEY_ARK', '').strip()),
+          }
 
-          provider, key, base_url = selected
-          client = OpenAI(api_key=key, base_url=base_url, timeout=15, max_retries=0)
-          model_ids = sorted({str(item.id) for item in client.models.list().data if getattr(item, 'id', None)})
-          preferences = {
-              'openai': ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1'],
-              'deepseek': ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-v4'],
-              'openrouter': [
-                  'deepseek/deepseek-v4-flash',
-                  'openai/gpt-5-mini',
-                  'openai/gpt-5',
-                  'deepseek/deepseek-chat',
-                  'openai/gpt-4.1-mini',
-              ],
-              'siliconflow': [
-                  'deepseek-ai/DeepSeek-V4',
-                  'deepseek-ai/DeepSeek-V3.1',
-                  'Qwen/Qwen3-30B-A3B-Instruct-2507',
-              ],
-          }[provider]
-          model = next((item for item in preferences if item in model_ids), None)
-          if model is None:
-              excluded = ('embed', 'audio', 'image', 'moderation', 'realtime', 'tts', 'whisper')
-              candidates = [
-                  item for item in model_ids
-                  if not any(token in item.lower() for token in excluded)
-                  and any(token in item.lower() for token in ('gpt', 'deepseek', 'qwen', 'chat', 'instruct'))
-              ]
-              if not candidates:
-                  raise SystemExit(f'no suitable chat model found for configured provider {provider}')
-              model = candidates[0]
+          standard = [
+              ('openai', os.environ.get('KEY_OPENAI', ''), 'https://api.openai.com/v1',
+               ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1']),
+              ('deepseek', os.environ.get('KEY_DEEPSEEK', ''), 'https://api.deepseek.com/v1',
+               ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-v4']),
+              ('openrouter', os.environ.get('KEY_OPENROUTER', ''), 'https://openrouter.ai/api/v1',
+               ['deepseek/deepseek-v4-flash', 'openai/gpt-5-mini', 'openai/gpt-5',
+                'deepseek/deepseek-chat', 'openai/gpt-4.1-mini']),
+              ('siliconflow', os.environ.get('KEY_SILICONFLOW', ''), 'https://api.siliconflow.cn/v1',
+               ['deepseek-ai/DeepSeek-V4', 'deepseek-ai/DeepSeek-V3.1',
+                'Qwen/Qwen3-30B-A3B-Instruct-2507']),
+          ]
+
+          provider_label = ''
+          llm_profile = ''
+          key = ''
+          base_url = ''
+          model = ''
+          selection_notes = []
+
+          def list_models(candidate_key, candidate_base):
+              client = OpenAI(
+                  api_key=candidate_key,
+                  base_url=candidate_base,
+                  timeout=15,
+                  max_retries=0,
+              )
+              return sorted({
+                  str(item.id) for item in client.models.list().data
+                  if getattr(item, 'id', None)
+              })
+
+          for profile, candidate_key, candidate_base, preferences in standard:
+              if not candidate_key.strip():
+                  continue
+              try:
+                  ids = list_models(candidate_key, candidate_base)
+              except Exception as exc:
+                  selection_notes.append(f'{profile}_models_list_failed:{type(exc).__name__}')
+                  continue
+              chosen = next((item for item in preferences if item in ids), None)
+              if chosen is None:
+                  excluded = ('embed', 'audio', 'image', 'moderation', 'realtime', 'tts', 'whisper')
+                  candidates = [
+                      item for item in ids
+                      if not any(token in item.lower() for token in excluded)
+                      and any(token in item.lower() for token in ('gpt', 'deepseek', 'qwen', 'chat', 'instruct'))
+                  ]
+                  chosen = candidates[0] if candidates else None
+              if chosen:
+                  provider_label = profile
+                  llm_profile = profile
+                  key = candidate_key
+                  base_url = candidate_base
+                  model = chosen
+                  break
+
+          if not model:
+              ark_key = os.environ.get('KEY_VOLCENGINE', '').strip() or os.environ.get('KEY_ARK', '').strip()
+              if ark_key:
+                  ark_endpoints = [
+                      (
+                          'volcengine_coding_plan',
+                          'https://ark.cn-beijing.volces.com/api/coding/v3',
+                          ['doubao-seed-2.0-pro', 'ark-code-latest', 'doubao-seed-2.0-code',
+                           'deepseek-v3.2', 'kimi-k2.5', 'glm-4.7'],
+                      ),
+                      (
+                          'volcengine_online_inference',
+                          'https://ark.cn-beijing.volces.com/api/v3',
+                          [],
+                      ),
+                  ]
+                  for label, candidate_base, preferences in ark_endpoints:
+                      try:
+                          ids = list_models(ark_key, candidate_base)
+                      except Exception as exc:
+                          selection_notes.append(f'{label}_models_list_failed:{type(exc).__name__}')
+                          continue
+                      chosen = next((item for item in preferences if item in ids), None)
+                      if chosen is None:
+                          candidates = [
+                              item for item in ids
+                              if any(token in item.lower() for token in ('doubao', 'deepseek', 'qwen', 'kimi', 'glm', 'code'))
+                              and not any(token in item.lower() for token in ('embed', 'image', 'vision', 'audio'))
+                          ]
+                          pro_like = [item for item in candidates if 'pro' in item.lower()]
+                          chosen = (pro_like or candidates or [None])[0]
+                      if chosen:
+                          provider_label = label
+                          llm_profile = 'openai'
+                          key = ark_key
+                          base_url = candidate_base
+                          model = chosen
+                          break
 
           metadata = {
               'git_sha': head,
-              'provider_profile': provider,
-              'base_url': base_url,
-              'model': model,
-              'model_selection': 'provider_models_list_fixed_preference_then_deterministic_fallback',
+              'configured_provider_secrets': secrets_present,
+              'selection_notes': selection_notes,
+              'provider_label': provider_label or None,
+              'llm_provider_profile': llm_profile or None,
+              'base_url': base_url or None,
+              'model': model or None,
+              'model_selection': 'authenticated_models_list_fixed_preference_then_deterministic_fallback',
               'sdk_max_retries': 0,
               'timeout_seconds': 20,
-              'configured_provider_secrets': {
-                  p: bool(k.strip()) for p, k, _ in choices
-              },
           }
           (output / 'rq1c-live12-environment.json').write_text(
               json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
           print(json.dumps({k: v for k, v in metadata.items() if k != 'configured_provider_secrets'}, sort_keys=True))
+          if not model:
+              raise SystemExit('no configured provider produced a usable authenticated model list')
 
           env_lines = {
-              'LLM_PROVIDER_PROFILE': provider,
+              'LLM_PROVIDER_PROFILE': llm_profile,
               'OPENAI_API_KEY': key,
               'OPENAI_BASE_URL': base_url,
               'MODEL_FLASH_NAME': model,
               'MODEL_PRO_NAME': model,
-              f'{provider.upper()}_API_KEY': key,
-              f'{provider.upper()}_BASE_URL': base_url,
-              f'{provider.upper()}_MODEL_FLASH_NAME': model,
-              f'{provider.upper()}_MODEL_PRO_NAME': model,
-              f'{provider.upper()}_DEFAULT_MODEL_PROFILE': 'flash',
+              'OPENAI_MODEL_FLASH_NAME': model,
+              'OPENAI_MODEL_PRO_NAME': model,
+              'OPENAI_DEFAULT_MODEL_PROFILE': 'flash',
           }
+          if llm_profile != 'openai':
+              prefix = llm_profile.upper()
+              env_lines.update({
+                  f'{prefix}_API_KEY': key,
+                  f'{prefix}_BASE_URL': base_url,
+                  f'{prefix}_MODEL_FLASH_NAME': model,
+                  f'{prefix}_MODEL_PRO_NAME': model,
+                  f'{prefix}_DEFAULT_MODEL_PROFILE': 'flash',
+              })
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
               for name, value in env_lines.items():
                   handle.write(f'{name}={value}\n')
