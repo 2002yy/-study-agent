@@ -39,35 +39,82 @@ from src.web.research.policy import evidence_policy_for_claim
 
 RUNTIME_CLAIM_PLAN_SCHEMA_VERSION = "research-runtime-claim-plan-v1"
 MAX_RUNTIME_CLAIMS = 6
-CLAIM_PLANNER_MAX_TOKENS = 320
+CLAIM_PLANNER_MAX_TOKENS = 448
 CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION = 1
 
 _CLAIM_KINDS = {"research_question", "hypothesis", "factual", "analytical"}
 _CLAIM_PRIORITIES = {"critical", "major", "context"}
+_POLICY_PROFILES_BY_KIND: dict[str, tuple[str, ...]] = {
+    "factual": (
+        "official_statement",
+        "current_fact",
+        "quantitative_claim",
+        "community_sentiment",
+    ),
+    "analytical": (
+        "quantitative_claim",
+        "causal_analysis",
+        "community_sentiment",
+    ),
+    "research_question": ("exploratory_hypothesis",),
+    "hypothesis": ("exploratory_hypothesis",),
+}
 _POLICY_PROFILES = {
-    "official_statement",
-    "current_fact",
-    "quantitative_claim",
-    "causal_analysis",
-    "community_sentiment",
-    "exploratory_hypothesis",
+    profile
+    for profiles in _POLICY_PROFILES_BY_KIND.values()
+    for profile in profiles
 }
 
 _CLAIM_SYSTEM_PROMPT = """You are a research claim planner.
 Return one JSON object and no prose. Decompose only the supplied user question
-into at most six independently evidence-testable claims. At least one claim
-must be critical. Keep every claim surface concise (at most 160 characters).
-Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence
-thresholds. The runtime will assign identifiers and evidence policy. Choose
-exactly one compatible policy_profile for each claim.
+into independently evidence-testable claims. Use the minimum number of claims
+needed: a simple single-fact question should normally produce one claim, a
+comparison normally two or three, and four to six only when the question has
+genuinely distinct evidence-testable parts. Never repeat or paraphrase the same
+claim to fill the plan. At least one claim must be critical. Keep every claim
+surface concise (at most 160 characters). Do not guess or pre-answer unknown
+facts; express unknowns as neutral verification targets. Do not invent evidence,
+sources, URLs, identifiers, freshness rules, or evidence thresholds. The
+runtime will assign identifiers and evidence policy. Choose exactly one
+compatible policy_profile for each claim.
 Compatibility rules:
-- official_statement: factual only
-- current_fact: factual only
-- quantitative_claim: factual or analytical
-- causal_analysis: analytical only
-- community_sentiment: factual or analytical
-- exploratory_hypothesis: research_question or hypothesis
+- factual: official_statement, current_fact, quantitative_claim, or community_sentiment
+- analytical: quantitative_claim, causal_analysis, or community_sentiment
+- research_question or hypothesis: exploratory_hypothesis only
 The response is constrained by a JSON Schema; satisfy its semantic rules too."""
+
+
+def _claim_item_schema(*, kind: str, profiles: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "surface",
+            "kind",
+            "priority",
+            "policy_profile",
+        ],
+        "properties": {
+            "surface": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+            },
+            "kind": {
+                "type": "string",
+                "enum": [kind],
+            },
+            "priority": {
+                "type": "string",
+                "enum": sorted(_CLAIM_PRIORITIES),
+            },
+            "policy_profile": {
+                "type": "string",
+                "enum": list(profiles),
+            },
+        },
+    }
+
 
 _CLAIM_PLAN_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
@@ -88,33 +135,10 @@ _CLAIM_PLAN_RESPONSE_FORMAT: dict[str, Any] = {
                     "minItems": 1,
                     "maxItems": MAX_RUNTIME_CLAIMS,
                     "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [
-                            "surface",
-                            "kind",
-                            "priority",
-                            "policy_profile",
-                        ],
-                        "properties": {
-                            "surface": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 160,
-                            },
-                            "kind": {
-                                "type": "string",
-                                "enum": sorted(_CLAIM_KINDS),
-                            },
-                            "priority": {
-                                "type": "string",
-                                "enum": sorted(_CLAIM_PRIORITIES),
-                            },
-                            "policy_profile": {
-                                "type": "string",
-                                "enum": sorted(_POLICY_PROFILES),
-                            },
-                        },
+                        "anyOf": [
+                            _claim_item_schema(kind=kind, profiles=profiles)
+                            for kind, profiles in _POLICY_PROFILES_BY_KIND.items()
+                        ]
                     },
                 },
             },
