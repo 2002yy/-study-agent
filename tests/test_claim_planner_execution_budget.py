@@ -166,6 +166,36 @@ def test_planner_attempt_beyond_shared_durable_budget_fails_closed_without_call(
     assert client.calls == []
 
 
+def test_shared_lazy_client_is_resolved_only_when_planner_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lazy_client = _StructuredClient(_valid_plan())
+    resolutions: list[str] = []
+
+    def fake_get_client(*, provider_profile: str) -> _StructuredClient:
+        resolutions.append(provider_profile)
+        return lazy_client
+
+    monkeypatch.setattr(claim_planner_module, "get_client", fake_get_client)
+    shared = ResearchModelGateway(
+        provider_profile="openai",
+        client=None,
+        model_name="shared-model",
+        timeout_seconds=20,
+    )
+
+    planner = RuntimeClaimPlanner(shared)
+    assert resolutions == []
+
+    result = _plan(planner)
+
+    assert result.completed
+    assert resolutions == ["openai"]
+    assert len(lazy_client.calls) == 1
+    assert lazy_client.calls[0]["response_format"]["type"] == "json_schema"
+    assert shared._client is None  # noqa: SLF001
+
+
 def test_dedicated_planner_endpoint_routes_only_planner_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
