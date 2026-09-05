@@ -80,7 +80,7 @@ jobs:
           done
           cat output/planner-server.log
           exit 1
-      - name: Test positional critical-claim contract at 320 tokens
+      - name: Test question-anchor contract at 320 tokens
         shell: python
         run: |
           import json
@@ -92,9 +92,9 @@ jobs:
               return {
                   'type': 'object',
                   'additionalProperties': False,
-                  'required': ['surface', 'kind', 'policy_profile'],
+                  'required': ['question_anchor', 'kind', 'policy_profile'],
                   'properties': {
-                      'surface': {
+                      'question_anchor': {
                           'type': 'string',
                           'minLength': 1,
                           'maxLength': 160,
@@ -113,7 +113,7 @@ jobs:
           response_format = {
               'type': 'json_schema',
               'json_schema': {
-                  'name': 'research_runtime_claim_plan_positional',
+                  'name': 'research_runtime_claim_plan_anchored',
                   'strict': True,
                   'schema': {
                       'type': 'object',
@@ -137,19 +137,16 @@ jobs:
           }
           system_prompt = (
               'You are a research claim planner. Return one JSON object and no prose. '
-              'critical_claim is the single indispensable verification target needed to answer '
-              'the supplied question. supporting_claims are optional and may be empty; add them '
-              'only for genuinely distinct evidence-testable parts. A simple single-fact question '
-              'should normally have no supporting claims; a comparison normally needs one or two. '
-              'Never repeat or paraphrase the same target. Do not answer the question from memory '
-              'and do not insert an unverified value into a claim. Write neutral verification targets. '
-              'BAD: The current stable Python release is 3.11.0. '
-              'GOOD: Identify the current stable Python release from an official source. '
-              'BAD: Release A is currently active. '
-              'GOOD: Verify the current official support status of release A. '
-              'Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence thresholds. '
-              'Choose exactly one compatible kind/policy_profile pair for each target. '
-              'factual supports official_statement, current_fact, quantitative_claim, or community_sentiment; '
+              'For every claim, question_anchor MUST be copied verbatim as one contiguous '
+              'substring of the supplied question. Never write an answer, inferred value, '
+              'new entity, or paraphrase into question_anchor. Choose an evidence-bearing '
+              'span that includes the subject and requested attribute, not an isolated word. '
+              'critical_claim is the single indispensable verification target. supporting_claims '
+              'are optional and may be empty; add them only for genuinely distinct parts. '
+              'A simple single-fact question should normally have no supporting claims and a '
+              'comparison normally one or two. Never reuse the same anchor. '
+              'Choose exactly one compatible kind/policy_profile pair. factual supports '
+              'official_statement, current_fact, quantitative_claim, or community_sentiment; '
               'analytical supports quantitative_claim, causal_analysis, or community_sentiment; '
               'research_question or hypothesis supports exploratory_hypothesis only.'
           )
@@ -180,7 +177,7 @@ jobs:
                   'finish_reason': None,
                   'completion_tokens': None,
                   'parsed_json': None,
-                  'parser_valid': False,
+                  'anchors_valid': False,
                   'claims_count': 0,
                   'error': '',
               }
@@ -200,20 +197,21 @@ jobs:
                   record['completion_tokens'] = getattr(response.usage, 'completion_tokens', None)
                   parsed = json.loads(response.choices[0].message.content or '')
                   record['parsed_json'] = parsed
-                  claims = []
-                  critical = dict(parsed['critical_claim'])
-                  critical['priority'] = 'critical'
-                  claims.append(critical)
-                  for supporting in parsed['supporting_claims']:
-                      item = dict(supporting)
-                      item['priority'] = 'major'
-                      claims.append(item)
-                  proposals = cp._parse_claim_plan({
-                      'schema_version': parsed['schema_version'],
-                      'claims': claims,
-                  })
-                  record['parser_valid'] = True
-                  record['claims_count'] = len(proposals)
+                  anchors = [parsed['critical_claim']['question_anchor']]
+                  anchors.extend(item['question_anchor'] for item in parsed['supporting_claims'])
+                  folded_question = question.casefold()
+                  valid = all(anchor.casefold() in folded_question for anchor in anchors)
+                  valid = valid and len({anchor.casefold() for anchor in anchors}) == len(anchors)
+                  if not valid:
+                      raise ValueError('model emitted a non-question or duplicate anchor')
+                  for raw_claim in [parsed['critical_claim'], *parsed['supporting_claims']]:
+                      cp.evidence_policy_for_claim(
+                          kind=raw_claim['kind'],
+                          priority='critical' if raw_claim is parsed['critical_claim'] else 'major',
+                          profile=raw_claim['policy_profile'],
+                      )
+                  record['anchors_valid'] = True
+                  record['claims_count'] = len(anchors)
               except Exception as exc:
                   record['elapsed_seconds'] = round(time.monotonic() - started, 6)
                   record['error'] = f'{type(exc).__name__}:{exc}'[:500]
@@ -223,12 +221,12 @@ jobs:
               json.dump(records, fh, ensure_ascii=False, indent=2, sort_keys=True)
               fh.write('\n')
           if not all(
-              item['parser_valid']
+              item['anchors_valid']
               and item['finish_reason'] == 'stop'
               and item['elapsed_seconds'] < 20.0
               for item in records
           ):
-              raise SystemExit('positional claim contract did not pass all cases')
+              raise SystemExit('question-anchor contract did not pass all cases')
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
