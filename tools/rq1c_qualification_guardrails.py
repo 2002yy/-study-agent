@@ -35,6 +35,68 @@ def configure_default_binding_rows_provider(provider: Callable[[Any], Any]) -> N
     _default_binding_rows_provider = provider
 
 
+def _bounded_text(value: Any, limit: int) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _optional_nonnegative_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _optional_nonnegative_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed != parsed:
+        return None
+    return round(parsed, 6)
+
+
+def _planner_observability(run: Any) -> dict[str, Any]:
+    """Project planner attempt truth without prompts, responses, or provider detail."""
+
+    context = getattr(run, "research_context", None)
+    context = context if isinstance(context, Mapping) else {}
+    runtime = context.get("claim_engine_runtime")
+    runtime = runtime if isinstance(runtime, Mapping) else {}
+    model_calls = runtime.get("model_calls")
+    attempts: list[dict[str, Any]] = []
+    if isinstance(model_calls, list):
+        for raw in model_calls:
+            if not isinstance(raw, Mapping):
+                continue
+            if str(raw.get("purpose") or "") != "research_claim_planning":
+                continue
+            attempts.append(
+                {
+                    "attempt": _optional_nonnegative_int(raw.get("attempt")),
+                    "status": _bounded_text(raw.get("status"), 80),
+                    "error_type": _bounded_text(raw.get("error_type"), 120),
+                    "finish_reason": _bounded_text(raw.get("finish_reason"), 80),
+                    "input_tokens": _optional_nonnegative_int(raw.get("input_tokens")),
+                    "output_tokens": _optional_nonnegative_int(raw.get("output_tokens")),
+                    "total_tokens": _optional_nonnegative_int(raw.get("total_tokens")),
+                    "elapsed_seconds": _optional_nonnegative_float(
+                        raw.get("elapsed_seconds")
+                    ),
+                }
+            )
+    return {
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+        "stores_raw_model_text": False,
+    }
+
+
 @dataclass
 class _AnswerStageBudget:
     """One shared physical-call/deadline ledger for a qualification case."""
@@ -190,6 +252,10 @@ def make_guarded_run_case(
             chat_service=bounded_chat,
             reference_date=reference_date,
         )
+
+        run_id = f"rq1c_{str(case.get('id') or '').strip()}"
+        persisted_run = repository.get(run_id) if run_id != "rq1c_" else None
+        record["planner"] = _planner_observability(persisted_run)
 
         observed = record.get("budget_observed")
         if isinstance(observed, dict):
