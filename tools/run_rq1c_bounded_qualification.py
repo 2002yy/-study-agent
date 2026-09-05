@@ -3,13 +3,12 @@
 The runner intentionally knows only the runtime manifest (id/category/question).
 Evaluation rubric/gold is a separate file and is never imported or accepted as a
 runner argument. Each case drives the production active Claim Engine through a
-throwaway SQLite database. The artifact stores bounded public metadata, hashes
+throwaway SQLite database, then drives the production answer-generation and
+claim-binding service over that exact persisted ResearchRun. The synthesis phase
+never starts a second web acquisition: its source set is frozen to the completed
+ResearchRun so the qualification budget measures one acquisition plus the real
+production answer stages. The artifact stores bounded public metadata, hashes
 research queries, and never stores page bodies or credentials.
-
-The current production research run is evidence-only. Until a production chat
-synthesis surface is captured, every case records an explicit unavailable answer
-surface; the independent evaluator must therefore fail closed rather than grade
-an Evidence Brief as though it were a learner-facing final answer.
 """
 
 from __future__ import annotations
@@ -39,17 +38,35 @@ from src.application.active_research_runtime import (  # noqa: E402
     ACTIVE_RESEARCH_BRIEF_KEY,
     ACTIVE_RESEARCH_METRICS_KEY,
 )
+from src.application.chat_service import ChatDependencies  # noqa: E402
+from src.application.policy_chat_service import (  # noqa: E402
+    ExternalDataPolicyChatService,
+    PolicyChatCommand,
+)
+from src.application.research_evidence import (  # noqa: E402
+    research_binding_rows,
+    research_run_provenance,
+    research_sources_snapshot,
+)
 from src.application.research_web_lookup_dispatch import (  # noqa: E402
     ClaimEngineDispatchWebLookupService,
 )
-from src.domain.runtime_entities import WebLookupRun  # noqa: E402
+from src.domain.runtime_entities import ChatTurn, WebLookupRun  # noqa: E402
 from src.infrastructure.sqlite.database import RuntimeDatabase  # noqa: E402
+from src.pedagogy.evaluation import LLMSemanticEvaluator  # noqa: E402
+from src.repositories.runtime_repository import RuntimeRepository  # noqa: E402
 from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
+from src.task_contract import (  # noqa: E402
+    TaskAwarePedagogyEngine,
+    TaskAwarePedagogyEvaluationService,
+    route_request_with_task_contract,
+)
 from src.web.research.contracts import ResearchBudget, build_research_state  # noqa: E402
 from src.web.research.state import attach_claim_engine_state  # noqa: E402
 
 MANIFEST_SCHEMA_VERSION = "rq1c-bounded-holdout-manifest-v1"
 ARTIFACT_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
+ANSWER_AUDIT_SCHEMA_VERSION = "answer-validation-audit-v1"
 DEFAULT_MANIFEST = (
     REPO_ROOT
     / "tests"
@@ -62,6 +79,8 @@ DEFAULT_OUTPUT = (
 )
 _ALLOWED_CASE_KEYS = {"id", "category", "question"}
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_ANSWER_PHASES = ("answer_generation", "answer_claim_binding")
 
 
 def _utc_now() -> str:
@@ -71,6 +90,10 @@ def _utc_now() -> str:
 def _sha256_text(value: str) -> str:
     normalized = " ".join(value.split()).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _sha256_exact(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _git_sha() -> str:
@@ -338,14 +361,147 @@ def _cluster_ids(
     return sorted(values)
 
 
-def _unavailable_answer_surface() -> dict[str, Any]:
+def _unavailable_answer_surface(reason: str = "production_chat_unavailable") -> dict[str, Any]:
     return {
         "status": "unavailable",
         "source": "none",
         "text": "",
         "content_sha256": "",
-        "reason": "production_final_answer_not_captured",
+        "reason": _bounded(reason, 120),
+        "turn_id": "",
+        "turn_status": "",
+        "validation": {},
     }
+
+
+def _answer_validation_projection(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+    candidate_sha = str(raw.get("candidate_answer_sha256") or "").strip().lower()
+    learner_sha = str(raw.get("learner_answer_sha256") or "").strip().lower()
+    if raw.get("schema_version") != ANSWER_AUDIT_SCHEMA_VERSION:
+        return {}
+    if not _HEX64.fullmatch(candidate_sha) or not _HEX64.fullmatch(learner_sha):
+        return {}
+    raw_phases = raw.get("phases")
+    if not isinstance(raw_phases, Mapping):
+        return {}
+    phases: dict[str, dict[str, Any]] = {}
+    for phase_name in _ANSWER_PHASES:
+        detail = raw_phases.get(phase_name)
+        if not isinstance(detail, Mapping):
+            continue
+        phases[phase_name] = {
+            "attempted": bool(detail.get("attempted")),
+            "model_calls": _bounded_int(detail.get("model_calls")),
+            "attempts": _bounded_int(detail.get("attempts")),
+            "outcome": _bounded(detail.get("outcome"), 80),
+            "error_type": _bounded(detail.get("error_type"), 120),
+        }
+    return {
+        "schema_version": ANSWER_AUDIT_SCHEMA_VERSION,
+        "candidate_answer_sha256": candidate_sha,
+        "learner_answer_sha256": learner_sha,
+        "phases": phases,
+    }
+
+
+def _answer_stage_model_calls(raw: Any) -> tuple[int, int] | None:
+    audit = _answer_validation_projection(raw)
+    phases = audit.get("phases")
+    if not isinstance(phases, Mapping):
+        return None
+    generation = phases.get("answer_generation")
+    binding = phases.get("answer_claim_binding")
+    if not isinstance(generation, Mapping) or not isinstance(binding, Mapping):
+        return None
+    return (
+        _bounded_int(generation.get("model_calls")),
+        _bounded_int(binding.get("model_calls")),
+    )
+
+
+def _production_answer_surface(turn: ChatTurn | None) -> dict[str, Any]:
+    if turn is None:
+        return _unavailable_answer_surface("production_chat_turn_missing")
+    if turn.status != "completed":
+        return _unavailable_answer_surface("production_chat_turn_not_completed")
+    text = str(turn.assistant_message or "")
+    if not text.strip():
+        return _unavailable_answer_surface("production_chat_answer_empty")
+    validation = _answer_validation_projection(
+        turn.rag_snapshot.get("answer_validation_audit")
+    )
+    expected_sha = _sha256_exact(text)
+    if not validation or validation.get("learner_answer_sha256") != expected_sha:
+        return _unavailable_answer_surface("production_chat_validation_missing")
+    claim_snapshot = turn.rag_snapshot.get("answer_claim_snapshot")
+    claim_status = (
+        _bounded(claim_snapshot.get("status"), 80)
+        if isinstance(claim_snapshot, Mapping)
+        else ""
+    )
+    evidence_refs = turn.rag_snapshot.get("research_evidence_refs")
+    return {
+        "status": "available",
+        "source": "production_chat",
+        "text": text,
+        "content_sha256": expected_sha,
+        "reason": "",
+        "turn_id": turn.id,
+        "turn_status": turn.status,
+        "validation": validation,
+        "claim_snapshot_status": claim_status,
+        "evidence_ref_count": (
+            len(evidence_refs) if isinstance(evidence_refs, list) else 0
+        ),
+    }
+
+
+def _build_chat_service(database: RuntimeDatabase) -> ExternalDataPolicyChatService:
+    """Production answer path with acquisition frozen to the completed ResearchRun.
+
+    `ChatDependencies` defaults `resolve_web_tools` to the production disabled
+    trace. That is intentional here: the bounded qualification already completed
+    its one allowed acquisition phase, and starting another web-tool run during
+    synthesis would evade the frozen candidate/read/model-call accounting.
+    """
+    return ExternalDataPolicyChatService(
+        RuntimeRepository(database),
+        ChatDependencies(
+            route_request=route_request_with_task_contract,
+            pedagogy_engine=TaskAwarePedagogyEngine(),
+            pedagogy_evaluation=TaskAwarePedagogyEvaluationService(
+                LLMSemanticEvaluator()
+            ),
+        ),
+    )
+
+
+def _production_chat_command(
+    *, case: Mapping[str, str], run: WebLookupRun
+) -> PolicyChatCommand:
+    if not research_run_provenance(run):
+        raise ValueError("qualification ResearchRun lost active claim-engine provenance")
+    if run.status not in {"completed", "partial"} or not run.source_block.strip():
+        raise ValueError("qualification ResearchRun is not usable as chat evidence")
+    return PolicyChatCommand(
+        user_input=case["question"],
+        thread_id=f"rq1c-thread-{case['id']}",
+        turn_id=f"rq1c-turn-{case['id']}",
+        web_context=run.source_block,
+        web_context_run_id=run.id,
+        web_policy="auto",
+        cloud_context_policy="question_only",
+        memory_policy="off",
+        rag_enabled=False,
+        task_intent="research",
+        research_sources=research_sources_snapshot(run),
+        answer_validation={
+            "evidence_rows": research_binding_rows(run),
+            "allowed_attempts": 1,
+        },
+    )
 
 
 def _run_case(
@@ -353,6 +509,7 @@ def _run_case(
     case: Mapping[str, str],
     repository: WebLookupRepository,
     service: ClaimEngineDispatchWebLookupService,
+    chat_service: ExternalDataPolicyChatService,
     reference_date: str,
 ) -> dict[str, Any]:
     started = time.monotonic()
@@ -377,11 +534,10 @@ def _run_case(
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "runner_error_type": type(exc).__name__,
             "run": None,
-            "answer": _unavailable_answer_surface(),
+            "answer": _unavailable_answer_surface("research_run_failed"),
             "budget_contract_violations": [],
         }
 
-    elapsed = round(time.monotonic() - started, 3)
     context = completed.research_context
     runtime = context.get("claim_engine_runtime")
     if not isinstance(runtime, Mapping):
@@ -395,7 +551,7 @@ def _run_case(
     candidates = runtime.get("candidates")
     candidate_count = len(candidates) if isinstance(candidates, list) else 0
     model_calls = runtime.get("model_calls")
-    model_call_count = len(model_calls) if isinstance(model_calls, list) else 0
+    research_model_call_count = len(model_calls) if isinstance(model_calls, list) else 0
     read_outcomes = runtime.get("read_outcomes")
     read_attempt_count = len(read_outcomes) if isinstance(read_outcomes, list) else 0
     read_count = _observed_read_count(metrics, runtime)
@@ -406,12 +562,54 @@ def _run_case(
     brief_projection = _brief_projection(brief)
     evidence_rows = brief_projection["eligible_evidence"]
     cluster_ids = _cluster_ids(source_rows, evidence_rows)
+
+    runner_error_type = ""
+    answer_surface = _unavailable_answer_surface("production_chat_not_attempted")
+    answer_generation_call_count: int | None = 0
+    answer_binding_call_count: int | None = 0
+    try:
+        command = _production_chat_command(case=case, run=completed)
+        prepared = chat_service.start_turn(command)
+        returned_reply = chat_service.generate(prepared)
+        persisted = chat_service.repository.get_chat_turn(prepared.turn.id)
+        if persisted is None:
+            raise RuntimeError("production ChatTurn was not persisted")
+        if persisted.status != "completed":
+            raise RuntimeError("production ChatTurn did not reach completed")
+        if persisted.assistant_message != returned_reply:
+            raise RuntimeError("production ChatTurn reply mismatch")
+        answer_surface = _production_answer_surface(persisted)
+        if answer_surface.get("status") != "available":
+            raise RuntimeError(str(answer_surface.get("reason") or "production answer unavailable"))
+        answer_calls = _answer_stage_model_calls(
+            persisted.rag_snapshot.get("answer_validation_audit")
+        )
+        if answer_calls is None:
+            raise RuntimeError("production answer-stage call audit unavailable")
+        answer_generation_call_count, answer_binding_call_count = answer_calls
+    except Exception as exc:
+        runner_error_type = type(exc).__name__
+        answer_surface = _unavailable_answer_surface("production_chat_failed")
+        answer_generation_call_count = None
+        answer_binding_call_count = None
+
+    elapsed = round(time.monotonic() - started, 3)
+    total_model_call_count = (
+        research_model_call_count
+        + answer_generation_call_count
+        + answer_binding_call_count
+        if answer_generation_call_count is not None
+        and answer_binding_call_count is not None
+        else None
+    )
     violations: list[str] = []
     if candidate_count > 20:
         violations.append("candidate_budget_exceeded")
     if read_count > 8:
         violations.append("read_budget_exceeded")
-    if model_call_count > 6:
+    if total_model_call_count is None:
+        violations.append("answer_stage_model_call_count_unavailable")
+    elif total_model_call_count > 6:
         violations.append("model_call_budget_exceeded")
     if elapsed > 60:
         violations.append("hard_timeout_exceeded")
@@ -422,14 +620,14 @@ def _run_case(
         "question": case["question"],
         "reference_date": reference_date,
         "elapsed_seconds": elapsed,
-        "runner_error_type": "",
+        "runner_error_type": runner_error_type,
         "run": {
             "status": completed.status,
             "provider_status": completed.provider_status,
             "stop_reason": completed.stop_reason,
             "stage": completed.stage,
         },
-        "answer": _unavailable_answer_surface(),
+        "answer": answer_surface,
         "search": {
             "attempt_count": len(completed.query_attempts),
             "audits": _provider_audit(completed.query_attempts),
@@ -438,7 +636,10 @@ def _run_case(
             "candidate_count": candidate_count,
             "read_count": read_count,
             "read_attempt_count": read_attempt_count,
-            "model_call_count": model_call_count,
+            "research_model_call_count": research_model_call_count,
+            "answer_generation_model_call_count": answer_generation_call_count,
+            "answer_binding_model_call_count": answer_binding_call_count,
+            "model_call_count": total_model_call_count,
             "elapsed_seconds": elapsed,
         },
         "budget_contract_violations": violations,
@@ -481,7 +682,8 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
             "rubric_loaded_by_runner": False,
             "stores_page_bodies": False,
             "stores_research_query_text": False,
-            "captures_production_final_answer": False,
+            "captures_production_final_answer": True,
+            "second_web_acquisition_during_synthesis": False,
         },
         "configured_budget": {
             "max_candidates": 20,
@@ -499,11 +701,13 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
         database = RuntimeDatabase(Path(tmp) / "qualification.sqlite")
         repository = WebLookupRepository(database)
         service = ClaimEngineDispatchWebLookupService(repository)
+        chat_service = _build_chat_service(database)
         for index, case in enumerate(cases, start=1):
             record = _run_case(
                 case=case,
                 repository=repository,
                 service=service,
+                chat_service=chat_service,
                 reference_date=reference_date,
             )
             artifact["cases"].append(record)
@@ -514,6 +718,7 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
             print(
                 f"[{index}/{len(cases)}] {case['id']}: "
                 f"status={(record.get('run') or {}).get('status', 'runner_error')} · "
+                f"answer={(record.get('answer') or {}).get('status', 'unavailable')} · "
                 f"elapsed={record['elapsed_seconds']}s",
                 flush=True,
             )
@@ -569,6 +774,8 @@ def main() -> int:
     structural_ok = (
         artifact["summary"]["case_count"] == 12
         and artifact["summary"]["runner_error_cases"] == 0
+        and artifact["summary"]["budget_violation_cases"] == 0
+        and artifact["summary"]["reviewable_answer_cases"] == 12
     )
     return 0 if structural_ok else 2
 
