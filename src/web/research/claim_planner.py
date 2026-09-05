@@ -1,26 +1,30 @@
 """Production claim bootstrap for the Claim Engine runtime.
 
-The model proposes only semantic claim shape.  Code owns identifiers, policy,
+The model proposes only semantic claim shape. Code owns identifiers, policy,
 evidence requirements, initial gaps, trace events, and the resulting
-``ResearchState``.  This module imports no evaluation helpers and performs no
+``ResearchState``. This module imports no evaluation helpers and performs no
 search/read/persistence work.
 """
 
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from hashlib import sha256
+from os import getenv
 from typing import Any, Mapping
+
+from openai import OpenAI
 
 from src.web.research.contracts import (
     EvidenceGap,
     EvidenceRequirement,
     ResearchBudget,
     ResearchClaim,
+    ResearchMode,
     ResearchQuestion,
     ResearchState,
-    ResearchMode,
     ResearchTraceEvent,
     build_research_state,
 )
@@ -34,6 +38,8 @@ from src.web.research.policy import evidence_policy_for_claim
 
 RUNTIME_CLAIM_PLAN_SCHEMA_VERSION = "research-runtime-claim-plan-v1"
 MAX_RUNTIME_CLAIMS = 6
+CLAIM_PLANNER_MAX_TOKENS = 320
+CLAIM_PLANNER_MAX_ATTEMPTS = 1
 
 _CLAIM_KINDS = {"research_question", "hypothesis", "factual", "analytical"}
 _CLAIM_PRIORITIES = {"critical", "major", "context"}
@@ -49,9 +55,10 @@ _POLICY_PROFILES = {
 _CLAIM_SYSTEM_PROMPT = """You are a research claim planner.
 Return one JSON object and no prose. Decompose only the supplied user question
 into at most six independently evidence-testable claims. At least one claim
-must be critical. Do not invent evidence, sources, URLs, identifiers, freshness
-rules, or evidence thresholds. The runtime will assign identifiers and evidence
-policy. Choose exactly one compatible policy_profile for each claim.
+must be critical. Keep every claim surface concise (at most 160 characters).
+Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence
+thresholds. The runtime will assign identifiers and evidence policy. Choose
+exactly one compatible policy_profile for each claim.
 Schema:
 {"schema_version":"research-runtime-claim-plan-v1","claims":[{"surface":"...","kind":"research_question|hypothesis|factual|analytical","priority":"critical|major|context","policy_profile":"official_statement|current_fact|quantitative_claim|causal_analysis|community_sentiment|exploratory_hypothesis"}]}"""
 
@@ -78,7 +85,11 @@ class ClaimBootstrapResult:
 
 class RuntimeClaimPlanner:
     def __init__(self, model_gateway: ResearchModelGateway) -> None:
-        self.model_gateway = model_gateway
+        # Claim planning is latency-sensitive and has a stricter semantic retry
+        # budget than the generic assessor/extractor gateway. Clone the supplied
+        # gateway so the planner can be one-attempt without mutating shared
+        # production behavior for other research model operations.
+        self.model_gateway = _claim_planner_gateway(model_gateway)
 
     def plan(
         self,
@@ -99,6 +110,19 @@ class RuntimeClaimPlanner:
         normalized_run_id = _required_text(run_id, 300, "run_id")
         if mode not in {"shadow", "active"}:
             raise ValueError("unsupported research mode")
+        if isinstance(attempt_start, bool) or attempt_start < 1:
+            raise ValueError("attempt_start must be a positive integer")
+        if attempt_start > CLAIM_PLANNER_MAX_ATTEMPTS:
+            # Durable runtime recovery may observe a previous planner attempt.
+            # The planner budget is intentionally one physical model call, so a
+            # resumed operation fails closed rather than spending attempt two.
+            return ClaimBootstrapResult(
+                status="unavailable",
+                state=None,
+                audits=(),
+                reason="claim_plan_attempts_exhausted",
+            )
+
         normalized_question = _required_text(question, 4000, "question")
         normalized_reference_date = date.fromisoformat(reference_date).isoformat()
         normalized_freshness = _freshness_days(
@@ -129,7 +153,7 @@ class RuntimeClaimPlanner:
                 "user_question": 1,
                 "question_chars": len(normalized_question),
             },
-            max_tokens=4000,
+            max_tokens=CLAIM_PLANNER_MAX_TOKENS,
             temperature=0.0,
             timeout_seconds=timeout_seconds,
             on_attempt_started=on_attempt_started,
@@ -159,6 +183,34 @@ class RuntimeClaimPlanner:
             state=state,
             audits=result.audits,
         )
+
+
+def _claim_planner_gateway(shared: ResearchModelGateway) -> ResearchModelGateway:
+    gateway = copy(shared)
+    gateway.max_attempts = CLAIM_PLANNER_MAX_ATTEMPTS
+
+    base_url = (getenv("RESEARCH_CLAIM_PLANNER_BASE_URL") or "").strip()
+    model_name = (getenv("RESEARCH_CLAIM_PLANNER_MODEL_NAME") or "").strip()
+    api_key = (getenv("RESEARCH_CLAIM_PLANNER_API_KEY") or "").strip()
+    dedicated = (base_url, model_name, api_key)
+    if any(dedicated) and not all(dedicated):
+        raise RuntimeError(
+            "dedicated claim planner requires RESEARCH_CLAIM_PLANNER_BASE_URL, "
+            "RESEARCH_CLAIM_PLANNER_MODEL_NAME, and RESEARCH_CLAIM_PLANNER_API_KEY"
+        )
+    if not all(dedicated):
+        return gateway
+
+    # A dedicated endpoint is optional production configuration. The clone keeps
+    # the shared timeout/audit/provider profile while routing only claim planning
+    # to the fast model; assessor/extractor calls keep using the original gateway.
+    gateway._client = OpenAI(  # noqa: SLF001
+        api_key=api_key,
+        base_url=base_url,
+        max_retries=0,
+    )
+    gateway._model_name = model_name  # noqa: SLF001
+    return gateway
 
 
 def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
@@ -191,8 +243,8 @@ def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
         profile = _enum(
             claim.get("policy_profile"), _POLICY_PROFILES, "evidence policy profile"
         )
-        # This call is intentionally part of parse validation.  Invalid
-        # kind/profile combinations consume an explicit model attempt and retry;
+        # This call is intentionally part of parse validation. Invalid
+        # kind/profile combinations consume the planner's explicit model attempt;
         # the runtime never repairs them with keyword heuristics.
         evidence_policy_for_claim(
             kind=kind,  # type: ignore[arg-type]
@@ -398,6 +450,8 @@ def _enum(value: Any, allowed: set[str], label: str) -> str:
 
 
 __all__ = [
+    "CLAIM_PLANNER_MAX_ATTEMPTS",
+    "CLAIM_PLANNER_MAX_TOKENS",
     "ClaimBootstrapResult",
     "MAX_RUNTIME_CLAIMS",
     "ProposedClaim",
