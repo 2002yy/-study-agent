@@ -11,9 +11,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
-import re
-import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
@@ -64,6 +61,8 @@ if __name__ == "__main__":
 
     raise SystemExit(guarded_main())
 
+from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
+
 PROTOCOL_SCHEMA_VERSION = "rq1c-bounded-protocol-probes-v1"
 RUNTIME_SCHEMA_VERSION = "rq1c-bounded-qualification-runtime-v1"
 DEFAULT_RUNTIME = (
@@ -80,7 +79,6 @@ REQUIRED_PROBES = (
     "unreadable_page",
     "duplicate_republication",
 )
-_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _utc_now() -> str:
@@ -92,22 +90,7 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _git_sha() -> str:
-    configured = str(os.getenv("GITHUB_SHA") or "").strip().lower()
-    if _HEX40.fullmatch(configured):
-        return configured
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    value = completed.stdout.strip().lower()
-    return value if _HEX40.fullmatch(value) else ""
+    return exact_checkout_git_sha(REPO_ROOT)
 
 
 def _probe_state(*, min_independent_sources: int = 1) -> ResearchState:
@@ -547,6 +530,7 @@ def _safe_probe(probe_id: str, call: Any) -> dict[str, Any]:
 
 
 def run_protocol_probes(*, runtime_path: Path, output_path: Path) -> dict[str, Any]:
+    git_sha = _git_sha()
     runtime_bytes = runtime_path.read_bytes()
     runtime = json.loads(runtime_bytes)
     if not isinstance(runtime, dict) or runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
@@ -580,7 +564,7 @@ def run_protocol_probes(*, runtime_path: Path, output_path: Path) -> dict[str, A
         "schema_version": PROTOCOL_SCHEMA_VERSION,
         "generated_at": _utc_now(),
         "runtime_artifact_sha256": _sha256_bytes(runtime_bytes),
-        "git_sha": _git_sha(),
+        "git_sha": git_sha,
         "leakage_contract": {
             "stores_generated_query_text": False,
             "stores_page_bodies": False,
