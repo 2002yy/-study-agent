@@ -1,4 +1,4 @@
-"""Non-bypassable compatibility facade for deterministic RQ1-C protocol probes."""
+"""Compatibility facade for deterministic RQ1-C protocol probes."""
 
 from __future__ import annotations
 
@@ -18,15 +18,7 @@ DEFAULT_RUNTIME = _core.DEFAULT_RUNTIME
 DEFAULT_OUTPUT = _core.DEFAULT_OUTPUT
 _parser = _core._parser
 _git_sha = _core._git_sha
-
-
-def run_protocol_probes(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    original_git_sha = _core._git_sha
-    _core._git_sha = _git_sha
-    try:
-        return _core.run_protocol_probes(*args, **kwargs)
-    finally:
-        _core._git_sha = original_git_sha
+run_protocol_probes = _core.run_protocol_probes
 
 
 def main() -> int:
