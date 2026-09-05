@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   live12:
-    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-local-qwen4b' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-live12-execute-local-split-planner' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -30,6 +30,9 @@ jobs:
       LLM_MAX_RETRIES: '0'
       LOCAL_TIMEOUT_SECONDS: '20'
       LLM_TIMEOUT_SECONDS: '20'
+      RESEARCH_CLAIM_PLANNER_BASE_URL: http://127.0.0.1:8001/v1
+      RESEARCH_CLAIM_PLANNER_MODEL_NAME: rq1c-qwen25-15b-instruct-q4km
+      RESEARCH_CLAIM_PLANNER_API_KEY: local
       WEB_TOOL_ENABLED: 'true'
       WEB_ENABLE_DUCKDUCKGO: 'true'
       WEB_ENABLE_SEARXNG: 'false'
@@ -43,6 +46,10 @@ jobs:
       HF_MODEL_REPO: unsloth/Qwen3-4B-Instruct-2507-GGUF
       HF_MODEL_FILE: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
       MODEL_ALIAS: rq1c-qwen3-4b-instruct-2507-q4km
+      PLANNER_HF_MODEL_REPO: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+      PLANNER_HF_MODEL_FILE: qwen2.5-1.5b-instruct-q4_k_m.gguf
+      PLANNER_MODEL_SHA256_EXPECTED: 6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e
+      PLANNER_MODEL_ALIAS: rq1c-qwen25-15b-instruct-q4km
 
     steps:
       - name: Check out exact qualification head
@@ -91,7 +98,25 @@ jobs:
           echo "MODEL_BYTES=$model_bytes" >> "$GITHUB_ENV"
           printf '%s  %s\n' "$model_sha" "$HF_MODEL_FILE" | tee output/model-sha256.txt
 
-      - name: Start local OpenAI-compatible model server
+      - name: Download pinned Qwen2.5 1.5B planner GGUF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-model output
+          model=.local-model/${PLANNER_HF_MODEL_FILE}
+          curl -fL --retry 5 --retry-delay 3 \
+            "https://huggingface.co/${PLANNER_HF_MODEL_REPO}/resolve/main/${PLANNER_HF_MODEL_FILE}?download=true" \
+            -o "$model"
+          test -s "$model"
+          model_sha="$(sha256sum "$model" | awk '{print $1}')"
+          test "$model_sha" = "$PLANNER_MODEL_SHA256_EXPECTED"
+          model_bytes="$(stat -c '%s' "$model")"
+          echo "PLANNER_MODEL_PATH=$model" >> "$GITHUB_ENV"
+          echo "PLANNER_MODEL_SHA256=$model_sha" >> "$GITHUB_ENV"
+          echo "PLANNER_MODEL_BYTES=$model_bytes" >> "$GITHUB_ENV"
+          printf '%s  %s\n' "$model_sha" "$PLANNER_HF_MODEL_FILE" | tee output/planner-model-sha256.txt
+
+      - name: Start local Qwen3 4B OpenAI-compatible server
         shell: bash
         run: |
           set -euo pipefail
@@ -118,7 +143,91 @@ jobs:
           cat output/llama-server.log >&2
           exit 1
 
-      - name: Run non-qualification local-model smoke
+      - name: Start local Qwen2.5 1.5B planner server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$LLAMA_SERVER" \
+            -m "$PLANNER_MODEL_PATH" \
+            --alias "$PLANNER_MODEL_ALIAS" \
+            --host 127.0.0.1 \
+            --port 8001 \
+            -c 4096 \
+            -t "$(nproc)" \
+            --jinja \
+            > output/planner-llama-server.log 2>&1 &
+          echo $! > output/planner-llama-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8001/health > output/planner-llama-health.json 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat output/planner-llama-server.pid)" 2>/dev/null; then
+              cat output/planner-llama-server.log >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          cat output/planner-llama-server.log >&2
+          exit 1
+
+      - name: Run production claim-planner smoke
+        shell: python
+        run: |
+          import json
+          import time
+          from pathlib import Path
+
+          from src.web.research.claim_planner import RuntimeClaimPlanner
+          from src.web.research.contracts import ResearchBudget
+          from src.web.research.model_gateway import ResearchModelGateway
+
+          budget = ResearchBudget(
+              max_candidates=20,
+              max_reads=8,
+              soft_timeout_seconds=45,
+              hard_timeout_seconds=60,
+              max_total_chars=16000,
+          )
+          cases = [
+              'What is the current stable Python release?',
+              'Compare the current official support status of two software releases.',
+              'What can be verified about an announced feature if independent confirmation is limited?',
+          ]
+          records = []
+          for index, question in enumerate(cases, start=1):
+              planner = RuntimeClaimPlanner(ResearchModelGateway(timeout_seconds=20.0))
+              started = time.monotonic()
+              result = planner.plan(
+                  run_id=f'planner_smoke_{index}',
+                  question=question,
+                  reference_date='2026-09-05',
+                  budget=budget,
+                  mode='active',
+                  timeout_seconds=20.0,
+              )
+              elapsed = time.monotonic() - started
+              record = {
+                  'case': index,
+                  'completed': result.completed,
+                  'elapsed_seconds': round(elapsed, 6),
+                  'audit_count': len(result.audits),
+                  'reason': result.reason,
+                  'model_name': result.audits[0].model_name if result.audits else '',
+                  'output_tokens': result.audits[0].output_tokens if result.audits else None,
+              }
+              records.append(record)
+              if not result.completed:
+                  raise SystemExit(f'production planner smoke unavailable: {record}')
+              if elapsed >= 20.0:
+                  raise SystemExit(f'production planner smoke exceeded 20s: {record}')
+              if len(result.audits) != 1:
+                  raise SystemExit(f'planner smoke spent unexpected attempts: {record}')
+          Path('output/rq1c-claim-planner-smoke.json').write_text(
+              json.dumps(records, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(records, sort_keys=True))
+
+      - name: Run non-qualification Qwen3 4B smoke
         shell: python
         run: |
           import json
@@ -202,11 +311,20 @@ jobs:
               'model_file': os.environ['HF_MODEL_FILE'],
               'model_sha256': os.environ['MODEL_SHA256'],
               'model_bytes': int(os.environ['MODEL_BYTES']),
+              'planner_base_url': os.environ['RESEARCH_CLAIM_PLANNER_BASE_URL'],
+              'planner_model_alias': os.environ['PLANNER_MODEL_ALIAS'],
+              'planner_model_repo': os.environ['PLANNER_HF_MODEL_REPO'],
+              'planner_model_file': os.environ['PLANNER_HF_MODEL_FILE'],
+              'planner_model_sha256': os.environ['PLANNER_MODEL_SHA256'],
+              'planner_model_bytes': int(os.environ['PLANNER_MODEL_BYTES']),
+              'planner_max_tokens': 320,
+              'planner_max_attempts': 1,
               'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
               'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],
               'runner_arch': platform.machine(),
               'runner_cpu_count': os.cpu_count(),
               'server_context_tokens': 8192,
+              'planner_server_context_tokens': 4096,
               'sdk_max_retries': 0,
               'provider_timeout_seconds': 20,
               'smoke_is_qualification_evidence': False,
@@ -295,11 +413,15 @@ jobs:
             output/rq1c-live12-execution-summary.json
             output/rq1c-live12-runtime.log
             output/rq1c-live12-protocol.log
+            output/rq1c-claim-planner-smoke.json
             output/rq1c-local-model-smoke.json
             output/model-sha256.txt
+            output/planner-model-sha256.txt
             output/llama-server-version.log
             output/llama-server.log
             output/llama-health.json
+            output/planner-llama-server.log
+            output/planner-llama-health.json
           if-no-files-found: warn
           retention-days: 14
 
