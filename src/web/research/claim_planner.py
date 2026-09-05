@@ -39,7 +39,7 @@ from src.web.research.policy import evidence_policy_for_claim
 RUNTIME_CLAIM_PLAN_SCHEMA_VERSION = "research-runtime-claim-plan-v1"
 MAX_RUNTIME_CLAIMS = 6
 CLAIM_PLANNER_MAX_TOKENS = 320
-CLAIM_PLANNER_MAX_ATTEMPTS = 1
+CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION = 1
 
 _CLAIM_KINDS = {"research_question", "hypothesis", "factual", "analytical"}
 _CLAIM_PRIORITIES = {"critical", "major", "context"}
@@ -59,8 +59,67 @@ must be critical. Keep every claim surface concise (at most 160 characters).
 Do not invent evidence, sources, URLs, identifiers, freshness rules, or evidence
 thresholds. The runtime will assign identifiers and evidence policy. Choose
 exactly one compatible policy_profile for each claim.
-Schema:
-{"schema_version":"research-runtime-claim-plan-v1","claims":[{"surface":"...","kind":"research_question|hypothesis|factual|analytical","priority":"critical|major|context","policy_profile":"official_statement|current_fact|quantitative_claim|causal_analysis|community_sentiment|exploratory_hypothesis"}]}"""
+Compatibility rules:
+- official_statement: factual only
+- current_fact: factual only
+- quantitative_claim: factual or analytical
+- causal_analysis: analytical only
+- community_sentiment: factual or analytical
+- exploratory_hypothesis: research_question or hypothesis
+The response is constrained by a JSON Schema; satisfy its semantic rules too."""
+
+_CLAIM_PLAN_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "research_runtime_claim_plan",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["schema_version", "claims"],
+            "properties": {
+                "schema_version": {
+                    "type": "string",
+                    "enum": [RUNTIME_CLAIM_PLAN_SCHEMA_VERSION],
+                },
+                "claims": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_RUNTIME_CLAIMS,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "surface",
+                            "kind",
+                            "priority",
+                            "policy_profile",
+                        ],
+                        "properties": {
+                            "surface": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": sorted(_CLAIM_KINDS),
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": sorted(_CLAIM_PRIORITIES),
+                            },
+                            "policy_profile": {
+                                "type": "string",
+                                "enum": sorted(_POLICY_PROFILES),
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -83,12 +142,40 @@ class ClaimBootstrapResult:
         return self.status == "completed" and self.state is not None
 
 
+class _ClaimPlannerCompletions:
+    """Inject planner-only JSON Schema without changing the shared gateway API."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def create(self, **kwargs: Any) -> Any:
+        kwargs["response_format"] = _CLAIM_PLAN_RESPONSE_FORMAT
+        return self._inner.create(**kwargs)
+
+
+class _ClaimPlannerChat:
+    def __init__(self, inner: Any) -> None:
+        self.completions = _ClaimPlannerCompletions(inner.completions)
+
+
+class _ClaimPlannerClient:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.chat = _ClaimPlannerChat(inner.chat)
+
+    def with_options(self, **kwargs: Any) -> _ClaimPlannerClient:
+        return _ClaimPlannerClient(self._inner.with_options(**kwargs))
+
+
 class RuntimeClaimPlanner:
     def __init__(self, model_gateway: ResearchModelGateway) -> None:
-        # Claim planning is latency-sensitive and has a stricter semantic retry
-        # budget than the generic assessor/extractor gateway. Clone the supplied
-        # gateway so the planner can be one-attempt without mutating shared
-        # production behavior for other research model operations.
+        # Preserve the shared gateway's durable operation budget, but constrain
+        # each planner invocation to one physical model request. A timeout or
+        # parse failure therefore cannot immediately burn attempt two. If the
+        # process crashes after a successful call but before semantic persist,
+        # the durable runtime may later resume at attempt two and spend exactly
+        # that one recovery request.
+        self._durable_max_attempts = model_gateway.max_attempts
         self.model_gateway = _claim_planner_gateway(model_gateway)
 
     def plan(
@@ -110,12 +197,9 @@ class RuntimeClaimPlanner:
         normalized_run_id = _required_text(run_id, 300, "run_id")
         if mode not in {"shadow", "active"}:
             raise ValueError("unsupported research mode")
-        if isinstance(attempt_start, bool) or attempt_start < 1:
+        if isinstance(attempt_start, bool) or not isinstance(attempt_start, int) or attempt_start < 1:
             raise ValueError("attempt_start must be a positive integer")
-        if attempt_start > CLAIM_PLANNER_MAX_ATTEMPTS:
-            # Durable runtime recovery may observe a previous planner attempt.
-            # The planner budget is intentionally one physical model call, so a
-            # resumed operation fails closed rather than spending attempt two.
+        if attempt_start > self._durable_max_attempts:
             return ClaimBootstrapResult(
                 status="unavailable",
                 state=None,
@@ -135,7 +219,13 @@ class RuntimeClaimPlanner:
             "freshness_requested": bool(freshness_requested),
             "freshness_days": normalized_freshness,
         }
-        result = self.model_gateway.complete_structured(
+
+        # ResearchModelGateway interprets max_attempts as the terminal attempt
+        # number. Setting it to attempt_start on an invocation-local clone makes
+        # range(attempt_start, max_attempts + 1) contain exactly one request.
+        call_gateway = copy(self.model_gateway)
+        call_gateway.max_attempts = attempt_start
+        result = call_gateway.complete_structured(
             logical_call_id=f"research_claim_plan:{normalized_run_id}:1",
             purpose="research_claim_planning",
             messages=[
@@ -187,7 +277,7 @@ class RuntimeClaimPlanner:
 
 def _claim_planner_gateway(shared: ResearchModelGateway) -> ResearchModelGateway:
     gateway = copy(shared)
-    gateway.max_attempts = CLAIM_PLANNER_MAX_ATTEMPTS
+    gateway.max_attempts = CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION
 
     base_url = (getenv("RESEARCH_CLAIM_PLANNER_BASE_URL") or "").strip()
     model_name = (getenv("RESEARCH_CLAIM_PLANNER_MODEL_NAME") or "").strip()
@@ -198,18 +288,18 @@ def _claim_planner_gateway(shared: ResearchModelGateway) -> ResearchModelGateway
             "dedicated claim planner requires RESEARCH_CLAIM_PLANNER_BASE_URL, "
             "RESEARCH_CLAIM_PLANNER_MODEL_NAME, and RESEARCH_CLAIM_PLANNER_API_KEY"
         )
-    if not all(dedicated):
-        return gateway
 
-    # A dedicated endpoint is optional production configuration. The clone keeps
-    # the shared timeout/audit/provider profile while routing only claim planning
-    # to the fast model; assessor/extractor calls keep using the original gateway.
-    gateway._client = OpenAI(  # noqa: SLF001
-        api_key=api_key,
-        base_url=base_url,
-        max_retries=0,
-    )
-    gateway._model_name = model_name  # noqa: SLF001
+    if all(dedicated):
+        client: Any = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            max_retries=0,
+        )
+        gateway._model_name = model_name  # noqa: SLF001
+    else:
+        client = gateway._client  # noqa: SLF001
+
+    gateway._client = _ClaimPlannerClient(client)  # noqa: SLF001
     return gateway
 
 
@@ -233,7 +323,7 @@ def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
             {"surface", "kind", "priority", "policy_profile"},
             "runtime claim",
         )
-        surface = _required_text(claim.get("surface"), 1000, "claim surface")
+        surface = _required_text(claim.get("surface"), 160, "claim surface")
         dedupe_key = " ".join(surface.casefold().split())
         if dedupe_key in seen:
             raise ValueError("runtime claim plan contains duplicate claims")
@@ -243,9 +333,9 @@ def _parse_claim_plan(raw: Any) -> tuple[ProposedClaim, ...]:
         profile = _enum(
             claim.get("policy_profile"), _POLICY_PROFILES, "evidence policy profile"
         )
-        # This call is intentionally part of parse validation. Invalid
-        # kind/profile combinations consume the planner's explicit model attempt;
-        # the runtime never repairs them with keyword heuristics.
+        # Semantic compatibility remains a hard code-owned validation even when
+        # the provider honors JSON Schema. A provider that only guarantees JSON
+        # syntax therefore cannot silently weaken evidence policy.
         evidence_policy_for_claim(
             kind=kind,  # type: ignore[arg-type]
             priority=priority,  # type: ignore[arg-type]
@@ -450,7 +540,7 @@ def _enum(value: Any, allowed: set[str], label: str) -> str:
 
 
 __all__ = [
-    "CLAIM_PLANNER_MAX_ATTEMPTS",
+    "CLAIM_PLANNER_MAX_ATTEMPTS_PER_INVOCATION",
     "CLAIM_PLANNER_MAX_TOKENS",
     "ClaimBootstrapResult",
     "MAX_RUNTIME_CLAIMS",
