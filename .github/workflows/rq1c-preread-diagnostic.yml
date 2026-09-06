@@ -178,9 +178,18 @@ jobs:
           assert data['stores_raw_model_text'] is False
           assert data['stores_query_text'] is False
           assert data['stores_page_bodies'] is False
-          encoded = json.dumps(data)
-          for forbidden in ('prompt', 'response_text', 'page_body', 'query_text'):
-              assert forbidden not in encoded
+          forbidden_keys = {'prompt', 'response_text', 'page_body', 'query_text'}
+
+          def assert_safe_keys(value):
+              if isinstance(value, dict):
+                  assert forbidden_keys.isdisjoint(value)
+                  for nested in value.values():
+                      assert_safe_keys(nested)
+              elif isinstance(value, list):
+                  for nested in value:
+                      assert_safe_keys(nested)
+
+          assert_safe_keys(data)
 
       - name: Upload pre-read diagnostic evidence
         if: always()

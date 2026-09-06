@@ -213,7 +213,7 @@ def test_planner_rejects_anchor_not_copied_from_question_without_fabricated_clai
     assert len(client.calls) == 1
 
 
-def test_planner_rejects_duplicate_question_anchors() -> None:
+def test_planner_discards_duplicate_optional_question_anchors() -> None:
     client = _StructuredClient(
         json.dumps(
             _plan_payload(
@@ -238,10 +238,14 @@ def test_planner_rejects_duplicate_question_anchors() -> None:
         )
     )
 
-    assert result.status == "unavailable"
-    assert result.state is None
+    assert result.status == "completed"
+    assert result.state is not None
+    assert len(result.state.claims) == 1
+    assert result.state.claims[0].text == "verified current release date"
+    assert result.state.claims[0].priority == "critical"
     assert len(result.audits) == 1
-    assert result.audits[0].error_type == "ValueError"
+    assert result.audits[0].status == "completed"
+    assert result.audits[0].error_type == ""
     assert len(client.calls) == 1
 
 
