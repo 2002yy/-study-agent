@@ -42,13 +42,13 @@ jobs:
       NEWS_ENABLE_FIRECRAWL_READER: 'false'
       NEWS_ENABLE_JINA_READER: 'false'
       LLAMA_CPP_TAG: b10809
-      LLAMA_CPP_ARCHIVE_SHA256: 5e34434ddc6d03cd1584f403201aff0d4bd1a5793a72ff7e286532dfd1e4b941
+      LLAMA_CPP_ARCHIVE_SHA256: 5e34434ddc6d03cd1584f403201aff0d4bd1a5793a72ff7e286532dfd1e4b941  # pragma: allowlist secret
       HF_MODEL_REPO: unsloth/Qwen3-4B-Instruct-2507-GGUF
       HF_MODEL_FILE: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
       MODEL_ALIAS: rq1c-qwen3-4b-instruct-2507-q4km
       PLANNER_HF_MODEL_REPO: Qwen/Qwen2.5-1.5B-Instruct-GGUF
       PLANNER_HF_MODEL_FILE: qwen2.5-1.5b-instruct-q4_k_m.gguf
-      PLANNER_MODEL_SHA256_EXPECTED: 6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e
+      PLANNER_MODEL_SHA256_EXPECTED: 6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e  # pragma: allowlist secret
       PLANNER_MODEL_ALIAS: rq1c-qwen25-15b-instruct-q4km
 
     steps:
