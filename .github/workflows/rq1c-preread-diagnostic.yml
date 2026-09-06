@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   preread-diagnostic:
-    if: "${{ github.event.head_commit.message == 'rq1c-preread-diagnostic-live8' }}"
+    if: "${{ github.event.head_commit.message == 'rq1c-preread-diagnostic-live9' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

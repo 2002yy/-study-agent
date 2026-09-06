@@ -19,9 +19,9 @@ from openai import OpenAI
 
 from src.llm_client import get_client
 from src.web.research.candidate_assessment import (
-    CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+    CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
     build_candidate_assessment_request,
-    parse_candidate_assessment_response,
+    parse_compact_candidate_assessment_response,
 )
 from src.web.research.candidate_pool import CandidatePoolItem
 from src.web.research.candidate_ranking import CandidateSemanticAssessment
@@ -42,13 +42,15 @@ CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE = 100
 CANDIDATE_ASSESSMENT_WINDOW_MAX_TOKENS = 220
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
-Return strict JSON matching candidate-assessment-v1. Cover every candidate_id exactly once.
+Return strict compact JSON matching ca1. Return one row per input candidate, in input order;
+i is its zero-based array index. Use r=relevance, rc=relevance confidence, s=source role,
+sc=source-role confidence, and g=expected gain signals.
 This is pre-read lead triage: judge whether opening the candidate page could produce evidence,
 not whether the bounded search snippet already proves the claim. If title, snippet, or URL
 plausibly points to a claim-bearing page but metadata is insufficient, use topic_only or unknown
 and include new_provenance_lead. Use off_target only for a clear mismatch. Leave
 expected_gain_signals empty only when reading has no plausible evidence or provenance gain.
-Do not invent URLs, candidate IDs, publication dates, source clusters, or evidence."""
+Do not invent URLs, candidate indexes, publication dates, source clusters, or evidence."""
 
 _EXTRACTION_SYSTEM_PROMPT = """You extract one bounded evidence link from a successfully read public page.
 Return strict JSON matching research-evidence-extraction-v1. Use only the supplied page excerpt.
@@ -77,18 +79,18 @@ _GAIN_SIGNALS = (
 _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
-        "name": "research_candidate_assessment",
+        "name": "research_candidate_assessment_compact",
         "strict": True,
         "schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["schema_version", "assessments"],
+            "required": ["v", "a"],
             "properties": {
-                "schema_version": {
+                "v": {
                     "type": "string",
-                    "enum": [CANDIDATE_ASSESSMENT_SCHEMA_VERSION],
+                    "enum": [CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION],
                 },
-                "assessments": {
+                "a": {
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 100,
@@ -96,34 +98,34 @@ _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
                         "type": "object",
                         "additionalProperties": False,
                         "required": [
-                            "candidate_id",
-                            "relevance",
-                            "relevance_confidence",
-                            "source_role",
-                            "source_role_confidence",
-                            "expected_gain_signals",
+                            "i",
+                            "r",
+                            "rc",
+                            "s",
+                            "sc",
+                            "g",
                         ],
                         "properties": {
-                            "candidate_id": {"type": "string", "minLength": 1},
-                            "relevance": {
+                            "i": {"type": "integer", "minimum": 0, "maximum": 99},
+                            "r": {
                                 "type": "string",
                                 "enum": list(_RELEVANCE_LABELS),
                             },
-                            "relevance_confidence": {
+                            "rc": {
                                 "type": "number",
                                 "minimum": 0.0,
                                 "maximum": 1.0,
                             },
-                            "source_role": {
+                            "s": {
                                 "type": "string",
                                 "enum": sorted(_SOURCE_ROLES | {"unknown"}),
                             },
-                            "source_role_confidence": {
+                            "sc": {
                                 "type": "number",
                                 "minimum": 0.0,
                                 "maximum": 1.0,
                             },
-                            "expected_gain_signals": {
+                            "g": {
                                 "type": "array",
                                 "maxItems": len(_GAIN_SIGNALS),
                                 "uniqueItems": True,
@@ -282,8 +284,8 @@ class RuntimeCandidateAssessor:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             audit_payload=payload,
-            response_schema_version=CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
-            parse=lambda raw: parse_candidate_assessment_response(
+            response_schema_version=CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+            parse=lambda raw: parse_compact_candidate_assessment_response(
                 _mapping(raw, "candidate assessment response"),
                 request=request,
                 cluster_assignments=assignments,

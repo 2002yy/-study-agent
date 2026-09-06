@@ -11,7 +11,9 @@ from src.web.research.active_semantics import RuntimeCandidateAssessor
 
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+    CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
     build_candidate_assessment_request,
+    parse_compact_candidate_assessment_response,
     parse_candidate_assessment_response,
 )
 from src.web.research.candidate_pool import CandidatePoolItem
@@ -114,6 +116,65 @@ def test_parser_attaches_server_owned_cluster_freshness_and_cost() -> None:
     assert parsed["b"].freshness_score == 0.0
 
 
+def test_compact_parser_restores_server_owned_candidate_identity() -> None:
+    candidates = (_candidate("a"), _candidate("b"))
+    request = build_candidate_assessment_request(candidates, claim=_claim())
+
+    parsed = parse_compact_candidate_assessment_response(
+        {
+            "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+            "a": [
+                {
+                    "i": 0,
+                    "r": "answer_relevant",
+                    "rc": 0.8,
+                    "s": "primary",
+                    "sc": 0.9,
+                    "g": ["new_primary"],
+                },
+                {
+                    "i": 1,
+                    "r": "topic_only",
+                    "rc": 0.7,
+                    "s": "unknown",
+                    "sc": 0.6,
+                    "g": ["new_provenance_lead"],
+                },
+            ],
+        },
+        request=request,
+        cluster_assignments={"a": _assignment("a"), "b": _assignment("b")},
+    )
+
+    assert tuple(parsed) == ("a", "b")
+    assert parsed["a"].candidate_id == "a"
+    assert parsed["b"].cluster_id == "cluster-b"
+
+
+@pytest.mark.parametrize("indexes", [(1, 0), (0, 0), (0,)])
+def test_compact_parser_fails_closed_on_order_or_coverage(indexes: tuple[int, ...]) -> None:
+    candidates = (_candidate("a"), _candidate("b"))
+    request = build_candidate_assessment_request(candidates, claim=_claim())
+    rows = [
+        {
+            "i": index,
+            "r": "topic_only",
+            "rc": 0.8,
+            "s": "primary",
+            "sc": 0.9,
+            "g": ["new_provenance_lead"],
+        }
+        for index in indexes
+    ]
+
+    with pytest.raises(ValueError):
+        parse_compact_candidate_assessment_response(
+            {"v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION, "a": rows},
+            request=request,
+            cluster_assignments={"a": _assignment("a"), "b": _assignment("b")},
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["missing", "extra", "confidence", "cluster", "infinite_cost"],
@@ -158,7 +219,7 @@ class _AssessmentClient:
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content='{"schema_version":"candidate-assessment-v1","assessments":[{"candidate_id":"a","relevance":"answer_relevant","relevance_confidence":0.8,"source_role":"primary","source_role_confidence":0.9,"expected_gain_signals":["new_primary"]}]}'),
+                    message=SimpleNamespace(content='{"v":"ca1","a":[{"i":0,"r":"answer_relevant","rc":0.8,"s":"primary","sc":0.9,"g":["new_primary"]}]}'),
                     finish_reason="stop",
                 )
             ],
@@ -265,17 +326,20 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
     response_format = dedicated.calls[0]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
-    assessment_schema = response_format["json_schema"]["schema"]["properties"][
-        "assessments"
-    ]["items"]
+    schema = response_format["json_schema"]["schema"]
+    assert set(schema["required"]) == {"v", "a"}
+    assert schema["properties"]["v"]["enum"] == [
+        CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION
+    ]
+    assessment_schema = schema["properties"]["a"]["items"]
     assert assessment_schema["additionalProperties"] is False
     assert set(assessment_schema["required"]) == {
-        "candidate_id",
-        "relevance",
-        "relevance_confidence",
-        "source_role",
-        "source_role_confidence",
-        "expected_gain_signals",
+        "i",
+        "r",
+        "rc",
+        "s",
+        "sc",
+        "g",
     }
     assert shared.calls == []
 

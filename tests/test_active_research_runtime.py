@@ -190,21 +190,21 @@ class _StructuredClient:
             }
         elif "search candidates" in system:
             payload = {
-                "schema_version": "candidate-assessment-v1",
-                "assessments": [
+                "v": "ca1",
+                "a": [
                     {
-                        "candidate_id": item["candidate_id"],
-                        "relevance": "answer_relevant",
-                        "relevance_confidence": 0.98,
-                        "source_role": (
+                        "i": index,
+                        "r": "answer_relevant",
+                        "rc": 0.98,
+                        "s": (
                             "primary" if index == 0 else "independent_secondary"
                         ),
-                        "source_role_confidence": 0.95,
-                        "expected_gain_signals": [
+                        "sc": 0.95,
+                        "g": [
                             "new_primary" if index == 0 else "new_independent_cluster"
                         ],
                     }
-                    for index, item in enumerate(request["candidates"])
+                    for index, _item in enumerate(request["candidates"])
                 ],
             }
         else:
@@ -445,17 +445,17 @@ class _PrimaryRoleClient(_StructuredClient):
         if "search candidates" in system:
             request = loads(str(kwargs["messages"][1]["content"]))
             payload = {
-                "schema_version": "candidate-assessment-v1",
-                "assessments": [
+                "v": "ca1",
+                "a": [
                     {
-                        "candidate_id": item["candidate_id"],
-                        "relevance": "answer_relevant",
-                        "relevance_confidence": 0.98,
-                        "source_role": "primary",
-                        "source_role_confidence": 0.95,
-                        "expected_gain_signals": ["new_primary"],
+                        "i": index,
+                        "r": "answer_relevant",
+                        "rc": 0.98,
+                        "s": "primary",
+                        "sc": 0.95,
+                        "g": ["new_primary"],
                     }
-                    for item in request["candidates"]
+                    for index, _item in enumerate(request["candidates"])
                 ],
             }
             content = _json_dumps(payload)

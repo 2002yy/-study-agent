@@ -17,6 +17,7 @@ from src.web.research.contracts import ResearchClaim
 from src.web.research.source_cluster import CandidateClusterAssignment
 
 CANDIDATE_ASSESSMENT_SCHEMA_VERSION = "candidate-assessment-v1"
+CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION = "ca1"
 
 _RELEVANCE = {"answer_relevant", "topic_only", "off_target", "unknown"}
 _SOURCE_ROLES = {
@@ -43,6 +44,7 @@ _ASSESSMENT_KEYS = {
     "source_role_confidence",
     "expected_gain_signals",
 }
+_COMPACT_ASSESSMENT_KEYS = {"i", "r", "rc", "s", "sc", "g"}
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,58 @@ def parse_candidate_assessment_response(
     return parsed
 
 
+def parse_compact_candidate_assessment_response(
+    payload: Mapping[str, Any],
+    *,
+    request: CandidateAssessmentRequest,
+    cluster_assignments: Mapping[str, CandidateClusterAssignment],
+    freshness_scores: Mapping[str, float] | None = None,
+    read_costs: Mapping[str, float] | None = None,
+) -> dict[str, CandidateSemanticAssessment]:
+    """Expand the compact model wire into the stable domain contract.
+
+    Candidate identity never crosses the response boundary. Each row must use
+    its zero-based request position, in order and with complete coverage; the
+    server restores authoritative IDs before applying the existing strict
+    semantic parser.
+    """
+
+    if set(payload) != {"v", "a"}:
+        raise ValueError("compact candidate assessment has unknown or missing fields")
+    if payload.get("v") != CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION:
+        raise ValueError("compact candidate assessment schema version mismatch")
+    rows = payload.get("a")
+    if not isinstance(rows, list) or len(rows) != len(request.candidate_ids):
+        raise ValueError("compact candidate assessment coverage mismatch")
+    assessments: list[dict[str, Any]] = []
+    for expected_index, raw in enumerate(rows):
+        if not isinstance(raw, Mapping) or set(raw) != _COMPACT_ASSESSMENT_KEYS:
+            raise ValueError("compact candidate assessment row is malformed")
+        index = raw.get("i")
+        if isinstance(index, bool) or not isinstance(index, int) or index != expected_index:
+            raise ValueError("compact candidate assessment order mismatch")
+        assessments.append(
+            {
+                "candidate_id": request.candidate_ids[index],
+                "relevance": raw.get("r"),
+                "relevance_confidence": raw.get("rc"),
+                "source_role": raw.get("s"),
+                "source_role_confidence": raw.get("sc"),
+                "expected_gain_signals": raw.get("g"),
+            }
+        )
+    return parse_candidate_assessment_response(
+        {
+            "schema_version": CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+            "assessments": assessments,
+        },
+        request=request,
+        cluster_assignments=cluster_assignments,
+        freshness_scores=freshness_scores,
+        read_costs=read_costs,
+    )
+
+
 def _bounded_text(value: Any, limit: int, *, required: bool = False) -> str:
     text = " ".join(str(value or "").split())[:limit]
     if required and not text:
@@ -217,7 +271,9 @@ def _positive_float(value: Any, label: str) -> float:
 
 __all__ = [
     "CANDIDATE_ASSESSMENT_SCHEMA_VERSION",
+    "CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION",
     "CandidateAssessmentRequest",
     "build_candidate_assessment_request",
+    "parse_compact_candidate_assessment_response",
     "parse_candidate_assessment_response",
 ]
