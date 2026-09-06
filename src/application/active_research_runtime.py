@@ -114,6 +114,7 @@ ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY = "claim_engine_covered_clusters"
 ACTIVE_RESEARCH_BRIEF_KEY = "claim_engine_evidence_brief"
 ACTIVE_RESEARCH_METRICS_KEY = "claim_engine_metrics"
 ACTIVE_RESEARCH_POLICY_AUDITS_KEY = "claim_engine_policy_audits"
+CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES = 3
 
 PolicyCheck = Callable[[Mapping[str, Any], str], bool]
 
@@ -811,6 +812,9 @@ class ActiveResearchRuntimeExecutor:
                         assignments=assignments,
                         max_reads=state.budget.max_reads,
                     )
+                    assessment_assignments = {
+                        item.id: assignments[item.id] for item in candidates
+                    }
                     saved = stored_assessments.get(claim.id)
                     candidate_ids = tuple(sorted(item.id for item in candidates))
                     # Only candidates that can fit inside the run's physical
@@ -865,7 +869,7 @@ class ActiveResearchRuntimeExecutor:
                         run_id=run_id,
                         claim=claim,
                         candidates=candidates,
-                        assignments=assignments,
+                        assignments=assessment_assignments,
                         reference_date=state.reference_date,
                         timeout_seconds=remaining_timeout(),
                         on_attempt_started=on_model_started,
@@ -1873,7 +1877,14 @@ def _bounded_assessment_candidates(
     the run, preferring one candidate per server-owned source cluster before
     filling remaining slots in discovery order.
     """
-    limit = max(0, min(len(candidates), int(max_reads)))
+    limit = max(
+        0,
+        min(
+            len(candidates),
+            int(max_reads),
+            CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES,
+        ),
+    )
     if limit == 0:
         return ()
     ordered = tuple(sorted(candidates, key=lambda item: (item.first_seen_rank, item.id)))

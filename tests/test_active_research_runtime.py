@@ -121,7 +121,7 @@ def test_assessment_window_is_read_bounded_and_cluster_diverse() -> None:
         max_reads=4,
     )
 
-    assert [item.id for item in selected] == ["a", "c", "e", "f"]
+    assert [item.id for item in selected] == ["a", "c", "e"]
     assert _bounded_assessment_candidates(
         candidates,
         assignments=assignments,

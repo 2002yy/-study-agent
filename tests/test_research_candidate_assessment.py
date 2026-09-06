@@ -195,6 +195,7 @@ def test_runtime_assessor_spends_one_physical_attempt_per_invocation() -> None:
     assert [audit.attempt for audit in first.audits] == [1]
     assert [audit.attempt for audit in second.audits] == [2]
     assert len(client.calls) == 2
+    assert all(call["timeout"] == 15.0 for call in client.calls)
 
 
 def test_dedicated_assessor_endpoint_routes_only_assessment_model(
@@ -232,6 +233,7 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
         }
     ]
     assert dedicated.calls[0]["model"] == "fast-assessor"
+    assert dedicated.calls[0]["timeout"] == 15.0
     response_format = dedicated.calls[0]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True

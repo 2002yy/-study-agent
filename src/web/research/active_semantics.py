@@ -36,6 +36,7 @@ from src.web.research.source_cluster import CandidateClusterAssignment
 
 EVIDENCE_EXTRACTION_SCHEMA_VERSION = "research-evidence-extraction-v1"
 CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION = 1
+CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS = 15.0
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
 Return strict JSON matching candidate-assessment-v1. Cover every candidate_id exactly once.
@@ -261,6 +262,9 @@ class RuntimeCandidateAssessor:
         # inside one 60-second run.
         call_gateway = copy(self.model_gateway)
         call_gateway.max_attempts = attempt_start
+        assessment_timeout = CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS
+        if timeout_seconds is not None:
+            assessment_timeout = min(assessment_timeout, float(timeout_seconds))
         result = call_gateway.complete_structured(
             logical_call_id=(
                 f"research_candidate_assessment:{run_id}:{claim.id}:1{call_id_suffix}"
@@ -285,7 +289,7 @@ class RuntimeCandidateAssessor:
             },
             max_tokens=min(4000, 250 + len(candidates) * 120),
             temperature=0.0,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=assessment_timeout,
             on_attempt_started=on_attempt_started,
             on_attempt_finished=on_attempt_finished,
             attempt_start=attempt_start,
@@ -541,6 +545,7 @@ def _date_text(value: Any) -> str:
 
 __all__ = [
     "CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION",
+    "CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS",
     "CandidateAssessmentResult",
     "EVIDENCE_EXTRACTION_SCHEMA_VERSION",
     "EvidenceExtractionResult",

@@ -23,7 +23,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.application.active_research_runtime import ACTIVE_RESEARCH_METRICS_KEY  # noqa: E402
+from src.application.active_research_runtime import (  # noqa: E402
+    ACTIVE_RESEARCH_ASSESSMENTS_KEY,
+    ACTIVE_RESEARCH_METRICS_KEY,
+)
 from src.application.research_web_lookup_dispatch import (  # noqa: E402
     ClaimEngineDispatchWebLookupService,
 )
@@ -95,6 +98,54 @@ def _model_call_rows(runtime: Mapping[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _assessment_summary(context: Mapping[str, Any]) -> dict[str, Any]:
+    raw = context.get(ACTIVE_RESEARCH_ASSESSMENTS_KEY)
+    stores = raw if isinstance(raw, Mapping) else {}
+    counts: dict[str, dict[str, int]] = {
+        "eligibility_counts": {},
+        "relevance_counts": {},
+        "source_role_counts": {},
+        "reason_code_counts": {},
+        "gain_signal_counts": {},
+    }
+    ranked_candidate_count = 0
+
+    def increment(group: str, value: Any) -> None:
+        label = _bounded(value, 100)
+        if not label:
+            return
+        bucket = counts[group]
+        bucket[label] = bucket.get(label, 0) + 1
+
+    for ranked in stores.values():
+        if not isinstance(ranked, list):
+            continue
+        for row in ranked:
+            if not isinstance(row, Mapping):
+                continue
+            ranked_candidate_count += 1
+            increment("eligibility_counts", row.get("eligibility"))
+            reasons = row.get("reason_codes")
+            for reason in reasons if isinstance(reasons, list) else []:
+                increment("reason_code_counts", reason)
+            assessment = row.get("assessment")
+            if not isinstance(assessment, Mapping):
+                continue
+            increment("relevance_counts", assessment.get("relevance"))
+            increment("source_role_counts", assessment.get("source_role"))
+            signals = assessment.get("expected_gain_signals")
+            for signal in signals if isinstance(signals, list) else []:
+                increment("gain_signal_counts", signal)
+    return {
+        "ranked_candidate_count": ranked_candidate_count,
+        **{
+            key: dict(sorted(value.items()))
+            for key, value in counts.items()
+        },
+        "stores_candidate_identity": False,
+    }
+
+
 def _run_case(
     *,
     case: Mapping[str, str],
@@ -152,6 +203,7 @@ def _run_case(
             "read_count": _count(metrics.get("read_count")) or 0,
             "model_call_count": len(model_calls),
             "model_calls": model_calls,
+            "assessment_summary": _assessment_summary(context),
         },
         "stores_raw_model_text": False,
         "stores_query_text": False,
