@@ -91,7 +91,10 @@ from src.web.research.scheduler import (
     is_schedulable_candidate,
     plan_read_wave,
 )
-from src.web.research.source_cluster import cluster_candidate_sources
+from src.web.research.source_cluster import (
+    CandidateClusterAssignment,
+    cluster_candidate_sources,
+)
 from src.web.research.state import attach_claim_engine_state
 from src.web.research.steering import (
     ACTIVE_RESEARCH_STEERING_KEY,
@@ -798,14 +801,23 @@ class ActiveResearchRuntimeExecutor:
                 assessed_inputs = _assessment_inputs_store(context)
                 claim_rankings: dict[str, tuple[RankedCandidate, ...]] = {}
                 for claim in _ordered_claims(state):
-                    candidates = _candidates_for_claim(cursor, claim.id)
-                    if not candidates:
+                    claim_candidates = _candidates_for_claim(cursor, claim.id)
+                    if not claim_candidates:
                         continue
+                    clusters = cluster_candidate_sources(claim_candidates)
+                    assignments = {item.candidate_id: item for item in clusters.assignments}
+                    candidates = _bounded_assessment_candidates(
+                        claim_candidates,
+                        assignments=assignments,
+                        max_reads=state.budget.max_reads,
+                    )
                     saved = stored_assessments.get(claim.id)
                     candidate_ids = tuple(sorted(item.id for item in candidates))
-                    # P1-C batch 2: a later wave re-assesses a claim only when new
-                    # candidates appeared for it; unchanged candidate sets reuse
-                    # the durable rankings instead of burning model budget again.
+                    # Only candidates that can fit inside the run's physical
+                    # read budget are semantically assessed. The bounded window
+                    # is deterministic and cluster-diverse, so later waves can
+                    # reuse it without feeding an ever-growing pool back to the
+                    # model or silently collapsing source diversity.
                     if (
                         isinstance(saved, list)
                         and saved
@@ -814,8 +826,6 @@ class ActiveResearchRuntimeExecutor:
                         claim_rankings[claim.id] = tuple(_ranked_from_dict(item) for item in saved)
                         continue
                     ensure_budget()
-                    clusters = cluster_candidate_sources(candidates)
-                    assignments = {item.candidate_id: item for item in clusters.assignments}
                     categories = ("public_research_claim", "public_candidate_metadata")
                     assessment_logical_call_id = (
                         f"research_candidate_assessment:{run_id}:{claim.id}:1"
@@ -1848,6 +1858,40 @@ def _candidates_for_claim(cursor: ResearchRuntimeCursor, claim_id: str) -> tuple
         for item in cursor.candidates
         if query_ids.intersection(item.query_ids)
     )
+
+
+def _bounded_assessment_candidates(
+    candidates: tuple[CandidatePoolItem, ...],
+    *,
+    assignments: Mapping[str, CandidateClusterAssignment],
+    max_reads: int,
+) -> tuple[CandidatePoolItem, ...]:
+    """Select a stable, cluster-diverse semantic-assessment window.
+
+    The candidate pool remains frozen at its existing cap. This window only
+    bounds model input to candidates that could still become physical reads in
+    the run, preferring one candidate per server-owned source cluster before
+    filling remaining slots in discovery order.
+    """
+    limit = max(0, min(len(candidates), int(max_reads)))
+    if limit == 0:
+        return ()
+    ordered = tuple(sorted(candidates, key=lambda item: (item.first_seen_rank, item.id)))
+    selected: list[CandidatePoolItem] = []
+    deferred: list[CandidatePoolItem] = []
+    seen_clusters: set[str] = set()
+    for candidate in ordered:
+        assignment = assignments.get(candidate.id)
+        cluster_id = str(getattr(assignment, "cluster_id", "") or candidate.id)
+        if cluster_id in seen_clusters:
+            deferred.append(candidate)
+            continue
+        seen_clusters.add(cluster_id)
+        selected.append(candidate)
+        if len(selected) == limit:
+            return tuple(selected)
+    selected.extend(deferred[: limit - len(selected)])
+    return tuple(selected)
 
 
 def _assessment_store(context: dict[str, Any]) -> dict[str, Any]:

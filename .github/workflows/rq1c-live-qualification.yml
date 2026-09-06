@@ -33,6 +33,9 @@ jobs:
       RESEARCH_CLAIM_PLANNER_BASE_URL: http://127.0.0.1:8001/v1
       RESEARCH_CLAIM_PLANNER_MODEL_NAME: rq1c-qwen25-15b-instruct-q4km
       RESEARCH_CLAIM_PLANNER_API_KEY: local
+      RESEARCH_CANDIDATE_ASSESSOR_BASE_URL: http://127.0.0.1:8001/v1
+      RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME: rq1c-qwen25-15b-instruct-q4km
+      RESEARCH_CANDIDATE_ASSESSOR_API_KEY: local
       WEB_TOOL_ENABLED: 'true'
       WEB_ENABLE_DUCKDUCKGO: 'true'
       WEB_ENABLE_SEARXNG: 'false'
@@ -319,6 +322,10 @@ jobs:
               'planner_model_bytes': int(os.environ['PLANNER_MODEL_BYTES']),
               'planner_max_tokens': 320,
               'planner_max_attempts': 1,
+              'candidate_assessor_base_url': os.environ['RESEARCH_CANDIDATE_ASSESSOR_BASE_URL'],
+              'candidate_assessor_model_alias': os.environ['RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME'],
+              'candidate_assessor_max_candidates_per_claim': 8,
+              'candidate_assessor_max_attempts_per_invocation': 1,
               'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
               'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],
               'runner_arch': platform.machine(),

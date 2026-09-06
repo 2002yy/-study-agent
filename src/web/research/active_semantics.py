@@ -7,11 +7,15 @@ turn an unread page or a malformed response into eligible evidence.
 
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from datetime import date
 import json
 from math import isfinite
+from os import getenv
 from typing import Any, Mapping
+
+from openai import OpenAI
 
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
@@ -30,6 +34,7 @@ from src.web.research.model_gateway import (
 from src.web.research.source_cluster import CandidateClusterAssignment
 
 EVIDENCE_EXTRACTION_SCHEMA_VERSION = "research-evidence-extraction-v1"
+CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION = 1
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
 Return strict JSON matching candidate-assessment-v1. Cover every candidate_id exactly once.
@@ -98,7 +103,8 @@ class EvidenceExtractionResult:
 
 class RuntimeCandidateAssessor:
     def __init__(self, model_gateway: ResearchModelGateway) -> None:
-        self.model_gateway = model_gateway
+        self._durable_max_attempts = model_gateway.max_attempts
+        self.model_gateway = _candidate_assessor_gateway(model_gateway)
 
     def assess(
         self,
@@ -114,6 +120,19 @@ class RuntimeCandidateAssessor:
         call_id_suffix: str = "",
         attempt_start: int = 1,
     ) -> CandidateAssessmentResult:
+        if (
+            isinstance(attempt_start, bool)
+            or not isinstance(attempt_start, int)
+            or attempt_start < 1
+        ):
+            raise ValueError("attempt_start must be a positive integer")
+        if attempt_start > self._durable_max_attempts:
+            return CandidateAssessmentResult(
+                status="unavailable",
+                assessments={},
+                audits=(),
+                reason="model_call_attempts_exhausted",
+            )
         request = build_candidate_assessment_request(candidates, claim=claim)
         freshness = {
             item.id: _freshness_score(
@@ -124,7 +143,13 @@ class RuntimeCandidateAssessor:
             for item in candidates
         }
         payload = request.to_dict()
-        result = self.model_gateway.complete_structured(
+        # One invocation may spend only one physical request. Durable runtime
+        # recovery can still resume the same logical call at attempt two, but
+        # a slow assessment cannot consume both attempts and starve all reads
+        # inside one 60-second run.
+        call_gateway = copy(self.model_gateway)
+        call_gateway.max_attempts = attempt_start
+        result = call_gateway.complete_structured(
             logical_call_id=(
                 f"research_candidate_assessment:{run_id}:{claim.id}:1{call_id_suffix}"
             ),
@@ -154,11 +179,17 @@ class RuntimeCandidateAssessor:
             attempt_start=attempt_start,
         )
         if not result.completed or result.value is None:
+            reason = result.reason
+            if (
+                reason == "model_call_attempts_exhausted"
+                and attempt_start < self._durable_max_attempts
+            ):
+                reason = "candidate_assessment_attempt_failed"
             return CandidateAssessmentResult(
                 status=result.status,
                 assessments=result.value or {},
                 audits=result.audits,
-                reason=result.reason,
+                reason=reason,
             )
         return CandidateAssessmentResult(
             status=result.status,
@@ -166,6 +197,33 @@ class RuntimeCandidateAssessor:
             audits=result.audits,
             reason=result.reason,
         )
+
+
+def _candidate_assessor_gateway(
+    shared: ResearchModelGateway,
+) -> ResearchModelGateway:
+    gateway = copy(shared)
+    gateway.max_attempts = CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION
+
+    base_url = (getenv("RESEARCH_CANDIDATE_ASSESSOR_BASE_URL") or "").strip()
+    model_name = (getenv("RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME") or "").strip()
+    api_key = (getenv("RESEARCH_CANDIDATE_ASSESSOR_API_KEY") or "").strip()
+    dedicated = (base_url, model_name, api_key)
+    if any(dedicated) and not all(dedicated):
+        raise RuntimeError(
+            "dedicated candidate assessor requires "
+            "RESEARCH_CANDIDATE_ASSESSOR_BASE_URL, "
+            "RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME, and "
+            "RESEARCH_CANDIDATE_ASSESSOR_API_KEY"
+        )
+    if all(dedicated):
+        gateway._client = OpenAI(  # noqa: SLF001
+            api_key=api_key,
+            base_url=base_url,
+            max_retries=0,
+        )
+        gateway._model_name = model_name  # noqa: SLF001
+    return gateway
 
 
 class RuntimeEvidenceExtractor:
@@ -364,6 +422,7 @@ def _date_text(value: Any) -> str:
 
 
 __all__ = [
+    "CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION",
     "CandidateAssessmentResult",
     "EVIDENCE_EXTRACTION_SCHEMA_VERSION",
     "EvidenceExtractionResult",

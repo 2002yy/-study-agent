@@ -25,6 +25,7 @@ from src.application.active_research_runtime import (
     ActiveResearchRuntimeExecutor,
     RuntimePlannedQuery,
     _append_gap_queries,
+    _bounded_assessment_candidates,
     _restore_completed_read_targets,
 )
 from src.application.research_web_lookup_dispatch import (
@@ -47,6 +48,8 @@ from src.web.research.contracts import (
     build_research_state,
 )
 from src.web.research.model_gateway import ResearchModelGateway
+from src.web.research.candidate_pool import CandidatePoolItem
+from src.web.research.gap_planner import GapSearchIntent
 from src.web.research.runtime import CLAIM_ENGINE_RUNTIME_CONTEXT_KEY, ResearchRuntimeCursor
 from src.web.research.state import attach_claim_engine_state
 
@@ -83,6 +86,47 @@ def _active_context(*, policy_allowed: bool = True) -> dict[str, Any]:
         state,
         known_evidence_ids=(),
     )
+
+
+def test_assessment_window_is_read_bounded_and_cluster_diverse() -> None:
+    def candidate(candidate_id: str, rank: int) -> CandidatePoolItem:
+        url = f"https://{candidate_id}.example/item"
+        return CandidatePoolItem(
+            id=candidate_id,
+            canonical_url=url,
+            url=url,
+            title=candidate_id,
+            snippet="snippet",
+            source="source",
+            published_at="2026-09-05",
+            query_ids=("query",),
+            intents=(GapSearchIntent.PRIMARY,),
+            providers=("searxng",),
+            first_seen_rank=rank,
+        )
+
+    candidates = tuple(candidate(chr(97 + index), index + 1) for index in range(6))
+    assignments = {
+        "a": SimpleNamespace(cluster_id="cluster-1"),
+        "b": SimpleNamespace(cluster_id="cluster-1"),
+        "c": SimpleNamespace(cluster_id="cluster-2"),
+        "d": SimpleNamespace(cluster_id="cluster-2"),
+        "e": SimpleNamespace(cluster_id="cluster-3"),
+        "f": SimpleNamespace(cluster_id="cluster-4"),
+    }
+
+    selected = _bounded_assessment_candidates(
+        candidates,
+        assignments=assignments,
+        max_reads=4,
+    )
+
+    assert [item.id for item in selected] == ["a", "c", "e", "f"]
+    assert _bounded_assessment_candidates(
+        candidates,
+        assignments=assignments,
+        max_reads=0,
+    ) == ()
 
 
 class _StructuredClient:
@@ -2425,7 +2469,7 @@ def test_assessment_identity_stable_across_crash_resume(tmp_path: Any) -> None:
 
 
 def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> None:
-    """Two durable failed attempts must resume as claim-unavailable/no-gain.
+    """A failed attempt resumes once, then remains claim-local/no-gain.
 
     The same logical assessment is never called a third time and its exhausted
     ceiling must not escape into the whole-run active_runtime_unavailable path.
@@ -2439,7 +2483,7 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
                 raise RuntimeError("simulated assessment provider failure")
             return super().create(**kwargs)
 
-    class _CrashAfterAssessmentUnavailableRepository(_TrackingRepository):
+    class _CrashAfterFirstAssessmentFailureRepository(_TrackingRepository):
         def __init__(self, database: RuntimeDatabase) -> None:
             super().__init__(database)
             self.crashed = False
@@ -2451,28 +2495,28 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
             cursor = ResearchRuntimeCursor.from_dict(
                 persisted.research_context[CLAIM_ENGINE_RUNTIME_CONTEXT_KEY]
             )
-            exhausted = [
+            failed = [
                 call
                 for call in cursor.model_calls
                 if "research_candidate_assessment" in call.logical_call_id
                 and call.status == "attempt_failed"
             ]
-            if len(exhausted) == 2 and any(
+            if len(failed) == 1 and any(
                 failure.phase == "assessing"
-                and failure.code == "model_attempts_exhausted"
+                and failure.code == "assessment_failed"
                 for failure in cursor.failures
             ):
                 self.crashed = True
                 assert persisted.active_operation_id
                 self.fail(
                     run_id,
-                    "simulated process exit after assessment exhaustion",
+                    "simulated process exit after assessment failure",
                     operation_id=persisted.active_operation_id,
                 )
-                raise RuntimeError("simulated assessment exhaustion crash")
+                raise RuntimeError("simulated assessment failure crash")
             return persisted
 
-    repository = _CrashAfterAssessmentUnavailableRepository(
+    repository = _CrashAfterFirstAssessmentFailureRepository(
         RuntimeDatabase(tmp_path / "active-assessment-exhausted.sqlite")
     )
     run = repository.create(
@@ -2486,7 +2530,7 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
         )
     )
     failing_client = _AssessmentFailingClient()
-    with pytest.raises(RuntimeError, match="assessment exhaustion crash"):
+    with pytest.raises(RuntimeError, match="assessment failure crash"):
         _service(repository, failing_client).execute(run.id, raise_on_error=True)
 
     crashed = repository.get(run.id)
@@ -2499,14 +2543,10 @@ def test_resume_after_exhausted_assessment_stays_claim_local(tmp_path: Any) -> N
         for call in crashed_cursor.model_calls
         if "research_candidate_assessment" in call.logical_call_id
     ]
-    assert [call.attempt for call in exhausted_calls] == [1, 2]
+    assert [call.attempt for call in exhausted_calls] == [1]
     exhausted_logical_call_id = exhausted_calls[0].logical_call_id
-    assert all(
-        call.logical_call_id == exhausted_logical_call_id
-        for call in exhausted_calls
-    )
 
-    resumed = _service(repository, _StructuredClient()).execute(
+    resumed = _service(repository, failing_client).execute(
         run.id,
         raise_on_error=True,
     )

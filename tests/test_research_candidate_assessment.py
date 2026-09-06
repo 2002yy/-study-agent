@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+
+import src.web.research.active_semantics as active_semantics_module
+from src.web.research.active_semantics import RuntimeCandidateAssessor
 
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
@@ -12,6 +17,7 @@ from src.web.research.candidate_assessment import (
 from src.web.research.candidate_pool import CandidatePoolItem
 from src.web.research.contracts import EvidenceRequirement, ResearchClaim
 from src.web.research.gap_planner import GapSearchIntent
+from src.web.research.model_gateway import ResearchModelGateway
 from src.web.research.source_cluster import CandidateClusterAssignment
 
 
@@ -132,4 +138,105 @@ def test_parser_fails_closed_on_untrusted_or_incomplete_output(mutation: str) ->
             request=request,
             cluster_assignments={"a": _assignment("a"), "b": _assignment("b")},
             read_costs={"a": float("inf")} if mutation == "infinite_cost" else None,
+        )
+
+
+class _AssessmentClient:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.chat = SimpleNamespace(completions=self)
+        self.calls: list[dict[str, Any]] = []
+        self.fail = fail
+
+    def with_options(self, **kwargs: Any) -> "_AssessmentClient":
+        assert kwargs == {"max_retries": 0}
+        return self
+
+    def create(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if self.fail:
+            raise TimeoutError("slow assessment")
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"schema_version":"candidate-assessment-v1","assessments":[{"candidate_id":"a","relevance":"answer_relevant","relevance_confidence":0.8,"source_role":"primary","source_role_confidence":0.9,"expected_gain_signals":["new_primary"]}]}'),
+                    finish_reason="stop",
+                )
+            ],
+            usage=None,
+        )
+
+
+def _assess(assessor: RuntimeCandidateAssessor, *, attempt_start: int = 1):
+    return assessor.assess(
+        run_id="run",
+        claim=_claim(),
+        candidates=(_candidate("a"),),
+        assignments={"a": _assignment("a")},
+        reference_date="2026-09-05",
+        attempt_start=attempt_start,
+    )
+
+
+def test_runtime_assessor_spends_one_physical_attempt_per_invocation() -> None:
+    client = _AssessmentClient(fail=True)
+    assessor = RuntimeCandidateAssessor(
+        ResearchModelGateway(client=client, model_name="shared", max_attempts=2)
+    )
+
+    first = _assess(assessor)
+    second = _assess(assessor, attempt_start=2)
+
+    assert first.status == second.status == "unavailable"
+    assert [audit.attempt for audit in first.audits] == [1]
+    assert [audit.attempt for audit in second.audits] == [2]
+    assert len(client.calls) == 2
+
+
+def test_dedicated_assessor_endpoint_routes_only_assessment_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dedicated = _AssessmentClient()
+    created: list[dict[str, Any]] = []
+
+    def fake_openai(**kwargs: Any) -> _AssessmentClient:
+        created.append(kwargs)
+        return dedicated
+
+    monkeypatch.setenv("RESEARCH_CANDIDATE_ASSESSOR_BASE_URL", "http://127.0.0.1:8001/v1")
+    monkeypatch.setenv("RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME", "fast-assessor")
+    monkeypatch.setenv("RESEARCH_CANDIDATE_ASSESSOR_API_KEY", "local")
+    monkeypatch.setattr(active_semantics_module, "OpenAI", fake_openai)
+    shared = _AssessmentClient(fail=True)
+    assessor = RuntimeCandidateAssessor(
+        ResearchModelGateway(client=shared, model_name="shared", max_attempts=2)
+    )
+
+    result = _assess(assessor)
+
+    assert result.status == "completed"
+    assert created == [
+        {
+            "api_key": "local",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "max_retries": 0,
+        }
+    ]
+    assert dedicated.calls[0]["model"] == "fast-assessor"
+    assert shared.calls == []
+
+
+def test_partial_dedicated_assessor_configuration_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RESEARCH_CANDIDATE_ASSESSOR_BASE_URL", "http://127.0.0.1:8001/v1")
+    monkeypatch.delenv("RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME", raising=False)
+    monkeypatch.delenv("RESEARCH_CANDIDATE_ASSESSOR_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="dedicated candidate assessor requires"):
+        RuntimeCandidateAssessor(
+            ResearchModelGateway(
+                client=_AssessmentClient(),
+                model_name="shared",
+                max_attempts=2,
+            )
         )
