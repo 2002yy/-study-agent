@@ -199,6 +199,32 @@ def test_runtime_assessor_spends_one_physical_attempt_per_invocation() -> None:
     assert all(call["max_tokens"] == 200 for call in client.calls)
 
 
+def test_runtime_assessor_caps_two_candidate_window_at_220_tokens() -> None:
+    client = _AssessmentClient()
+    assessor = RuntimeCandidateAssessor(
+        ResearchModelGateway(
+            client=client,
+            model_name="shared",
+            max_attempts=2,
+            timeout_seconds=20,
+        )
+    )
+
+    assessor.assess(
+        run_id="run-two-candidate-cap",
+        claim=_claim(),
+        candidates=(_candidate("a"), _candidate("b")),
+        assignments={
+            "a": _assignment("a"),
+            "b": _assignment("b"),
+        },
+        reference_date="2026-09-05",
+        timeout_seconds=15.0,
+    )
+
+    assert client.calls[0]["max_tokens"] == 220
+
+
 def test_dedicated_assessor_endpoint_routes_only_assessment_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
