@@ -151,7 +151,42 @@ def test_compact_parser_restores_server_owned_candidate_identity() -> None:
     assert parsed["b"].cluster_id == "cluster-b"
 
 
-@pytest.mark.parametrize("indexes", [(1, 0), (0, 0), (0,)])
+def test_compact_parser_normalizes_one_based_candidate_indexes() -> None:
+    candidates = (_candidate("a"), _candidate("b"))
+    request = build_candidate_assessment_request(candidates, claim=_claim())
+
+    parsed = parse_compact_candidate_assessment_response(
+        {
+            "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+            "a": [
+                {
+                    "i": 1,
+                    "r": "answer_relevant",
+                    "rc": 0.8,
+                    "s": "primary",
+                    "sc": 0.9,
+                    "g": ["new_primary"],
+                },
+                {
+                    "i": 2,
+                    "r": "topic_only",
+                    "rc": 0.7,
+                    "s": "unknown",
+                    "sc": 0.6,
+                    "g": ["new_provenance_lead"],
+                },
+            ],
+        },
+        request=request,
+        cluster_assignments={"a": _assignment("a"), "b": _assignment("b")},
+    )
+
+    assert tuple(parsed) == ("a", "b")
+    assert parsed["a"].candidate_id == "a"
+    assert parsed["b"].candidate_id == "b"
+
+
+@pytest.mark.parametrize("indexes", [(1, 0), (0, 0), (0, 2), (0,)])
 def test_compact_parser_fails_closed_on_order_or_coverage(indexes: tuple[int, ...]) -> None:
     candidates = (_candidate("a"), _candidate("b"))
     request = build_candidate_assessment_request(candidates, claim=_claim())

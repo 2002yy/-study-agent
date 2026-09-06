@@ -183,9 +183,9 @@ def parse_compact_candidate_assessment_response(
     """Expand the compact model wire into the stable domain contract.
 
     Candidate identity never crosses the response boundary. Each row must use
-    its zero-based request position, in order and with complete coverage; the
-    server restores authoritative IDs before applying the existing strict
-    semantic parser.
+    a consistent zero- or one-based request position, in order and with
+    complete coverage; the server restores authoritative IDs before applying
+    the existing strict semantic parser.
     """
 
     if set(payload) != {"v", "a"}:
@@ -195,16 +195,27 @@ def parse_compact_candidate_assessment_response(
     rows = payload.get("a")
     if not isinstance(rows, list) or len(rows) != len(request.candidate_ids):
         raise ValueError("compact candidate assessment coverage mismatch")
-    assessments: list[dict[str, Any]] = []
-    for expected_index, raw in enumerate(rows):
+    indexes: list[int] = []
+    for raw in rows:
         if not isinstance(raw, Mapping) or set(raw) != _COMPACT_ASSESSMENT_KEYS:
             raise ValueError("compact candidate assessment row is malformed")
         index = raw.get("i")
-        if isinstance(index, bool) or not isinstance(index, int) or index != expected_index:
+        if isinstance(index, bool) or not isinstance(index, int):
             raise ValueError("compact candidate assessment order mismatch")
+        indexes.append(index)
+    zero_based = list(range(len(rows)))
+    one_based = list(range(1, len(rows) + 1))
+    if indexes == zero_based:
+        index_base = 0
+    elif indexes == one_based:
+        index_base = 1
+    else:
+        raise ValueError("compact candidate assessment order mismatch")
+    assessments: list[dict[str, Any]] = []
+    for raw, index in zip(rows, indexes, strict=True):
         assessments.append(
             {
-                "candidate_id": request.candidate_ids[index],
+                "candidate_id": request.candidate_ids[index - index_base],
                 "relevance": raw.get("r"),
                 "relevance_confidence": raw.get("rc"),
                 "source_role": raw.get("s"),

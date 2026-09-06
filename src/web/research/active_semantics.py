@@ -43,7 +43,8 @@ CANDIDATE_ASSESSMENT_WINDOW_MAX_TOKENS = 220
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
 Return strict compact JSON matching ca1. Return one row per input candidate, in input order;
-i is its zero-based array index. Use r=relevance, rc=relevance confidence, s=source role,
+i is its zero- or one-based array position; use one convention consistently for all rows.
+Use r=relevance, rc=relevance confidence, s=source role,
 sc=source-role confidence, and g=expected gain signals.
 This is pre-read lead triage: judge whether opening the candidate page could produce evidence,
 not whether the bounded search snippet already proves the claim. If title, snippet, or URL
@@ -106,7 +107,7 @@ _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
                             "g",
                         ],
                         "properties": {
-                            "i": {"type": "integer", "minimum": 0, "maximum": 99},
+                            "i": {"type": "integer", "minimum": 0, "maximum": 100},
                             "r": {
                                 "type": "string",
                                 "enum": list(_RELEVANCE_LABELS),
