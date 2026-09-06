@@ -180,7 +180,12 @@ def _assess(assessor: RuntimeCandidateAssessor, *, attempt_start: int = 1):
 def test_runtime_assessor_spends_one_physical_attempt_per_invocation() -> None:
     client = _AssessmentClient(fail=True)
     assessor = RuntimeCandidateAssessor(
-        ResearchModelGateway(client=client, model_name="shared", max_attempts=2)
+        ResearchModelGateway(
+            client=client,
+            model_name="shared",
+            max_attempts=2,
+            timeout_seconds=20,
+        )
     )
 
     first = _assess(assessor)
@@ -208,7 +213,12 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
     monkeypatch.setattr(active_semantics_module, "OpenAI", fake_openai)
     shared = _AssessmentClient(fail=True)
     assessor = RuntimeCandidateAssessor(
-        ResearchModelGateway(client=shared, model_name="shared", max_attempts=2)
+        ResearchModelGateway(
+            client=shared,
+            model_name="shared",
+            max_attempts=2,
+            timeout_seconds=20,
+        )
     )
 
     result = _assess(assessor)
@@ -222,6 +232,21 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
         }
     ]
     assert dedicated.calls[0]["model"] == "fast-assessor"
+    response_format = dedicated.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assessment_schema = response_format["json_schema"]["schema"]["properties"][
+        "assessments"
+    ]["items"]
+    assert assessment_schema["additionalProperties"] is False
+    assert set(assessment_schema["required"]) == {
+        "candidate_id",
+        "relevance",
+        "relevance_confidence",
+        "source_role",
+        "source_role_confidence",
+        "expected_gain_signals",
+    }
     assert shared.calls == []
 
 
@@ -238,5 +263,6 @@ def test_partial_dedicated_assessor_configuration_fails_fast(
                 client=_AssessmentClient(),
                 model_name="shared",
                 max_attempts=2,
+                timeout_seconds=20,
             )
         )

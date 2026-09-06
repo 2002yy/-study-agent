@@ -17,6 +17,7 @@ from typing import Any, Mapping
 
 from openai import OpenAI
 
+from src.llm_client import get_client
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
     build_candidate_assessment_request,
@@ -55,6 +56,80 @@ _SOURCE_ROLES = {
     "independent_secondary",
     "community",
     "aggregator",
+}
+_RELEVANCE_LABELS = ("answer_relevant", "topic_only", "off_target", "unknown")
+_GAIN_SIGNALS = (
+    "new_primary",
+    "new_independent_cluster",
+    "new_contradiction",
+    "new_provenance_lead",
+    "freshness_update",
+    "claim_status_improvement",
+)
+_CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "research_candidate_assessment",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["schema_version", "assessments"],
+            "properties": {
+                "schema_version": {
+                    "type": "string",
+                    "enum": [CANDIDATE_ASSESSMENT_SCHEMA_VERSION],
+                },
+                "assessments": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "candidate_id",
+                            "relevance",
+                            "relevance_confidence",
+                            "source_role",
+                            "source_role_confidence",
+                            "expected_gain_signals",
+                        ],
+                        "properties": {
+                            "candidate_id": {"type": "string", "minLength": 1},
+                            "relevance": {
+                                "type": "string",
+                                "enum": list(_RELEVANCE_LABELS),
+                            },
+                            "relevance_confidence": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                            },
+                            "source_role": {
+                                "type": "string",
+                                "enum": sorted(_SOURCE_ROLES | {"unknown"}),
+                            },
+                            "source_role_confidence": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                            },
+                            "expected_gain_signals": {
+                                "type": "array",
+                                "maxItems": len(_GAIN_SIGNALS),
+                                "uniqueItems": True,
+                                "items": {
+                                    "type": "string",
+                                    "enum": list(_GAIN_SIGNALS),
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
 }
 _EXTRACTION_FIELDS = {
     "schema_version",
@@ -99,6 +174,43 @@ class EvidenceExtractionResult:
     extraction: ExtractedEvidenceLink | None
     audits: tuple[ResearchModelCallAudit, ...]
     reason: str = ""
+
+
+class _CandidateAssessorCompletions:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def create(self, **kwargs: Any) -> Any:
+        kwargs["response_format"] = _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT
+        return self._inner.create(**kwargs)
+
+
+class _CandidateAssessorChat:
+    def __init__(self, inner: Any) -> None:
+        self.completions = _CandidateAssessorCompletions(inner.completions)
+
+
+class _CandidateAssessorClient:
+    """Inject strict assessment JSON Schema while preserving lazy clients."""
+
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
+        self._inner = inner
+        self._provider_profile = provider_profile
+
+    @property
+    def chat(self) -> _CandidateAssessorChat:
+        return _CandidateAssessorChat(self._resolved_inner().chat)
+
+    def with_options(self, **kwargs: Any) -> _CandidateAssessorClient:
+        return _CandidateAssessorClient(
+            self._resolved_inner().with_options(**kwargs),
+            provider_profile=self._provider_profile,
+        )
+
+    def _resolved_inner(self) -> Any:
+        if self._inner is not None:
+            return self._inner
+        return get_client(provider_profile=self._provider_profile)
 
 
 class RuntimeCandidateAssessor:
@@ -217,12 +329,18 @@ def _candidate_assessor_gateway(
             "RESEARCH_CANDIDATE_ASSESSOR_API_KEY"
         )
     if all(dedicated):
-        gateway._client = OpenAI(  # noqa: SLF001
+        client: Any = OpenAI(
             api_key=api_key,
             base_url=base_url,
             max_retries=0,
         )
         gateway._model_name = model_name  # noqa: SLF001
+    else:
+        client = gateway._client  # noqa: SLF001
+    gateway._client = _CandidateAssessorClient(  # noqa: SLF001
+        client,
+        provider_profile=gateway.provider_profile,
+    )
     return gateway
 
 
