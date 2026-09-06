@@ -121,12 +121,19 @@ def test_assessment_window_is_read_bounded_and_cluster_diverse() -> None:
         max_reads=4,
     )
 
-    assert [item.id for item in selected] == ["a", "c", "e"]
+    assert [item.id for item in selected] == ["a", "c"]
     assert _bounded_assessment_candidates(
         candidates,
         assignments=assignments,
         max_reads=0,
     ) == ()
+    advanced = _bounded_assessment_candidates(
+        candidates,
+        assignments=assignments,
+        max_reads=4,
+        excluded_candidate_ids=frozenset({"a", "c"}),
+    )
+    assert [item.id for item in advanced] == ["b", "d"]
 
 
 class _StructuredClient:

@@ -114,7 +114,7 @@ ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY = "claim_engine_covered_clusters"
 ACTIVE_RESEARCH_BRIEF_KEY = "claim_engine_evidence_brief"
 ACTIVE_RESEARCH_METRICS_KEY = "claim_engine_metrics"
 ACTIVE_RESEARCH_POLICY_AUDITS_KEY = "claim_engine_policy_audits"
-CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES = 3
+CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES = 2
 
 PolicyCheck = Callable[[Mapping[str, Any], str], bool]
 
@@ -805,30 +805,37 @@ class ActiveResearchRuntimeExecutor:
                     claim_candidates = _candidates_for_claim(cursor, claim.id)
                     if not claim_candidates:
                         continue
+                    saved = stored_assessments.get(claim.id)
+                    saved_ranked = (
+                        tuple(_ranked_from_dict(item) for item in saved)
+                        if isinstance(saved, list) and saved
+                        else ()
+                    )
+                    if saved_ranked:
+                        claim_rankings[claim.id] = saved_ranked
+                    saved_candidate_ids = {
+                        item.candidate.id for item in saved_ranked
+                    }
                     clusters = cluster_candidate_sources(claim_candidates)
                     assignments = {item.candidate_id: item for item in clusters.assignments}
                     candidates = _bounded_assessment_candidates(
                         claim_candidates,
                         assignments=assignments,
                         max_reads=state.budget.max_reads,
+                        excluded_candidate_ids=frozenset(
+                            {*cursor.completed_read_ids, *saved_candidate_ids}
+                        ),
                     )
+                    if not candidates:
+                        continue
                     assessment_assignments = {
                         item.id: assignments[item.id] for item in candidates
                     }
-                    saved = stored_assessments.get(claim.id)
                     candidate_ids = tuple(sorted(item.id for item in candidates))
-                    # Only candidates that can fit inside the run's physical
-                    # read budget are semantically assessed. The bounded window
-                    # is deterministic and cluster-diverse, so later waves can
-                    # reuse it without feeding an ever-growing pool back to the
-                    # model or silently collapsing source diversity.
-                    if (
-                        isinstance(saved, list)
-                        and saved
-                        and assessed_inputs.get(claim.id) == list(candidate_ids)
-                    ):
-                        claim_rankings[claim.id] = tuple(_ranked_from_dict(item) for item in saved)
-                        continue
+                    # Assess only a new, unread cluster-diverse window. Prior
+                    # rankings remain durable inputs for scheduling and crash
+                    # recovery; successful later windows are merged and
+                    # reranked instead of replacing those bindings.
                     ensure_budget()
                     categories = ("public_research_claim", "public_candidate_metadata")
                     assessment_logical_call_id = (
@@ -898,14 +905,23 @@ class ActiveResearchRuntimeExecutor:
                         )
                         checkpoint()
                         continue
+                    merged_assessments = {
+                        item.candidate.id: item.assessment for item in saved_ranked
+                    }
+                    merged_assessments.update(assessed.assessments)
+                    ranked_candidates = tuple(
+                        item
+                        for item in claim_candidates
+                        if item.id in merged_assessments
+                    )
                     ranked = rank_candidate_pool(
-                        candidates,
+                        ranked_candidates,
                         claim=claim,
-                        assessments=assessed.assessments,
+                        assessments=merged_assessments,
                     )
                     claim_rankings[claim.id] = ranked
                     stored_assessments[claim.id] = [item.to_dict() for item in ranked]
-                    assessed_inputs[claim.id] = list(candidate_ids)
+                    assessed_inputs[claim.id] = sorted(merged_assessments)
                     context[ACTIVE_RESEARCH_ASSESSMENTS_KEY] = stored_assessments
                     context[ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY] = assessed_inputs
                     checkpoint()
@@ -1869,6 +1885,7 @@ def _bounded_assessment_candidates(
     *,
     assignments: Mapping[str, CandidateClusterAssignment],
     max_reads: int,
+    excluded_candidate_ids: frozenset[str] = frozenset(),
 ) -> tuple[CandidatePoolItem, ...]:
     """Select a stable, cluster-diverse semantic-assessment window.
 
@@ -1877,17 +1894,20 @@ def _bounded_assessment_candidates(
     the run, preferring one candidate per server-owned source cluster before
     filling remaining slots in discovery order.
     """
+    unread = tuple(
+        item for item in candidates if item.id not in excluded_candidate_ids
+    )
     limit = max(
         0,
         min(
-            len(candidates),
+            len(unread),
             int(max_reads),
             CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES,
         ),
     )
     if limit == 0:
         return ()
-    ordered = tuple(sorted(candidates, key=lambda item: (item.first_seen_rank, item.id)))
+    ordered = tuple(sorted(unread, key=lambda item: (item.first_seen_rank, item.id)))
     selected: list[CandidatePoolItem] = []
     deferred: list[CandidatePoolItem] = []
     seen_clusters: set[str] = set()
