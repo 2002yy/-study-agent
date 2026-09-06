@@ -37,10 +37,16 @@ from src.web.research.source_cluster import CandidateClusterAssignment
 EVIDENCE_EXTRACTION_SCHEMA_VERSION = "research-evidence-extraction-v1"
 CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION = 1
 CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS = 15.0
+CANDIDATE_ASSESSMENT_BASE_MAX_TOKENS = 120
+CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE = 100
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
 Return strict JSON matching candidate-assessment-v1. Cover every candidate_id exactly once.
-Judge whether the candidate can answer the claim, not whether it merely shares topic words.
+This is pre-read lead triage: judge whether opening the candidate page could produce evidence,
+not whether the bounded search snippet already proves the claim. If title, snippet, or URL
+plausibly points to a claim-bearing page but metadata is insufficient, use topic_only or unknown
+and include new_provenance_lead. Use off_target only for a clear mismatch. Leave
+expected_gain_signals empty only when reading has no plausible evidence or provenance gain.
 Do not invent URLs, candidate IDs, publication dates, source clusters, or evidence."""
 
 _EXTRACTION_SYSTEM_PROMPT = """You extract one bounded evidence link from a successfully read public page.
@@ -287,7 +293,11 @@ class RuntimeCandidateAssessor:
                 "research_claim": 1,
                 "candidate_metadata": len(candidates),
             },
-            max_tokens=min(4000, 250 + len(candidates) * 120),
+            max_tokens=min(
+                4000,
+                CANDIDATE_ASSESSMENT_BASE_MAX_TOKENS
+                + len(candidates) * CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE,
+            ),
             temperature=0.0,
             timeout_seconds=assessment_timeout,
             on_attempt_started=on_attempt_started,
@@ -545,6 +555,8 @@ def _date_text(value: Any) -> str:
 
 __all__ = [
     "CANDIDATE_ASSESSMENT_MAX_ATTEMPTS_PER_INVOCATION",
+    "CANDIDATE_ASSESSMENT_BASE_MAX_TOKENS",
+    "CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE",
     "CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS",
     "CandidateAssessmentResult",
     "EVIDENCE_EXTRACTION_SCHEMA_VERSION",

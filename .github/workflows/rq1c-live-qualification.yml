@@ -326,6 +326,7 @@ jobs:
               'candidate_assessor_model_alias': os.environ['RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME'],
               'candidate_assessor_max_candidates_per_claim': 3,
               'candidate_assessor_max_attempts_per_invocation': 1,
+              'candidate_assessor_max_tokens_per_three_candidates': 420,
               'candidate_assessor_timeout_seconds': 15,
               'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
               'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],
