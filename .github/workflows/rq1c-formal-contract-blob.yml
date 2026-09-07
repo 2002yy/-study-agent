@@ -1,0 +1,84 @@
+name: RQ1-C Formal Contract Blob Uploader
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  blob:
+    if: "${{ github.event.head_commit.message == 'ci: create rq1c formal contract blob' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/rq1c-bounded-qualification
+      - name: Patch and validate formal workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('.github/workflows/rq1c-live-qualification.yml')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ('    timeout-minutes: 45\n', '    timeout-minutes: 90\n'),
+              (
+                  "              'qualification_hosted_cpu_hard_timeout_seconds': 300,\n"
+                  "              'hosted_cpu_wallclock_exempt': (\n",
+                  "              'qualification_hosted_cpu_hard_timeout_seconds': 300,\n"
+                  "              'qualification_hosted_cpu_case_hard_timeout_seconds': 540,\n"
+                  "              'qualification_hosted_cpu_answer_timeout_seconds': 120,\n"
+                  "              'hosted_cpu_wallclock_exempt': (\n",
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one patch anchor, got {count}: {old!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+      - name: Verify single-file bounded diff and create Git blob
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only)" = ".github/workflows/rq1c-live-qualification.yml"
+          grep -F "timeout-minutes: 90" .github/workflows/rq1c-live-qualification.yml
+          grep -F "'qualification_hosted_cpu_case_hard_timeout_seconds': 540" .github/workflows/rq1c-live-qualification.yml
+          grep -F "'qualification_hosted_cpu_answer_timeout_seconds': 120" .github/workflows/rq1c-live-qualification.yml
+          git diff --check
+          git diff --numstat .github/workflows/rq1c-live-qualification.yml | tee formal-contract-numstat.txt
+          python - <<'PY' > blob-request.json
+          import base64, json
+          from pathlib import Path
+          data = Path('.github/workflows/rq1c-live-qualification.yml').read_bytes()
+          print(json.dumps({'content': base64.b64encode(data).decode(), 'encoding': 'base64'}))
+          PY
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs" \
+            --data-binary @blob-request.json > blob-response.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('blob-response.json').read_text())
+          sha = str(data.get('sha') or '')
+          if len(sha) != 40:
+              raise SystemExit(f'invalid blob response: {data}')
+          Path('formal-contract-blob-sha.txt').write_text(sha + '\n')
+          print(sha)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rq1c-formal-contract-blob
+          path: |
+            formal-contract-blob-sha.txt
+            formal-contract-numstat.txt
+          if-no-files-found: error
+          retention-days: 2
