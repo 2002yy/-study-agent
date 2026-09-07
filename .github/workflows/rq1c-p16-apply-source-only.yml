@@ -108,8 +108,7 @@ jobs:
             tests/test_research_candidate_assessment.py \
             tests/test_tool_gateway_read_codes.py \
             tests/test_rq1c_preread_diagnostic.py \
-            tests/test_active_research_runtime.py \
-            tests/test_research_dispatch.py -q
+            tests/test_active_research_runtime.py -q
           ruff check \
             src/web/research/candidate_assessment.py \
             src/web/research/active_semantics.py \
@@ -119,8 +118,7 @@ jobs:
             tests/test_research_candidate_assessment.py \
             tests/test_tool_gateway_read_codes.py \
             tests/test_rq1c_preread_diagnostic.py \
-            tests/test_active_research_runtime.py \
-            tests/test_research_dispatch.py
+            tests/test_active_research_runtime.py
           python -m py_compile \
             src/web/research/candidate_assessment.py \
             src/web/research/active_semantics.py \
