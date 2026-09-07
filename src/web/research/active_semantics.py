@@ -7,7 +7,7 @@ turn an unread page or a malformed response into eligible evidence.
 
 from __future__ import annotations
 
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from datetime import date
 import json
@@ -192,7 +192,25 @@ class _CandidateAssessorCompletions:
         self._inner = inner
 
     def create(self, **kwargs: Any) -> Any:
-        kwargs["response_format"] = _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT
+        response_format = deepcopy(_CANDIDATE_ASSESSMENT_RESPONSE_FORMAT)
+        messages = kwargs.get("messages")
+        if (
+            not isinstance(messages, list)
+            or not messages
+            or not isinstance(messages[-1], Mapping)
+        ):
+            raise ValueError("candidate assessment request messages invalid")
+        try:
+            request_payload = json.loads(str(messages[-1]["content"]))
+            candidate_count = len(request_payload["candidates"])
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError("candidate assessment request envelope invalid") from exc
+        if not 1 <= candidate_count <= 100:
+            raise ValueError("candidate assessment request count invalid")
+        rows_schema = response_format["json_schema"]["schema"]["properties"]["a"]
+        rows_schema["minItems"] = candidate_count
+        rows_schema["maxItems"] = candidate_count
+        kwargs["response_format"] = response_format
         return self._inner.create(**kwargs)
 
 

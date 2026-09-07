@@ -329,6 +329,7 @@ jobs:
               'candidate_assessor_max_tokens_per_two_candidates': 220,
               'candidate_assessor_wire_schema': 'ca1',
               'candidate_assessor_index_conventions': ['zero_based', 'one_based'],
+              'candidate_assessor_exact_response_rows': True,
               'candidate_assessor_timeout_seconds': 15,
               'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
               'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],

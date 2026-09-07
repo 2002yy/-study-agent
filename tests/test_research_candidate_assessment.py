@@ -319,6 +319,11 @@ def test_runtime_assessor_caps_two_candidate_window_at_220_tokens() -> None:
     )
 
     assert client.calls[0]["max_tokens"] == 220
+    rows_schema = client.calls[0]["response_format"]["json_schema"]["schema"][
+        "properties"
+    ]["a"]
+    assert rows_schema["minItems"] == 2
+    assert rows_schema["maxItems"] == 2
 
 
 def test_dedicated_assessor_endpoint_routes_only_assessment_model(
@@ -367,6 +372,8 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
         CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION
     ]
     assessment_schema = schema["properties"]["a"]["items"]
+    assert schema["properties"]["a"]["minItems"] == 1
+    assert schema["properties"]["a"]["maxItems"] == 1
     assert assessment_schema["additionalProperties"] is False
     assert set(assessment_schema["required"]) == {
         "i",

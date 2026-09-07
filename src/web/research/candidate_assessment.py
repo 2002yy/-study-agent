@@ -47,6 +47,26 @@ _ASSESSMENT_KEYS = {
 _COMPACT_ASSESSMENT_KEYS = {"i", "r", "rc", "s", "sc", "g"}
 
 
+class CompactAssessmentEnvelopeError(ValueError):
+    """Compact response envelope or version is invalid."""
+
+
+class CompactAssessmentCoverageError(ValueError):
+    """Compact response does not cover the requested candidate count."""
+
+
+class CompactAssessmentRowError(ValueError):
+    """Compact response row shape is invalid."""
+
+
+class CompactAssessmentOrderError(ValueError):
+    """Compact response indexes are not one consistent ordered sequence."""
+
+
+class CompactAssessmentDomainError(ValueError):
+    """Expanded response failed the stable semantic domain contract."""
+
+
 @dataclass(frozen=True)
 class CandidateAssessmentRequest:
     schema_version: str
@@ -189,19 +209,19 @@ def parse_compact_candidate_assessment_response(
     """
 
     if set(payload) != {"v", "a"}:
-        raise ValueError("compact candidate assessment has unknown or missing fields")
+        raise CompactAssessmentEnvelopeError("compact assessment envelope invalid")
     if payload.get("v") != CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION:
-        raise ValueError("compact candidate assessment schema version mismatch")
+        raise CompactAssessmentEnvelopeError("compact assessment version invalid")
     rows = payload.get("a")
     if not isinstance(rows, list) or len(rows) != len(request.candidate_ids):
-        raise ValueError("compact candidate assessment coverage mismatch")
+        raise CompactAssessmentCoverageError("compact assessment coverage invalid")
     indexes: list[int] = []
     for raw in rows:
         if not isinstance(raw, Mapping) or set(raw) != _COMPACT_ASSESSMENT_KEYS:
-            raise ValueError("compact candidate assessment row is malformed")
+            raise CompactAssessmentRowError("compact assessment row invalid")
         index = raw.get("i")
         if isinstance(index, bool) or not isinstance(index, int):
-            raise ValueError("compact candidate assessment order mismatch")
+            raise CompactAssessmentOrderError("compact assessment index invalid")
         indexes.append(index)
     zero_based = list(range(len(rows)))
     one_based = list(range(1, len(rows) + 1))
@@ -210,7 +230,7 @@ def parse_compact_candidate_assessment_response(
     elif indexes == one_based:
         index_base = 1
     else:
-        raise ValueError("compact candidate assessment order mismatch")
+        raise CompactAssessmentOrderError("compact assessment order invalid")
     assessments: list[dict[str, Any]] = []
     for raw, index in zip(rows, indexes, strict=True):
         assessments.append(
@@ -223,16 +243,21 @@ def parse_compact_candidate_assessment_response(
                 "expected_gain_signals": raw.get("g"),
             }
         )
-    return parse_candidate_assessment_response(
-        {
-            "schema_version": CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
-            "assessments": assessments,
-        },
-        request=request,
-        cluster_assignments=cluster_assignments,
-        freshness_scores=freshness_scores,
-        read_costs=read_costs,
-    )
+    try:
+        return parse_candidate_assessment_response(
+            {
+                "schema_version": CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+                "assessments": assessments,
+            },
+            request=request,
+            cluster_assignments=cluster_assignments,
+            freshness_scores=freshness_scores,
+            read_costs=read_costs,
+        )
+    except ValueError as exc:
+        raise CompactAssessmentDomainError(
+            "compact assessment domain validation failed"
+        ) from exc
 
 
 def _bounded_text(value: Any, limit: int, *, required: bool = False) -> str:
@@ -283,6 +308,11 @@ def _positive_float(value: Any, label: str) -> float:
 __all__ = [
     "CANDIDATE_ASSESSMENT_SCHEMA_VERSION",
     "CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION",
+    "CompactAssessmentCoverageError",
+    "CompactAssessmentDomainError",
+    "CompactAssessmentEnvelopeError",
+    "CompactAssessmentOrderError",
+    "CompactAssessmentRowError",
     "CandidateAssessmentRequest",
     "build_candidate_assessment_request",
     "parse_compact_candidate_assessment_response",
