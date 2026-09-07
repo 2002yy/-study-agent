@@ -90,7 +90,7 @@ def _validate_rubric(rubric: dict[str, Any]) -> tuple[set[str], dict[str, int]]:
         "hard_failures_allowed": 0,
         "max_candidates": 20,
         "max_reads": 8,
-        "max_model_calls": 6,
+        "max_model_calls": 8,
         "soft_timeout_seconds": 45,
         "hard_timeout_seconds": 60,
     }
@@ -223,6 +223,17 @@ def _runtime_wallclock_applicable(runtime: Mapping[str, Any]) -> bool:
         raise ValueError("runtime hosted-cpu wallclock exemption reason invalid")
     if not exempt and reason:
         raise ValueError("runtime wallclock reason requires hosted-cpu exemption")
+    hosted_case_hard = contract.get(
+        "qualification_hosted_cpu_case_hard_timeout_seconds"
+    )
+    hosted_answer_timeout = contract.get(
+        "qualification_hosted_cpu_answer_timeout_seconds"
+    )
+    if exempt:
+        if hosted_case_hard != 540 or hosted_answer_timeout != 120:
+            raise ValueError("runtime hosted-cpu execution allowance invalid")
+    elif hosted_case_hard is not None or hosted_answer_timeout is not None:
+        raise ValueError("runtime hosted-cpu execution allowance requires exemption")
     return not exempt
 
 

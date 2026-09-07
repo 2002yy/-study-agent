@@ -13,7 +13,7 @@ def test_answer_pipeline_capacity_rejects_before_generation(monkeypatch: pytest.
     monkeypatch.setattr(runner, "_production_chat", lambda *args, **kwargs: calls.append((args, kwargs)))
     budget = runner._AnswerStageBudget(
         started_at=time.monotonic(),
-        research_model_calls=5,
+        research_model_calls=7,
         required_answer_calls=2,
     )
 
@@ -25,10 +25,10 @@ def test_answer_pipeline_capacity_rejects_before_generation(monkeypatch: pytest.
 
     assert calls == []
     assert budget.answer_calls_started == 0
-    assert budget.total_model_calls_started == 5
+    assert budget.total_model_calls_started == 7
 
 
-def test_sixth_call_may_dispatch_but_seventh_is_rejected_before_network(
+def test_eighth_call_may_dispatch_but_ninth_is_rejected_before_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -40,7 +40,7 @@ def test_sixth_call_may_dispatch_but_seventh_is_rejected_before_network(
     monkeypatch.setattr(runner, "_production_chat", fake_chat)
     budget = runner._AnswerStageBudget(
         started_at=time.monotonic(),
-        research_model_calls=5,
+        research_model_calls=7,
         required_answer_calls=1,
     )
 
@@ -54,8 +54,50 @@ def test_sixth_call_may_dispatch_but_seventh_is_rejected_before_network(
     assert len(calls) == 1
     assert budget.phase_calls["answer_generation"] == 1
     assert budget.phase_calls["answer_claim_binding"] == 0
-    assert budget.total_model_calls_started == 6
+    assert budget.total_model_calls_started == 8
 
+
+
+def test_six_research_calls_leave_capacity_for_generation_and_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_chat(messages: list[dict], **kwargs: object) -> str:
+        calls.append(str(kwargs.get("task_name") or ""))
+        return "ok"
+
+    monkeypatch.setattr(runner, "_production_chat", fake_chat)
+    budget = runner._AnswerStageBudget(
+        started_at=time.monotonic(),
+        research_model_calls=6,
+        required_answer_calls=2,
+    )
+
+    assert budget.chat([], task_name="single_chat", timeout=10.0) == "ok"
+    assert budget.chat([], task_name="answer_claim_binding", timeout=10.0) == "ok"
+    assert calls == ["single_chat", "answer_claim_binding"]
+    assert budget.total_model_calls_started == 8
+
+
+def test_hosted_answer_allowance_can_raise_provider_timeout_without_changing_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[float] = []
+
+    def fake_chat(messages: list[dict], **kwargs: object) -> str:
+        seen.append(float(kwargs["timeout"]))
+        return "ok"
+
+    monkeypatch.setattr(runner, "_production_chat", fake_chat)
+    budget = runner._AnswerStageBudget(
+        started_at=time.monotonic(),
+        hard_timeout_seconds=540.0,
+        answer_timeout_floor_seconds=120.0,
+    )
+
+    assert budget.chat([], task_name="single_chat", timeout=7.0) == "ok"
+    assert seen == [120.0]
 
 def test_expired_case_deadline_rejects_before_network(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []

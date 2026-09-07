@@ -733,11 +733,17 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
                 if _hosted_cpu_wallclock_exempt()
                 else ""
             ),
+            "qualification_hosted_cpu_case_hard_timeout_seconds": (
+                540 if _hosted_cpu_wallclock_exempt() else None
+            ),
+            "qualification_hosted_cpu_answer_timeout_seconds": (
+                120 if _hosted_cpu_wallclock_exempt() else None
+            ),
         },
         "configured_budget": {
             "max_candidates": 20,
             "max_reads": 8,
-            "max_model_calls": 6,
+            "max_model_calls": 8,
             "soft_timeout_seconds": 45,
             "hard_timeout_seconds": 60,
         },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -9,8 +10,11 @@ from typing import Any
 
 from src.llm_client import _resolve_timeout, chat as _production_chat
 
-MAX_MODEL_CALLS = 6
+MAX_MODEL_CALLS = 8
 HARD_TIMEOUT_SECONDS = 60.0
+HOSTED_CPU_CASE_HARD_TIMEOUT_SECONDS = 540.0
+HOSTED_CPU_ANSWER_TIMEOUT_SECONDS = 120.0
+_HOSTED_CPU_WALLCLOCK_ENV = "RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT"
 
 
 def _empty_binding_rows_provider(_run: Any) -> tuple[Any, ...]:
@@ -26,6 +30,26 @@ class QualificationModelBudgetExhausted(RuntimeError):
 
 class QualificationHardDeadlineReached(TimeoutError):
     """Raised before dispatch when no case-level wall-clock budget remains."""
+
+
+def _hosted_cpu_wallclock_exempt() -> bool:
+    requested = str(os.getenv(_HOSTED_CPU_WALLCLOCK_ENV) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    github_actions = str(os.getenv("GITHUB_ACTIONS") or "").strip().lower() == "true"
+    return requested and github_actions
+
+
+def _qualification_execution_limits() -> tuple[float, float | None]:
+    if _hosted_cpu_wallclock_exempt():
+        return (
+            HOSTED_CPU_CASE_HARD_TIMEOUT_SECONDS,
+            HOSTED_CPU_ANSWER_TIMEOUT_SECONDS,
+        )
+    return HARD_TIMEOUT_SECONDS, None
 
 
 def configure_default_binding_rows_provider(provider: Callable[[Any], Any]) -> None:
@@ -105,6 +129,7 @@ class _AnswerStageBudget:
     research_model_calls: int = 0
     max_model_calls: int = MAX_MODEL_CALLS
     hard_timeout_seconds: float = HARD_TIMEOUT_SECONDS
+    answer_timeout_floor_seconds: float | None = None
     required_answer_calls: int = 1
     phase_calls: dict[str, int] = field(
         default_factory=lambda: {
@@ -189,6 +214,8 @@ class _AnswerStageBudget:
                 kwargs.get("provider_profile"),
             )
         )
+        if self.answer_timeout_floor_seconds is not None:
+            normal_timeout = max(normal_timeout, self.answer_timeout_floor_seconds)
         bounded_timeout = min(normal_timeout, remaining)
         if bounded_timeout <= 0:
             self._reject(
@@ -238,8 +265,13 @@ def make_guarded_run_case(
     ) -> dict[str, Any]:
         # Exact checkout identity is part of the callable contract, not just CLI setup.
         exact_git_check()
+        hard_timeout_seconds, answer_timeout_floor_seconds = (
+            _qualification_execution_limits()
+        )
         budget = _AnswerStageBudget(
             started_at=time.monotonic(),
+            hard_timeout_seconds=hard_timeout_seconds,
+            answer_timeout_floor_seconds=answer_timeout_floor_seconds,
             binding_rows_provider=binding_rows_provider,
         )
         guarded_research = _ResearchBudgetProxy(service, budget)

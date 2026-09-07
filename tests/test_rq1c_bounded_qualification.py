@@ -446,7 +446,7 @@ def test_runtime_total_model_call_budget_is_independently_enforced(tmp_path: Pat
     case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
     runtime = _runtime(case_ids)
     first = runtime["cases"][0]  # type: ignore[index]
-    first["budget_observed"]["model_call_count"] = 7
+    first["budget_observed"]["model_call_count"] = 9
 
     report = _evaluate_fixture_set(tmp_path, runtime=runtime)
 
@@ -644,6 +644,8 @@ def test_hosted_cpu_exemption_skips_only_wallclock_budget(tmp_path: Path) -> Non
         "product_hard_timeout_seconds": 60,
         "hosted_cpu_exempt": True,
         "reason": "github_hosted_local_model_cpu",
+        "qualification_hosted_cpu_case_hard_timeout_seconds": 540,
+        "qualification_hosted_cpu_answer_timeout_seconds": 120,
     }
     runtime["cases"][0]["budget_observed"]["elapsed_seconds"] = 240.0  # type: ignore[index]
 
@@ -667,6 +669,8 @@ def test_hosted_cpu_exemption_requires_exact_bounded_contract(tmp_path: Path) ->
         "product_hard_timeout_seconds": 60,
         "hosted_cpu_exempt": True,
         "reason": "anything-else",
+        "qualification_hosted_cpu_case_hard_timeout_seconds": 540,
+        "qualification_hosted_cpu_answer_timeout_seconds": 120,
     }
 
     with pytest.raises(ValueError, match="exemption reason invalid"):
