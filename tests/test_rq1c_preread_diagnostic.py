@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from tools.run_rq1c_preread_diagnostic import _assessment_summary
+from tools.run_rq1c_preread_diagnostic import (
+    _assessment_summary,
+    _read_failure_summary,
+)
 
 
 def test_assessment_summary_exposes_counts_without_candidate_identity() -> None:
@@ -43,3 +46,32 @@ def test_assessment_summary_exposes_counts_without_candidate_identity() -> None:
     assert "candidate-secret" not in serialized
     assert "private title" not in serialized
     assert "private.example" not in serialized
+
+
+def test_read_failure_summary_exposes_safe_counts_without_candidate_identity() -> None:
+    summary = _read_failure_summary(
+        {
+            "read_outcomes": [
+                {"candidate_id": "secret", "status": "failed", "error_code": "read_failed"}
+            ],
+            "failures": [
+                {
+                    "phase": "reading",
+                    "item_id": "secret",
+                    "code": "read_failed",
+                    "detail": "private response body",
+                    "exception_type": "TimeoutError",
+                }
+            ],
+        }
+    )
+
+    assert summary == {
+        "outcome_error_code_counts": {"read_failed": 1},
+        "failure_code_counts": {"read_failed": 1},
+        "exception_type_counts": {"TimeoutError": 1},
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
+    assert "secret" not in str(summary)
+    assert "private response body" not in str(summary)

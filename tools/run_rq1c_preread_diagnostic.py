@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -146,6 +147,40 @@ def _assessment_summary(context: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _read_failure_summary(runtime: Mapping[str, Any]) -> dict[str, Any]:
+    """Aggregate bounded canonical read failures without source identity."""
+
+    result: dict[str, dict[str, int]] = {
+        "outcome_error_code_counts": {},
+        "failure_code_counts": {},
+        "exception_type_counts": {},
+    }
+
+    def increment(group: str, value: Any, *, type_name: bool = False) -> None:
+        label = _bounded(value, 120)
+        if type_name and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,119}", label):
+            label = "other" if label else ""
+        if label:
+            bucket = result[group]
+            bucket[label] = bucket.get(label, 0) + 1
+
+    outcomes = runtime.get("read_outcomes")
+    for row in outcomes if isinstance(outcomes, list) else []:
+        if isinstance(row, Mapping) and row.get("status") == "failed":
+            increment("outcome_error_code_counts", row.get("error_code"))
+    failures = runtime.get("failures")
+    for row in failures if isinstance(failures, list) else []:
+        if not isinstance(row, Mapping) or row.get("phase") != "reading":
+            continue
+        increment("failure_code_counts", row.get("code"))
+        increment("exception_type_counts", row.get("exception_type"), type_name=True)
+    return {
+        **{key: dict(sorted(value.items())) for key, value in result.items()},
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
+
+
 def _run_case(
     *,
     case: Mapping[str, str],
@@ -204,6 +239,7 @@ def _run_case(
             "model_call_count": len(model_calls),
             "model_calls": model_calls,
             "assessment_summary": _assessment_summary(context),
+            "read_failure_summary": _read_failure_summary(runtime),
         },
         "stores_raw_model_text": False,
         "stores_query_text": False,

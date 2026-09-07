@@ -12,6 +12,7 @@ from src.web.research.active_semantics import RuntimeCandidateAssessor
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
     CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+    CompactAssessmentCodeError,
     build_candidate_assessment_request,
     parse_compact_candidate_assessment_response,
     parse_candidate_assessment_response,
@@ -186,6 +187,21 @@ def test_compact_parser_normalizes_one_based_candidate_indexes() -> None:
     assert tuple(parsed) == ("a", "b")
     assert parsed["a"].candidate_id == "a"
     assert parsed["b"].candidate_id == "b"
+
+
+def test_compact_parser_classifies_unknown_enum_code() -> None:
+    candidate = _candidate("a")
+    request = build_candidate_assessment_request((candidate,), claim=_claim())
+
+    with pytest.raises(CompactAssessmentCodeError):
+        parse_compact_candidate_assessment_response(
+            {
+                "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+                "a": [{"i": 0, "r": 99, "rc": 0.8, "s": 1, "sc": 0.9, "g": [0]}],
+            },
+            request=request,
+            cluster_assignments={"a": _assignment("a")},
+        )
 
 
 @pytest.mark.parametrize("indexes", [(1, 0), (0, 0), (0, 2), (0,)])

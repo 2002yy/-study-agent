@@ -90,6 +90,10 @@ class CompactAssessmentDomainError(ValueError):
     """Expanded response failed the stable semantic domain contract."""
 
 
+class CompactAssessmentCodeError(ValueError):
+    """Compact response contains an unknown or malformed enum code."""
+
+
 @dataclass(frozen=True)
 class CandidateAssessmentRequest:
     schema_version: str
@@ -293,18 +297,18 @@ def parse_compact_candidate_assessment_response(
 
 def _compact_code(value: Any, codes: Mapping[int, str], label: str) -> str:
     if isinstance(value, bool) or not isinstance(value, int) or value not in codes:
-        raise CompactAssessmentDomainError(f"compact {label} code invalid")
+        raise CompactAssessmentCodeError(f"compact {label} code invalid")
     return codes[value]
 
 
 def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
     if not isinstance(value, list):
-        raise CompactAssessmentDomainError("compact gain signal codes invalid")
+        raise CompactAssessmentCodeError("compact gain signal codes invalid")
     result: list[str] = []
     for item in value:
         decoded = _compact_code(item, codes, "gain signal")
         if decoded in result:
-            raise CompactAssessmentDomainError("compact gain signal codes duplicate")
+            raise CompactAssessmentCodeError("compact gain signal codes duplicate")
         result.append(decoded)
     return result
 
@@ -361,6 +365,7 @@ __all__ = [
     "CANDIDATE_ASSESSMENT_RELEVANCE_CODES",
     "CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES",
     "CompactAssessmentCoverageError",
+    "CompactAssessmentCodeError",
     "CompactAssessmentDomainError",
     "CompactAssessmentEnvelopeError",
     "CompactAssessmentOrderError",

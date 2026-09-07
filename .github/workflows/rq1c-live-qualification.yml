@@ -329,6 +329,7 @@ jobs:
               'candidate_assessor_max_tokens_per_two_candidates': 220,
               'candidate_assessor_wire_schema': 'ca2',
               'candidate_assessor_enum_encoding': 'integer_codes',
+              'diagnostic_failure_categories': ['compact_code', 'compact_domain', 'reader'],
               'candidate_assessor_index_conventions': ['zero_based', 'one_based'],
               'candidate_assessor_exact_response_rows': True,
               'candidate_assessor_timeout_seconds': 15,
