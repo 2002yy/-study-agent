@@ -175,7 +175,12 @@ def _answer_surface_is_reviewable(record: Mapping[str, Any]) -> bool:
     return _answer_validation_is_reviewable(answer, expected_hash)
 
 
-def _runtime_budget_is_valid(record: Mapping[str, Any], gate: Mapping[str, int]) -> bool:
+def _runtime_budget_is_valid(
+    record: Mapping[str, Any],
+    gate: Mapping[str, int],
+    *,
+    wallclock_applicable: bool,
+) -> bool:
     observed = record.get("budget_observed")
     if not isinstance(observed, Mapping):
         return False
@@ -193,8 +198,32 @@ def _runtime_budget_is_valid(record: Mapping[str, Any], gate: Mapping[str, int])
         candidates <= gate["max_candidates"]
         and reads <= gate["max_reads"]
         and model_calls <= gate["max_model_calls"]
-        and elapsed_seconds <= gate["hard_timeout_seconds"]
+        and (
+            not wallclock_applicable
+            or elapsed_seconds <= gate["hard_timeout_seconds"]
+        )
     )
+
+
+def _runtime_wallclock_applicable(runtime: Mapping[str, Any]) -> bool:
+    contract = runtime.get("wallclock_contract")
+    if contract is None:
+        return True
+    if not isinstance(contract, Mapping):
+        raise ValueError("runtime wallclock contract must be an object")
+    if contract.get("product_soft_timeout_seconds") != 45:
+        raise ValueError("runtime wallclock contract changed product soft timeout")
+    if contract.get("product_hard_timeout_seconds") != 60:
+        raise ValueError("runtime wallclock contract changed product hard timeout")
+    exempt = contract.get("hosted_cpu_exempt")
+    if not isinstance(exempt, bool):
+        raise ValueError("runtime hosted-cpu wallclock exemption must be boolean")
+    reason = str(contract.get("reason") or "")
+    if exempt and reason != "github_hosted_local_model_cpu":
+        raise ValueError("runtime hosted-cpu wallclock exemption reason invalid")
+    if not exempt and reason:
+        raise ValueError("runtime wallclock reason requires hosted-cpu exemption")
+    return not exempt
 
 
 def _validate_runtime(
@@ -214,6 +243,7 @@ def _validate_runtime(
         raise ValueError("runtime runner did not capture production final answers")
     if leakage.get("second_web_acquisition_during_synthesis") is not False:
         raise ValueError("runtime synthesis started an unbudgeted second web acquisition")
+    wallclock_applicable = _runtime_wallclock_applicable(runtime)
     records = runtime.get("cases")
     runtime_ids = set(_case_ids(records))
     if runtime_ids != rubric_ids:
@@ -226,7 +256,11 @@ def _validate_runtime(
             runner_errors += 1
         violations = record.get("budget_contract_violations")
         marker_violation = isinstance(violations, list) and bool(violations)
-        if marker_violation or not _runtime_budget_is_valid(record, gate):
+        if marker_violation or not _runtime_budget_is_valid(
+            record,
+            gate,
+            wallclock_applicable=wallclock_applicable,
+        ):
             budget_violations += 1
         reviewable_answers += int(_answer_surface_is_reviewable(record))
         for audit in ((record.get("search") or {}).get("audits") or []):

@@ -623,6 +623,56 @@ def test_runtime_budget_violation_forces_no_go(tmp_path: Path) -> None:
     assert report["checks"]["runtime_budget"] is False  # type: ignore[index]
 
 
+def test_wallclock_budget_is_enforced_by_default(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["cases"][0]["budget_observed"]["elapsed_seconds"] = 61.0  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "NO-GO"
+    assert report["checks"]["runtime_budget"] is False  # type: ignore[index]
+
+
+def test_hosted_cpu_exemption_skips_only_wallclock_budget(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["wallclock_contract"] = {
+        "product_soft_timeout_seconds": 45,
+        "product_hard_timeout_seconds": 60,
+        "hosted_cpu_exempt": True,
+        "reason": "github_hosted_local_model_cpu",
+    }
+    runtime["cases"][0]["budget_observed"]["elapsed_seconds"] = 240.0  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "GO"
+    assert report["checks"]["runtime_budget"] is True  # type: ignore[index]
+
+    runtime["cases"][0]["budget_observed"]["candidate_count"] = 21  # type: ignore[index]
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+    assert report["decision"] == "NO-GO"
+    assert report["checks"]["runtime_budget"] is False  # type: ignore[index]
+
+
+def test_hosted_cpu_exemption_requires_exact_bounded_contract(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["wallclock_contract"] = {
+        "product_soft_timeout_seconds": 45,
+        "product_hard_timeout_seconds": 60,
+        "hosted_cpu_exempt": True,
+        "reason": "anything-else",
+    }
+
+    with pytest.raises(ValueError, match="exemption reason invalid"):
+        _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+
 def test_failed_protocol_probe_forces_no_go(tmp_path: Path) -> None:
     report = _evaluate_fixture_set(tmp_path, failed_probe="provider_http_503")
 

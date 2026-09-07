@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -40,6 +41,7 @@ from dotenv import load_dotenv  # noqa: E402
 from src.application.active_research_runtime import (  # noqa: E402
     ACTIVE_RESEARCH_BRIEF_KEY,
     ACTIVE_RESEARCH_METRICS_KEY,
+    ActiveResearchRuntimeExecutor,
 )
 from src.application.chat_service import ChatDependencies  # noqa: E402
 from src.application.policy_chat_service import (  # noqa: E402
@@ -66,6 +68,7 @@ from src.task_contract import (  # noqa: E402
 )
 from src.web.research.contracts import ResearchBudget, build_research_state  # noqa: E402
 from src.web.research.state import attach_claim_engine_state  # noqa: E402
+from src.web.research.model_gateway import ResearchModelGateway  # noqa: E402
 from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
 from tools.rq1c_qualification_guardrails import make_guarded_run_case  # noqa: E402
 
@@ -85,6 +88,21 @@ DEFAULT_OUTPUT = (
 _ALLOWED_CASE_KEYS = {"id", "category", "question"}
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ANSWER_PHASES = ("answer_generation", "answer_claim_binding")
+_HOSTED_CPU_WALLCLOCK_ENV = "RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT"
+_HOSTED_CPU_SOFT_TIMEOUT_SECONDS = 240
+_HOSTED_CPU_HARD_TIMEOUT_SECONDS = 300
+_HOSTED_CPU_MODEL_TIMEOUT_SECONDS = 120.0
+
+
+def _hosted_cpu_wallclock_exempt() -> bool:
+    requested = str(os.getenv(_HOSTED_CPU_WALLCLOCK_ENV) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    github_actions = str(os.getenv("GITHUB_ACTIONS") or "").strip().lower() == "true"
+    return requested and github_actions
 
 
 def _utc_now() -> str:
@@ -131,6 +149,7 @@ def _load_manifest(path: Path) -> tuple[dict[str, str], ...]:
 
 
 def _active_context(reference_date: str) -> dict[str, Any]:
+    wallclock_exempt = _hosted_cpu_wallclock_exempt()
     state = build_research_state(
         mode="active",
         questions=(),
@@ -143,8 +162,12 @@ def _active_context(reference_date: str) -> dict[str, Any]:
         budget=ResearchBudget(
             max_candidates=20,
             max_reads=8,
-            soft_timeout_seconds=45,
-            hard_timeout_seconds=60,
+            soft_timeout_seconds=(
+                _HOSTED_CPU_SOFT_TIMEOUT_SECONDS if wallclock_exempt else 45
+            ),
+            hard_timeout_seconds=(
+                _HOSTED_CPU_HARD_TIMEOUT_SECONDS if wallclock_exempt else 60
+            ),
             max_total_chars=16000,
         ),
         reference_date=reference_date,
@@ -600,7 +623,7 @@ def _run_case(
         violations.append("answer_stage_model_call_count_unavailable")
     elif total_model_call_count > 6:
         violations.append("model_call_budget_exceeded")
-    if elapsed > 60:
+    if elapsed > 60 and not _hosted_cpu_wallclock_exempt():
         violations.append("hard_timeout_exceeded")
 
     return {
@@ -657,6 +680,24 @@ _run_case = make_guarded_run_case(
 )
 
 
+def _qualification_active_runtime_factory(
+    repository: WebLookupRepository,
+    gateway: Any,
+) -> ActiveResearchRuntimeExecutor:
+    if not _hosted_cpu_wallclock_exempt():
+        return ActiveResearchRuntimeExecutor(repository, gateway)
+    model_gateway = ResearchModelGateway(
+        timeout_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS
+    )
+    return ActiveResearchRuntimeExecutor(
+        repository,
+        gateway,
+        model_gateway=model_gateway,
+        model_timeout_cap_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS,
+        candidate_assessment_timeout_cap_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS,
+    )
+
+
 def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
     load_dotenv(REPO_ROOT / ".env")
     cases = _load_manifest(manifest_path)
@@ -683,6 +724,16 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
             "captures_production_final_answer": True,
             "second_web_acquisition_during_synthesis": False,
         },
+        "wallclock_contract": {
+            "product_soft_timeout_seconds": 45,
+            "product_hard_timeout_seconds": 60,
+            "hosted_cpu_exempt": _hosted_cpu_wallclock_exempt(),
+            "reason": (
+                "github_hosted_local_model_cpu"
+                if _hosted_cpu_wallclock_exempt()
+                else ""
+            ),
+        },
         "configured_budget": {
             "max_candidates": 20,
             "max_reads": 8,
@@ -698,7 +749,10 @@ def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, An
     try:
         database = RuntimeDatabase(Path(tmp) / "qualification.sqlite")
         repository = WebLookupRepository(database)
-        service = ClaimEngineDispatchWebLookupService(repository)
+        service = ClaimEngineDispatchWebLookupService(
+            repository,
+            active_runtime_factory=_qualification_active_runtime_factory,
+        )
         chat_service = _build_chat_service(database)
         for index, case in enumerate(cases, start=1):
             record = _run_case(
