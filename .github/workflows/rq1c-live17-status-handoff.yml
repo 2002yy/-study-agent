@@ -1,0 +1,54 @@
+name: RQ1-C Live17 Status Handoff
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  handoff:
+    if: "${{ github.event.head_commit.message == 'ci: stage rq1c live17 status handoff' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/rq1c-bounded-qualification
+          fetch-depth: 0
+      - name: Patch authoritative handoff
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('docs/PROJECT_STATUS.md')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = {
+              'Remote CI / current branch gate': '''- **Remote CI / current branch gate：**Draft PR #142 当前 source fix commit 为 `0826bd09cb8fc974063add4fa08ba3a8f47e7d91`；focused gate **82/82 PASS**，Ruff、py_compile、diff-check 全绿。清理临时 source-only runner 后 clean tree `36ee6e5b5e9f4a68514a2d1d2653bd9d182eb2de` 的 push CI [#34139465762](https://github.com/2002yy/study-agent/actions/runs/34139465762) 与 PR CI [#34139470838](https://github.com/2002yy/study-agent/actions/runs/34139470838) 均 `completed / success`；full pytest **1725/1725**（204.60s），RAG K1、Ruff、package helper、detect-secrets、expanded mypy、frontend tests/build、browser Golden Journeys、real-stack browser gates 全绿。live15 零净变化 evidence head `4d3fe684faa15ac73a848873f33769c015077b23` 与该 clean source tree 等价，其 push CI [#34140370293](https://github.com/2002yy/study-agent/actions/runs/34140370293) 与 PR CI [#34140373796](https://github.com/2002yy/study-agent/actions/runs/34140373796) 再次全绿；full pytest **1725/1725**（209.48s）。live16/live17 仅通过临时 diagnostic workflows 增加安全计数，随后已删除；`4d3fe684… -> 3a9007e1afebbe49a574069bb4e0dcedfc3ae151` 为 4 个临时提交且 **0 changed files**，production tree 未改变。''',
+              'Current initiative': '''- **Current initiative：**Draft PR #142（分支 `codex/rq1c-bounded-qualification`）仍处于 **RQ1-C bounded qualification remediation / pre-read reader root-cause screening**。assessor starvation 已通过 compact/expanded 语义对齐消除；当前不扩功能、不改模型或业务门，而是在固定两例上把剩余 reader failure 从 gateway negative result 逐层收敛到 article-extractor 内部。''',
+              'Runtime status': '''- **Runtime status：**live15（head `4d3fe684…`，diagnostic [#34140370214](https://github.com/2002yy/study-agent/actions/runs/34140370214)，artifact `10025846270`, digest `sha256:ac7078f6f0c8b67e47a21c749f871f6438682b46b34e94a7b4aceda46b403cc8`）将 pre-read 门从 0/2 提升到 **1/2**：`academic_primary` 1 次 read 成功；`unanswerable_unverifiable` 2/2 reads 为 `gateway_negative_result / provider_failed`。academic 成功读取后另有两次 evidence-extraction `ValueError`，不是当前 pre-read blocker，但需保留为后续链路缺口。live16 reader-reason screen [#34141803459](https://github.com/2002yy/study-agent/actions/runs/34141803459)，artifact `10026360921`, digest `sha256:494b26a9c7b7cdb93231e72081362181ddacbbe1091e0b92d09d57882f7c2c89`：`unanswerable_unverifiable` 3 次 read 中 1 成功、2 失败，两个失败均安全分类为 **`all_backends_failed`**；`academic_primary` 本轮 1 次 read 失败安全分类为 **`provider_exception`**，说明存在独立 live transport 波动，但不是此前第二例重复失败的主 owner。live17 local-stage screen [#34142620553](https://github.com/2002yy/study-agent/actions/runs/34142620553)，artifact `10026655961`, digest `sha256:b19bfc2e35e6be8a87cecc71eaa22e4b680edf16ce7847f259a41b7c0a89bcd5`：`unanswerable_unverifiable` 两次 read 均取得 **non-empty HTML**，其中 `local_reader_ok=1`、`local_reader_empty=1`，故剩余 `all_backends_failed` 已精确收敛为 **non-empty HTML -> local article extractor returns empty text**，不是网络异常、空响应、非 HTML 或 local-reader exception；`academic_primary` 本轮 6 个 ranked candidates 全部 `off_target/rejected`，因此 0 read attempts，反映 live retrieval/assessment 波动，不能视为 reader 成功证据。所有筛查 artifact 均不保存 prompt、raw model response、query text、page body、candidate identity/URL 或 raw failure detail。''',
+              'GO / NO-GO': '''- **GO / NO-GO：**RQCE-P0、P1-A0、A1–A4/B1–B5 + Hardening + P1-C 子批 1/2/3 + active steering + failure-state Batch A/B/C + PR #143 answer/claim binding = **REMOTE GO / DELIVERED**。PR #142 qualification infrastructure 与本轮 source fix/CI = **REMOTE GATES GREEN**；但固定两例 pre-read 业务门仍为 **NOT GO / ONLY 1 OF 2 CASES SUCCESSFULLY READ IN EACH OBSERVED RUN / 2 OF 2 NOT YET DEMONSTRATED**。live16/live17 的成功案例发生对调，进一步说明不能用单例偶发成功替代双例同轮成功门。default activation = **FROZEN**；RQCE-P2 = **NOT STARTED**；formal untouched live12 继续 **SKIPPED**（live15 [#34140370225](https://github.com/2002yy/study-agent/actions/runs/34140370225)，live17 [#34142620496](https://github.com/2002yy/study-agent/actions/runs/34142620496)）。''',
+              '唯一下一步': '''- **唯一下一步：**保持 `ca2`、模型、prompt、token/timeout、untouched manifest/rubric/Evidence Gate、预算、2-candidate window、候选/读取调度、reader backend/fallback/retry 与 default activation 全部不变。**当前唯一 root-cause owner = `src/news/article_extractor.py` 的 local extraction path。**下一层只做 diagnostic-only bounded screening：区分 trafilatura / readability / fallback-parser 各自是“原始提取为空”，还是产生了短/噪声文本后被 `clean_article_text()` 清洗为空；建议仅记录 backend label + raw-length bucket（0、1–179、>=180）+ clean_empty/clean_ok 计数，不保存任何文本、URL、来源身份或错误细节。**不得现在就降低 180 字阈值，也不得直接打开 Jina/Firecrawl。**独立的 `provider_exception` 与 academic candidate 全 off-target 作为 live 波动保留观察，但不抢占已重复定位的 extractor owner。只有固定两例在同一 diagnostic run 中均产生真实 successful read，才允许 untouched live12；随后才处理 academic 已暴露的 evidence-extraction `ValueError` 与更后续 qualification 链。''',
+          }
+
+          for label, replacement in replacements.items():
+              pattern = rf'^- \*\*{re.escape(label)}：\*\*.*$'
+              text, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f'failed to replace handoff bullet: {label} ({count})')
+
+          path.write_text(text, encoding='utf-8')
+      - name: Commit handoff and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/rq1c-live17-status-handoff.yml
+          git add docs/PROJECT_STATUS.md
+          git diff --cached --check
+          git commit -m "docs: record rq1c live17 reader screening"
+          git push origin HEAD:codex/rq1c-bounded-qualification
