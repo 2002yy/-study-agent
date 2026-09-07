@@ -34,6 +34,8 @@ from src.application.research_web_lookup_dispatch import (  # noqa: E402
 from src.domain.runtime_entities import WebLookupRun  # noqa: E402
 from src.infrastructure.sqlite.database import RuntimeDatabase  # noqa: E402
 from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
+from src.web.research.active_adapter import ActiveResearchGateway  # noqa: E402
+from src.web.research_gateway import ResearchWebGateway  # noqa: E402
 from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
 from tools.run_rq1c_bounded_qualification_core import (  # noqa: E402
     DEFAULT_MANIFEST,
@@ -47,6 +49,28 @@ TARGET_CASE_IDS = (
     "rq1c-unverifiable-python-security",
 )
 DEFAULT_OUTPUT = REPO_ROOT / "output" / "rq1c-preread-starvation-diagnostic.json"
+_ASSESSOR_FAILURE_CATEGORY_BY_TYPE = {
+    "CompactAssessmentRelevanceCodeError": "compact_code_relevance",
+    "CompactAssessmentSourceRoleCodeError": "compact_code_source_role",
+    "CompactAssessmentGainSignalCodeError": "compact_code_gain_signal",
+    "CompactAssessmentGainSignalDuplicateError": "compact_code_duplicate",
+    "CompactAssessmentCodeError": "compact_code_other",
+    "CompactAssessmentDomainError": "expanded_domain",
+}
+_CANONICAL_READER_PROVIDER_CODES = frozenset(
+    {
+        "blocked",
+        "fetch_failed",
+        "http_error",
+        "http_status",
+        "invalid_url",
+        "not_found",
+        "page_read_failed",
+        "provider_failed",
+        "timeout",
+        "unsupported",
+    }
+)
 
 
 def _bounded(value: Any, limit: int) -> str:
@@ -73,6 +97,69 @@ def _duration(value: Any) -> float | None:
     if parsed < 0 or parsed != parsed:
         return None
     return round(parsed, 6)
+
+
+def _canonical_provider_code(value: Any) -> str:
+    label = _bounded(value, 80).casefold().replace("-", "_")
+    if not label:
+        return ""
+    return label if label in _CANONICAL_READER_PROVIDER_CODES else "other"
+
+
+class _DiagnosticReadGateway:
+    """Observe safe failure classes while preserving the production read result."""
+
+    def __init__(self, inner: Any | None = None) -> None:
+        self._inner = inner if inner is not None else ResearchWebGateway()
+        self._failure_category_counts: dict[str, int] = {}
+        self._provider_code_counts: dict[str, int] = {}
+
+    @staticmethod
+    def _increment(bucket: dict[str, int], key: str) -> None:
+        bucket[key] = bucket.get(key, 0) + 1
+
+    def read(self, url: str, *, max_chars: int = 6000) -> Any:
+        try:
+            result = self._inner.read(url, max_chars=max_chars)
+        except Exception:
+            self._increment(self._failure_category_counts, "exception")
+            raise
+        if not isinstance(result, Mapping):
+            return result
+        content = str(result.get("content") or result.get("readme") or "")
+        if result.get("ok") is True:
+            if not content.strip():
+                self._increment(self._failure_category_counts, "empty_content")
+        else:
+            self._increment(self._failure_category_counts, "gateway_negative_result")
+            provider_code = _canonical_provider_code(result.get("error_code"))
+            if provider_code:
+                self._increment(self._provider_code_counts, provider_code)
+        return result
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "failure_category_counts": dict(sorted(self._failure_category_counts.items())),
+            "provider_code_counts": dict(sorted(self._provider_code_counts.items())),
+            "stores_candidate_identity": False,
+            "stores_failure_detail": False,
+            "stores_page_content": False,
+        }
+
+
+def _assessor_failure_summary(model_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for row in model_calls:
+        if row.get("purpose") != "research_candidate_assessment":
+            continue
+        category = _ASSESSOR_FAILURE_CATEGORY_BY_TYPE.get(str(row.get("error_type") or ""))
+        if category:
+            counts[category] = counts.get(category, 0) + 1
+    return {
+        "failure_category_counts": dict(sorted(counts.items())),
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
 
 
 def _model_call_rows(runtime: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -185,7 +272,6 @@ def _run_case(
     *,
     case: Mapping[str, str],
     repository: WebLookupRepository,
-    service: ClaimEngineDispatchWebLookupService,
     reference_date: str,
 ) -> dict[str, Any]:
     case_id = case["id"]
@@ -199,6 +285,11 @@ def _run_case(
             research_context=_active_context(reference_date),
             max_items=5,
         )
+    )
+    diagnostic_reader = _DiagnosticReadGateway()
+    service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(read_gateway=diagnostic_reader),
     )
     error_type = ""
     try:
@@ -239,7 +330,9 @@ def _run_case(
             "model_call_count": len(model_calls),
             "model_calls": model_calls,
             "assessment_summary": _assessment_summary(context),
+            "assessor_failure_summary": _assessor_failure_summary(model_calls),
             "read_failure_summary": _read_failure_summary(runtime),
+            "reader_failure_classification": diagnostic_reader.summary(),
         },
         "stores_raw_model_text": False,
         "stores_query_text": False,
@@ -278,12 +371,10 @@ def run_diagnostic(
     try:
         database = RuntimeDatabase(Path(tmp) / "diagnostic.sqlite")
         repository = WebLookupRepository(database)
-        service = ClaimEngineDispatchWebLookupService(repository)
         for case in cases:
             record = _run_case(
                 case=case,
                 repository=repository,
-                service=service,
                 reference_date=reference_date,
             )
             artifact["cases"].append(record)
@@ -295,6 +386,15 @@ def run_diagnostic(
                         "phase": record["runtime"]["phase"],
                         "model_calls": record["runtime"]["model_call_count"],
                         "reads": record["runtime"]["read_count"],
+                        "assessor_failure_categories": record["runtime"][
+                            "assessor_failure_summary"
+                        ]["failure_category_counts"],
+                        "reader_failure_categories": record["runtime"][
+                            "reader_failure_classification"
+                        ]["failure_category_counts"],
+                        "reader_provider_codes": record["runtime"][
+                            "reader_failure_classification"
+                        ]["provider_code_counts"],
                     },
                     sort_keys=True,
                 ),

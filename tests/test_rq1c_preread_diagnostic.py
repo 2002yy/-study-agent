@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from tools.run_rq1c_preread_diagnostic import (
+    _DiagnosticReadGateway,
     _assessment_summary,
+    _assessor_failure_summary,
     _read_failure_summary,
 )
 
@@ -75,3 +79,76 @@ def test_read_failure_summary_exposes_safe_counts_without_candidate_identity() -
     }
     assert "secret" not in str(summary)
     assert "private response body" not in str(summary)
+
+
+
+def test_assessor_failure_summary_splits_safe_compact_domains() -> None:
+    summary = _assessor_failure_summary(
+        [
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentRelevanceCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentSourceRoleCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentGainSignalCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentGainSignalDuplicateError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentDomainError"},
+            {"purpose": "research_candidate_assessment", "error_type": "TimeoutError"},
+            {"purpose": "research_evidence_extraction", "error_type": "CompactAssessmentRelevanceCodeError"},
+        ]
+    )
+    assert summary == {
+        "failure_category_counts": {
+            "compact_code_duplicate": 1,
+            "compact_code_gain_signal": 1,
+            "compact_code_relevance": 1,
+            "compact_code_source_role": 1,
+            "expanded_domain": 1,
+        },
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
+
+
+class _ReaderStub:
+    def read(self, url: str, *, max_chars: int = 6000):
+        del max_chars
+        if url.endswith("exception"):
+            raise TimeoutError("private timeout detail")
+        if url.endswith("empty"):
+            return {"ok": True, "content": "   ", "url": "private-empty"}
+        if url.endswith("known-negative"):
+            return {
+                "ok": False,
+                "error": "private upstream detail",
+                "error_code": "timeout",
+                "url": "private-known",
+            }
+        return {
+            "ok": False,
+            "error": "private upstream detail",
+            "error_code": "private-upstream-code",
+            "url": "private-unknown",
+        }
+
+
+def test_diagnostic_reader_classifies_failures_without_storing_content_or_identity() -> None:
+    reader = _DiagnosticReadGateway(_ReaderStub())
+    with pytest.raises(TimeoutError):
+        reader.read("https://secret.example/exception")
+    assert reader.read("https://secret.example/empty")["ok"] is True
+    assert reader.read("https://secret.example/known-negative")["ok"] is False
+    assert reader.read("https://secret.example/other-negative")["ok"] is False
+    summary = reader.summary()
+    assert summary == {
+        "failure_category_counts": {
+            "empty_content": 1,
+            "exception": 1,
+            "gateway_negative_result": 2,
+        },
+        "provider_code_counts": {"other": 1, "timeout": 1},
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+        "stores_page_content": False,
+    }
+    serialized = str(summary)
+    assert "secret.example" not in serialized
+    assert "private upstream detail" not in serialized
+    assert "private-upstream-code" not in serialized

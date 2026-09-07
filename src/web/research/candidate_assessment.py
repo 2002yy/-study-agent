@@ -94,6 +94,22 @@ class CompactAssessmentCodeError(ValueError):
     """Compact response contains an unknown or malformed enum code."""
 
 
+class CompactAssessmentRelevanceCodeError(CompactAssessmentCodeError):
+    """Compact relevance code is unknown or malformed."""
+
+
+class CompactAssessmentSourceRoleCodeError(CompactAssessmentCodeError):
+    """Compact source-role code is unknown or malformed."""
+
+
+class CompactAssessmentGainSignalCodeError(CompactAssessmentCodeError):
+    """Compact gain-signal code is unknown or malformed."""
+
+
+class CompactAssessmentGainSignalDuplicateError(CompactAssessmentCodeError):
+    """Compact gain-signal list repeats a decoded semantic value."""
+
+
 @dataclass(frozen=True)
 class CandidateAssessmentRequest:
     schema_version: str
@@ -264,13 +280,17 @@ def parse_compact_candidate_assessment_response(
             {
                 "candidate_id": request.candidate_ids[index - index_base],
                 "relevance": _compact_code(
-                    raw.get("r"), CANDIDATE_ASSESSMENT_RELEVANCE_CODES, "relevance"
+                    raw.get("r"),
+                    CANDIDATE_ASSESSMENT_RELEVANCE_CODES,
+                    "relevance",
+                    CompactAssessmentRelevanceCodeError,
                 ),
                 "relevance_confidence": raw.get("rc"),
                 "source_role": _compact_code(
                     raw.get("s"),
                     CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES,
                     "source role",
+                    CompactAssessmentSourceRoleCodeError,
                 ),
                 "source_role_confidence": raw.get("sc"),
                 "expected_gain_signals": _compact_codes(
@@ -295,20 +315,32 @@ def parse_compact_candidate_assessment_response(
         ) from exc
 
 
-def _compact_code(value: Any, codes: Mapping[int, str], label: str) -> str:
+def _compact_code(
+    value: Any,
+    codes: Mapping[int, str],
+    label: str,
+    error_type: type[CompactAssessmentCodeError] = CompactAssessmentCodeError,
+) -> str:
     if isinstance(value, bool) or not isinstance(value, int) or value not in codes:
-        raise CompactAssessmentCodeError(f"compact {label} code invalid")
+        raise error_type(f"compact {label} code invalid")
     return codes[value]
 
 
 def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
     if not isinstance(value, list):
-        raise CompactAssessmentCodeError("compact gain signal codes invalid")
+        raise CompactAssessmentGainSignalCodeError("compact gain signal codes invalid")
     result: list[str] = []
     for item in value:
-        decoded = _compact_code(item, codes, "gain signal")
+        decoded = _compact_code(
+            item,
+            codes,
+            "gain signal",
+            CompactAssessmentGainSignalCodeError,
+        )
         if decoded in result:
-            raise CompactAssessmentCodeError("compact gain signal codes duplicate")
+            raise CompactAssessmentGainSignalDuplicateError(
+                "compact gain signal codes duplicate"
+            )
         result.append(decoded)
     return result
 
@@ -367,6 +399,10 @@ __all__ = [
     "CompactAssessmentCoverageError",
     "CompactAssessmentCodeError",
     "CompactAssessmentDomainError",
+    "CompactAssessmentGainSignalCodeError",
+    "CompactAssessmentGainSignalDuplicateError",
+    "CompactAssessmentRelevanceCodeError",
+    "CompactAssessmentSourceRoleCodeError",
     "CompactAssessmentEnvelopeError",
     "CompactAssessmentOrderError",
     "CompactAssessmentRowError",

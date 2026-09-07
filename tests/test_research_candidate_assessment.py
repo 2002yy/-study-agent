@@ -13,6 +13,10 @@ from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
     CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
     CompactAssessmentCodeError,
+    CompactAssessmentGainSignalCodeError,
+    CompactAssessmentGainSignalDuplicateError,
+    CompactAssessmentRelevanceCodeError,
+    CompactAssessmentSourceRoleCodeError,
     build_candidate_assessment_request,
     parse_compact_candidate_assessment_response,
     parse_candidate_assessment_response,
@@ -189,19 +193,38 @@ def test_compact_parser_normalizes_one_based_candidate_indexes() -> None:
     assert parsed["b"].candidate_id == "b"
 
 
-def test_compact_parser_classifies_unknown_enum_code() -> None:
+@pytest.mark.parametrize(
+    ("field", "value", "error_type"),
+    [
+        ("r", 99, CompactAssessmentRelevanceCodeError),
+        ("s", 99, CompactAssessmentSourceRoleCodeError),
+        ("g", [99], CompactAssessmentGainSignalCodeError),
+        ("g", [0, 0], CompactAssessmentGainSignalDuplicateError),
+    ],
+)
+def test_compact_parser_classifies_code_failure_domain(
+    field: str,
+    value: object,
+    error_type: type[CompactAssessmentCodeError],
+) -> None:
     candidate = _candidate("a")
     request = build_candidate_assessment_request((candidate,), claim=_claim())
+    row = {"i": 0, "r": 0, "rc": 0.8, "s": 1, "sc": 0.9, "g": [0]}
+    row[field] = value
 
-    with pytest.raises(CompactAssessmentCodeError):
+    with pytest.raises(error_type):
         parse_compact_candidate_assessment_response(
-            {
-                "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
-                "a": [{"i": 0, "r": 99, "rc": 0.8, "s": 1, "sc": 0.9, "g": [0]}],
-            },
+            {"v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION, "a": [row]},
             request=request,
             cluster_assignments={"a": _assignment("a")},
         )
+
+
+def test_compact_code_subclasses_preserve_fail_closed_base_contract() -> None:
+    assert issubclass(CompactAssessmentRelevanceCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentSourceRoleCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentGainSignalCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentGainSignalDuplicateError, CompactAssessmentCodeError)
 
 
 @pytest.mark.parametrize("indexes", [(1, 0), (0, 0), (0, 2), (0,)])
