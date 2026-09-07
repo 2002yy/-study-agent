@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
+from src.web.research.state import load_claim_engine_state
+from tools.run_rq1c_bounded_qualification_core import _active_context
 from tools.run_rq1c_preread_diagnostic import (
+    DIAGNOSTIC_ASSESSOR_TIMEOUT_CAP_SECONDS,
+    DIAGNOSTIC_HARD_TIMEOUT_SECONDS,
+    DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS,
+    DIAGNOSTIC_SOFT_TIMEOUT_SECONDS,
+    _diagnostic_active_context,
+    _diagnostic_runtime_factory,
     _DiagnosticReadGateway,
     _assessment_summary,
     _assessor_failure_summary,
@@ -152,3 +162,45 @@ def test_diagnostic_reader_classifies_failures_without_storing_content_or_identi
     assert "secret.example" not in serialized
     assert "private upstream detail" not in serialized
     assert "private-upstream-code" not in serialized
+
+
+def _state(context: dict[str, Any]):
+    loaded = load_claim_engine_state(context, known_evidence_ids=())
+    assert loaded.available
+    assert loaded.state is not None
+    return loaded.state
+
+
+def test_diagnostic_wall_clock_override_preserves_business_budgets() -> None:
+    production = _state(_active_context("2026-09-05"))
+    diagnostic = _state(_diagnostic_active_context("2026-09-05"))
+
+    assert diagnostic.budget.max_candidates == production.budget.max_candidates == 20
+    assert diagnostic.budget.max_reads == production.budget.max_reads == 8
+    assert diagnostic.budget.max_total_chars == 16000
+    assert diagnostic.budget.max_total_chars == production.budget.max_total_chars
+    assert production.budget.soft_timeout_seconds == 45
+    assert production.budget.hard_timeout_seconds == 60
+    assert diagnostic.budget.soft_timeout_seconds == DIAGNOSTIC_SOFT_TIMEOUT_SECONDS
+    assert diagnostic.budget.hard_timeout_seconds == DIAGNOSTIC_HARD_TIMEOUT_SECONDS
+
+
+def test_diagnostic_runtime_uses_nonqualification_timeout_caps() -> None:
+    runtime = _diagnostic_runtime_factory(
+        cast(Any, object()),
+        cast(Any, object()),
+    )
+
+    assert runtime.model_timeout_cap_seconds == DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS
+    assert (
+        runtime.claim_planner.model_gateway._timeout_seconds  # noqa: SLF001
+        == DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS
+    )
+    assert (
+        runtime.candidate_assessor.model_gateway._timeout_seconds  # noqa: SLF001
+        == DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS
+    )
+    assert (
+        runtime.candidate_assessor.timeout_cap_seconds
+        == DIAGNOSTIC_ASSESSOR_TIMEOUT_CAP_SECONDS
+    )

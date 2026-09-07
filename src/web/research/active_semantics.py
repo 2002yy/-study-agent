@@ -240,8 +240,24 @@ class _CandidateAssessorClient:
 
 
 class RuntimeCandidateAssessor:
-    def __init__(self, model_gateway: ResearchModelGateway) -> None:
+    def __init__(
+        self,
+        model_gateway: ResearchModelGateway,
+        *,
+        timeout_cap_seconds: float = CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS,
+    ) -> None:
+        if isinstance(timeout_cap_seconds, bool):
+            raise ValueError("candidate assessment timeout cap must be positive")
+        try:
+            timeout_cap = float(timeout_cap_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "candidate assessment timeout cap must be positive"
+            ) from exc
+        if not isfinite(timeout_cap) or timeout_cap <= 0:
+            raise ValueError("candidate assessment timeout cap must be positive")
         self._durable_max_attempts = model_gateway.max_attempts
+        self.timeout_cap_seconds = timeout_cap
         self.model_gateway = _candidate_assessor_gateway(model_gateway)
 
     def assess(
@@ -287,7 +303,7 @@ class RuntimeCandidateAssessor:
         # inside one 60-second run.
         call_gateway = copy(self.model_gateway)
         call_gateway.max_attempts = attempt_start
-        assessment_timeout = CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS
+        assessment_timeout = self.timeout_cap_seconds
         if timeout_seconds is not None:
             assessment_timeout = min(assessment_timeout, float(timeout_seconds))
         result = call_gateway.complete_structured(

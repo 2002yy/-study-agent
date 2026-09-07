@@ -107,7 +107,7 @@ class CompactAssessmentGainSignalCodeError(CompactAssessmentCodeError):
 
 
 class CompactAssessmentGainSignalDuplicateError(CompactAssessmentCodeError):
-    """Compact gain-signal list repeats a decoded semantic value."""
+    """Legacy subtype retained for compatibility with older diagnostics."""
 
 
 @dataclass(frozen=True)
@@ -327,7 +327,7 @@ def _compact_code(
 
 
 def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
-    if not isinstance(value, list):
+    if not isinstance(value, list) or len(value) > len(codes):
         raise CompactAssessmentGainSignalCodeError("compact gain signal codes invalid")
     result: list[str] = []
     for item in value:
@@ -337,11 +337,8 @@ def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
             "gain signal",
             CompactAssessmentGainSignalCodeError,
         )
-        if decoded in result:
-            raise CompactAssessmentGainSignalDuplicateError(
-                "compact gain signal codes duplicate"
-            )
-        result.append(decoded)
+        if decoded not in result:
+            result.append(decoded)
     return result
 
 

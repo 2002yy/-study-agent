@@ -199,7 +199,6 @@ def test_compact_parser_normalizes_one_based_candidate_indexes() -> None:
         ("r", 99, CompactAssessmentRelevanceCodeError),
         ("s", 99, CompactAssessmentSourceRoleCodeError),
         ("g", [99], CompactAssessmentGainSignalCodeError),
-        ("g", [0, 0], CompactAssessmentGainSignalDuplicateError),
     ],
 )
 def test_compact_parser_classifies_code_failure_domain(
@@ -218,6 +217,33 @@ def test_compact_parser_classifies_code_failure_domain(
             request=request,
             cluster_assignments={"a": _assignment("a")},
         )
+
+
+def test_compact_parser_deduplicates_legal_gain_signals_in_order() -> None:
+    candidate = _candidate("a")
+    request = build_candidate_assessment_request((candidate,), claim=_claim())
+    parsed = parse_compact_candidate_assessment_response(
+        {
+            "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+            "a": [
+                {
+                    "i": 0,
+                    "r": 0,
+                    "rc": 0.8,
+                    "s": 1,
+                    "sc": 0.9,
+                    "g": [0, 0, 1, 0],
+                }
+            ],
+        },
+        request=request,
+        cluster_assignments={"a": _assignment("a")},
+    )
+
+    assert parsed["a"].expected_gain_signals == (
+        "new_primary",
+        "new_independent_cluster",
+    )
 
 
 def test_compact_code_subclasses_preserve_fail_closed_base_contract() -> None:
@@ -334,6 +360,30 @@ def test_runtime_assessor_spends_one_physical_attempt_per_invocation() -> None:
     assert len(client.calls) == 2
     assert all(call["timeout"] == 15.0 for call in client.calls)
     assert all(call["max_tokens"] == 200 for call in client.calls)
+
+
+def test_runtime_assessor_accepts_explicit_diagnostic_timeout_cap() -> None:
+    client = _AssessmentClient()
+    assessor = RuntimeCandidateAssessor(
+        ResearchModelGateway(
+            client=client,
+            model_name="shared",
+            max_attempts=2,
+            timeout_seconds=120,
+        ),
+        timeout_cap_seconds=120.0,
+    )
+
+    assessor.assess(
+        run_id="diagnostic-timeout-cap",
+        claim=_claim(),
+        candidates=(_candidate("a"),),
+        assignments={"a": _assignment("a")},
+        reference_date="2026-09-05",
+        timeout_seconds=90.0,
+    )
+
+    assert client.calls[0]["timeout"] == 90.0
 
 
 def test_runtime_assessor_caps_two_candidate_window_at_220_tokens() -> None:

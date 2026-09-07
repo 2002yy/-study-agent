@@ -12,7 +12,7 @@ import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
-from math import ceil
+from math import ceil, isfinite
 import time
 from typing import Any, cast
 
@@ -21,6 +21,7 @@ from src.domain.runtime_entities import WebLookupRun, new_id
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.active_semantics import (
+    CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS,
     RuntimeCandidateAssessor,
     RuntimeEvidenceExtractor,
 )
@@ -146,12 +147,28 @@ class ActiveResearchRuntimeExecutor:
         policy_check: PolicyCheck | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         utc_now: Callable[[], str] | None = None,
+        model_timeout_cap_seconds: float = 20.0,
+        candidate_assessment_timeout_cap_seconds: float = (
+            CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS
+        ),
     ) -> None:
         self.repository = repository
         self.gateway = gateway
+        if isinstance(model_timeout_cap_seconds, bool):
+            raise ValueError("model timeout cap must be positive")
+        try:
+            model_timeout_cap = float(model_timeout_cap_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("model timeout cap must be positive") from exc
+        if not isfinite(model_timeout_cap) or model_timeout_cap <= 0:
+            raise ValueError("model timeout cap must be positive")
+        self.model_timeout_cap_seconds = model_timeout_cap
         shared_model = model_gateway or ResearchModelGateway(timeout_seconds=20.0)
         self.claim_planner = claim_planner or RuntimeClaimPlanner(shared_model)
-        self.candidate_assessor = candidate_assessor or RuntimeCandidateAssessor(shared_model)
+        self.candidate_assessor = candidate_assessor or RuntimeCandidateAssessor(
+        shared_model,
+        timeout_cap_seconds=candidate_assessment_timeout_cap_seconds,
+    )
         self.evidence_extractor = evidence_extractor or RuntimeEvidenceExtractor(shared_model)
         self.policy_check = policy_check or _default_policy_check
         self.monotonic = monotonic
@@ -283,7 +300,13 @@ class ActiveResearchRuntimeExecutor:
             return late_ids
 
         def remaining_timeout() -> float:
-            return max(1.0, min(20.0, state.budget.hard_timeout_seconds - elapsed()))
+            return max(
+        1.0,
+        min(
+            self.model_timeout_cap_seconds,
+            state.budget.hard_timeout_seconds - elapsed(),
+        ),
+    )
 
         def ensure_budget() -> None:
             if elapsed() >= state.budget.hard_timeout_seconds:

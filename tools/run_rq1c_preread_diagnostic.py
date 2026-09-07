@@ -2,14 +2,15 @@
 
 This is non-qualification diagnostic evidence. It selects the two already-known
 case IDs from the untouched 12-case manifest, executes the production active
-Claim Engine with the unchanged bounded ResearchBudget, and projects only safe
-runtime metadata. No model response text, prompts, page bodies, or query text are
+Claim Engine with unchanged candidate/read/material limits and diagnostic-only
+wall-clock allowances, and projects only safe runtime metadata. No model response text, prompts, page bodies, or query text are
 written to the artifact.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 import re
@@ -27,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.active_research_runtime import (  # noqa: E402
     ACTIVE_RESEARCH_ASSESSMENTS_KEY,
     ACTIVE_RESEARCH_METRICS_KEY,
+    ActiveResearchRuntimeExecutor,
 )
 from src.application.research_web_lookup_dispatch import (  # noqa: E402
     ClaimEngineDispatchWebLookupService,
@@ -35,6 +37,11 @@ from src.domain.runtime_entities import WebLookupRun  # noqa: E402
 from src.infrastructure.sqlite.database import RuntimeDatabase  # noqa: E402
 from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
 from src.web.research.active_adapter import ActiveResearchGateway  # noqa: E402
+from src.web.research.model_gateway import ResearchModelGateway  # noqa: E402
+from src.web.research.state import (  # noqa: E402
+    attach_claim_engine_state,
+    load_claim_engine_state,
+)
 from src.web.research_gateway import ResearchWebGateway  # noqa: E402
 from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
 from tools.run_rq1c_bounded_qualification_core import (  # noqa: E402
@@ -49,6 +56,10 @@ TARGET_CASE_IDS = (
     "rq1c-unverifiable-python-security",
 )
 DEFAULT_OUTPUT = REPO_ROOT / "output" / "rq1c-preread-starvation-diagnostic.json"
+DIAGNOSTIC_SOFT_TIMEOUT_SECONDS = 240.0
+DIAGNOSTIC_HARD_TIMEOUT_SECONDS = 300.0
+DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS = 120.0
+DIAGNOSTIC_ASSESSOR_TIMEOUT_CAP_SECONDS = 120.0
 _ASSESSOR_FAILURE_CATEGORY_BY_TYPE = {
     "CompactAssessmentRelevanceCodeError": "compact_code_relevance",
     "CompactAssessmentSourceRoleCodeError": "compact_code_source_role",
@@ -268,6 +279,40 @@ def _read_failure_summary(runtime: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _diagnostic_active_context(reference_date: str) -> dict[str, Any]:
+    context = _active_context(reference_date)
+    loaded = load_claim_engine_state(context, known_evidence_ids=())
+    if not loaded.available or loaded.state is None:
+        raise RuntimeError("diagnostic active context is unavailable")
+    state = replace(
+        loaded.state,
+        budget=replace(
+            loaded.state.budget,
+            soft_timeout_seconds=DIAGNOSTIC_SOFT_TIMEOUT_SECONDS,
+            hard_timeout_seconds=DIAGNOSTIC_HARD_TIMEOUT_SECONDS,
+        ),
+    )
+    return attach_claim_engine_state(context, state, known_evidence_ids=())
+
+
+def _diagnostic_runtime_factory(
+    repository: WebLookupRepository,
+    gateway: ActiveResearchGateway,
+) -> ActiveResearchRuntimeExecutor:
+    diagnostic_model = ResearchModelGateway(
+        timeout_seconds=DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS,
+    )
+    return ActiveResearchRuntimeExecutor(
+        repository,
+        gateway,
+        model_gateway=diagnostic_model,
+        model_timeout_cap_seconds=DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS,
+        candidate_assessment_timeout_cap_seconds=(
+            DIAGNOSTIC_ASSESSOR_TIMEOUT_CAP_SECONDS
+        ),
+    )
+
+
 def _run_case(
     *,
     case: Mapping[str, str],
@@ -282,7 +327,7 @@ def _run_case(
             query=case["question"],
             stage="planned",
             status="pending",
-            research_context=_active_context(reference_date),
+            research_context=_diagnostic_active_context(reference_date),
             max_items=5,
         )
     )
@@ -290,6 +335,7 @@ def _run_case(
     service = ClaimEngineDispatchWebLookupService(
         repository,
         active_gateway_factory=lambda: ActiveResearchGateway(read_gateway=diagnostic_reader),
+        active_runtime_factory=_diagnostic_runtime_factory,
     )
     error_type = ""
     try:
@@ -359,8 +405,14 @@ def run_diagnostic(
         "configured_budget": {
             "max_candidates": 20,
             "max_reads": 8,
-            "soft_timeout_seconds": 45,
-            "hard_timeout_seconds": 60,
+        "max_total_chars": 16000,
+        "soft_timeout_seconds": DIAGNOSTIC_SOFT_TIMEOUT_SECONDS,
+        "hard_timeout_seconds": DIAGNOSTIC_HARD_TIMEOUT_SECONDS,
+        "model_timeout_cap_seconds": DIAGNOSTIC_MODEL_TIMEOUT_CAP_SECONDS,
+        "candidate_assessment_timeout_cap_seconds": (
+            DIAGNOSTIC_ASSESSOR_TIMEOUT_CAP_SECONDS
+        ),
+        "wall_clock_is_qualification_gate": False,
         },
         "cases": [],
         "stores_raw_model_text": False,
