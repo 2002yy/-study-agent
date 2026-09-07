@@ -1,0 +1,532 @@
+name: RQ1-C Live14 Safe Classification Patch 3
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: "${{ github.event.head_commit.message == 'chore: apply RQ1-C live14 safe classification' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Apply diagnostic-only patch
+        shell: bash
+        run: |
+          cat > /tmp/rq1c_live14_patch.py <<'PY'
+          from pathlib import Path
+
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one anchor in {path}, found {count}: {old[:100]!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+          candidate = "src/web/research/candidate_assessment.py"
+          replace_once(
+              candidate,
+              '''class CompactAssessmentCodeError(ValueError):
+              """Compact response contains an unknown or malformed enum code."""
+          '''.replace("          ", ""),
+              '''class CompactAssessmentCodeError(ValueError):
+              """Compact response contains an unknown or malformed enum code."""
+
+
+          class CompactAssessmentRelevanceCodeError(CompactAssessmentCodeError):
+              """Compact relevance code is unknown or malformed."""
+
+
+          class CompactAssessmentSourceRoleCodeError(CompactAssessmentCodeError):
+              """Compact source-role code is unknown or malformed."""
+
+
+          class CompactAssessmentGainSignalCodeError(CompactAssessmentCodeError):
+              """Compact gain-signal code is unknown or malformed."""
+
+
+          class CompactAssessmentGainSignalDuplicateError(CompactAssessmentCodeError):
+              """Compact gain-signal list repeats a decoded semantic value."""
+          '''.replace("          ", ""),
+          )
+          replace_once(
+              candidate,
+              '''                "relevance": _compact_code(
+                    raw.get("r"), CANDIDATE_ASSESSMENT_RELEVANCE_CODES, "relevance"
+                ),''',
+              '''                "relevance": _compact_code(
+                    raw.get("r"),
+                    CANDIDATE_ASSESSMENT_RELEVANCE_CODES,
+                    "relevance",
+                    CompactAssessmentRelevanceCodeError,
+                ),''',
+          )
+          replace_once(
+              candidate,
+              '''                "source_role": _compact_code(
+                    raw.get("s"),
+                    CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES,
+                    "source role",
+                ),''',
+              '''                "source_role": _compact_code(
+                    raw.get("s"),
+                    CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES,
+                    "source role",
+                    CompactAssessmentSourceRoleCodeError,
+                ),''',
+          )
+          replace_once(
+              candidate,
+              '''def _compact_code(value: Any, codes: Mapping[int, str], label: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in codes:
+        raise CompactAssessmentCodeError(f"compact {label} code invalid")
+    return codes[value]
+
+
+def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
+    if not isinstance(value, list):
+        raise CompactAssessmentCodeError("compact gain signal codes invalid")
+    result: list[str] = []
+    for item in value:
+        decoded = _compact_code(item, codes, "gain signal")
+        if decoded in result:
+            raise CompactAssessmentCodeError("compact gain signal codes duplicate")
+        result.append(decoded)
+    return result
+''',
+              '''def _compact_code(
+    value: Any,
+    codes: Mapping[int, str],
+    label: str,
+    error_type: type[CompactAssessmentCodeError] = CompactAssessmentCodeError,
+) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in codes:
+        raise error_type(f"compact {label} code invalid")
+    return codes[value]
+
+
+def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
+    if not isinstance(value, list):
+        raise CompactAssessmentGainSignalCodeError("compact gain signal codes invalid")
+    result: list[str] = []
+    for item in value:
+        decoded = _compact_code(
+            item,
+            codes,
+            "gain signal",
+            CompactAssessmentGainSignalCodeError,
+        )
+        if decoded in result:
+            raise CompactAssessmentGainSignalDuplicateError(
+                "compact gain signal codes duplicate"
+            )
+        result.append(decoded)
+    return result
+''',
+          )
+          replace_once(
+              candidate,
+              '''    "CompactAssessmentCoverageError",
+    "CompactAssessmentCodeError",
+    "CompactAssessmentDomainError",
+''',
+              '''    "CompactAssessmentCoverageError",
+    "CompactAssessmentCodeError",
+    "CompactAssessmentDomainError",
+    "CompactAssessmentGainSignalCodeError",
+    "CompactAssessmentGainSignalDuplicateError",
+    "CompactAssessmentRelevanceCodeError",
+    "CompactAssessmentSourceRoleCodeError",
+''',
+          )
+
+          candidate_test = "tests/test_research_candidate_assessment.py"
+          replace_once(
+              candidate_test,
+              '''    CompactAssessmentCodeError,
+    build_candidate_assessment_request,
+''',
+              '''    CompactAssessmentCodeError,
+    CompactAssessmentGainSignalCodeError,
+    CompactAssessmentGainSignalDuplicateError,
+    CompactAssessmentRelevanceCodeError,
+    CompactAssessmentSourceRoleCodeError,
+    build_candidate_assessment_request,
+''',
+          )
+          replace_once(
+              candidate_test,
+              '''def test_compact_parser_classifies_unknown_enum_code() -> None:
+    candidate = _candidate("a")
+    request = build_candidate_assessment_request((candidate,), claim=_claim())
+
+    with pytest.raises(CompactAssessmentCodeError):
+        parse_compact_candidate_assessment_response(
+            {
+                "v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
+                "a": [{"i": 0, "r": 99, "rc": 0.8, "s": 1, "sc": 0.9, "g": [0]}],
+            },
+            request=request,
+            cluster_assignments={"a": _assignment("a")},
+        )
+''',
+              '''@pytest.mark.parametrize(
+    ("field", "value", "error_type"),
+    [
+        ("r", 99, CompactAssessmentRelevanceCodeError),
+        ("s", 99, CompactAssessmentSourceRoleCodeError),
+        ("g", [99], CompactAssessmentGainSignalCodeError),
+        ("g", [0, 0], CompactAssessmentGainSignalDuplicateError),
+    ],
+)
+def test_compact_parser_classifies_code_failure_domain(
+    field: str,
+    value: object,
+    error_type: type[CompactAssessmentCodeError],
+) -> None:
+    candidate = _candidate("a")
+    request = build_candidate_assessment_request((candidate,), claim=_claim())
+    row = {"i": 0, "r": 0, "rc": 0.8, "s": 1, "sc": 0.9, "g": [0]}
+    row[field] = value
+
+    with pytest.raises(error_type):
+        parse_compact_candidate_assessment_response(
+            {"v": CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION, "a": [row]},
+            request=request,
+            cluster_assignments={"a": _assignment("a")},
+        )
+
+
+def test_compact_code_subclasses_preserve_fail_closed_base_contract() -> None:
+    assert issubclass(CompactAssessmentRelevanceCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentSourceRoleCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentGainSignalCodeError, CompactAssessmentCodeError)
+    assert issubclass(CompactAssessmentGainSignalDuplicateError, CompactAssessmentCodeError)
+''',
+          )
+
+          diagnostic = "tools/run_rq1c_preread_diagnostic.py"
+          replace_once(
+              diagnostic,
+              '''from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
+from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
+''',
+              '''from src.repositories.web_lookup_repository import WebLookupRepository  # noqa: E402
+from src.web.research.active_adapter import ActiveResearchGateway  # noqa: E402
+from src.web.research_gateway import ResearchWebGateway  # noqa: E402
+from tools.rq1c_git_identity import exact_checkout_git_sha  # noqa: E402
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''DEFAULT_OUTPUT = REPO_ROOT / "output" / "rq1c-preread-starvation-diagnostic.json"
+''',
+              '''DEFAULT_OUTPUT = REPO_ROOT / "output" / "rq1c-preread-starvation-diagnostic.json"
+_ASSESSOR_FAILURE_CATEGORY_BY_TYPE = {
+    "CompactAssessmentRelevanceCodeError": "compact_code_relevance",
+    "CompactAssessmentSourceRoleCodeError": "compact_code_source_role",
+    "CompactAssessmentGainSignalCodeError": "compact_code_gain_signal",
+    "CompactAssessmentGainSignalDuplicateError": "compact_code_duplicate",
+    "CompactAssessmentCodeError": "compact_code_other",
+    "CompactAssessmentDomainError": "expanded_domain",
+}
+_CANONICAL_READER_PROVIDER_CODES = frozenset(
+    {
+        "blocked",
+        "fetch_failed",
+        "http_error",
+        "http_status",
+        "invalid_url",
+        "not_found",
+        "page_read_failed",
+        "provider_failed",
+        "timeout",
+        "unsupported",
+    }
+)
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''def _model_call_rows(runtime: Mapping[str, Any]) -> list[dict[str, Any]]:
+''',
+              '''def _canonical_provider_code(value: Any) -> str:
+    label = _bounded(value, 80).casefold().replace("-", "_")
+    if not label:
+        return ""
+    return label if label in _CANONICAL_READER_PROVIDER_CODES else "other"
+
+
+class _DiagnosticReadGateway:
+    """Observe safe failure classes while preserving the production read result."""
+
+    def __init__(self, inner: Any | None = None) -> None:
+        self._inner = inner if inner is not None else ResearchWebGateway()
+        self._failure_category_counts: dict[str, int] = {}
+        self._provider_code_counts: dict[str, int] = {}
+
+    @staticmethod
+    def _increment(bucket: dict[str, int], key: str) -> None:
+        bucket[key] = bucket.get(key, 0) + 1
+
+    def read(self, url: str, *, max_chars: int = 6000) -> Any:
+        try:
+            result = self._inner.read(url, max_chars=max_chars)
+        except Exception:
+            self._increment(self._failure_category_counts, "exception")
+            raise
+        if not isinstance(result, Mapping):
+            return result
+        content = str(result.get("content") or result.get("readme") or "")
+        if result.get("ok") is True:
+            if not content.strip():
+                self._increment(self._failure_category_counts, "empty_content")
+        else:
+            self._increment(self._failure_category_counts, "gateway_negative_result")
+            provider_code = _canonical_provider_code(result.get("error_code"))
+            if provider_code:
+                self._increment(self._provider_code_counts, provider_code)
+        return result
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "failure_category_counts": dict(sorted(self._failure_category_counts.items())),
+            "provider_code_counts": dict(sorted(self._provider_code_counts.items())),
+            "stores_candidate_identity": False,
+            "stores_failure_detail": False,
+            "stores_page_content": False,
+        }
+
+
+def _assessor_failure_summary(model_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for row in model_calls:
+        if row.get("purpose") != "research_candidate_assessment":
+            continue
+        category = _ASSESSOR_FAILURE_CATEGORY_BY_TYPE.get(str(row.get("error_type") or ""))
+        if category:
+            counts[category] = counts.get(category, 0) + 1
+    return {
+        "failure_category_counts": dict(sorted(counts.items())),
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
+
+
+def _model_call_rows(runtime: Mapping[str, Any]) -> list[dict[str, Any]]:
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''    service: ClaimEngineDispatchWebLookupService,
+    reference_date: str,
+''',
+              '''    reference_date: str,
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''    error_type = ""
+    try:
+        completed = service.execute(run.id, raise_on_error=False)
+''',
+              '''    diagnostic_reader = _DiagnosticReadGateway()
+    service = ClaimEngineDispatchWebLookupService(
+        repository,
+        active_gateway_factory=lambda: ActiveResearchGateway(read_gateway=diagnostic_reader),
+    )
+    error_type = ""
+    try:
+        completed = service.execute(run.id, raise_on_error=False)
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''            "assessment_summary": _assessment_summary(context),
+            "read_failure_summary": _read_failure_summary(runtime),
+''',
+              '''            "assessment_summary": _assessment_summary(context),
+            "assessor_failure_summary": _assessor_failure_summary(model_calls),
+            "read_failure_summary": _read_failure_summary(runtime),
+            "reader_failure_classification": diagnostic_reader.summary(),
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''        service = ClaimEngineDispatchWebLookupService(repository)
+        for case in cases:
+            record = _run_case(
+                case=case,
+                repository=repository,
+                service=service,
+                reference_date=reference_date,
+            )
+''',
+              '''        for case in cases:
+            record = _run_case(
+                case=case,
+                repository=repository,
+                reference_date=reference_date,
+            )
+''',
+          )
+          replace_once(
+              diagnostic,
+              '''                        "model_calls": record["runtime"]["model_call_count"],
+                        "reads": record["runtime"]["read_count"],
+''',
+              '''                        "model_calls": record["runtime"]["model_call_count"],
+                        "reads": record["runtime"]["read_count"],
+                        "assessor_failure_categories": record["runtime"][
+                            "assessor_failure_summary"
+                        ]["failure_category_counts"],
+                        "reader_failure_categories": record["runtime"][
+                            "reader_failure_classification"
+                        ]["failure_category_counts"],
+                        "reader_provider_codes": record["runtime"][
+                            "reader_failure_classification"
+                        ]["provider_code_counts"],
+''',
+          )
+
+          diagnostic_test = "tests/test_rq1c_preread_diagnostic.py"
+          replace_once(
+              diagnostic_test,
+              '''from __future__ import annotations
+
+from tools.run_rq1c_preread_diagnostic import (
+    _assessment_summary,
+    _read_failure_summary,
+)
+''',
+              '''from __future__ import annotations
+
+import pytest
+
+from tools.run_rq1c_preread_diagnostic import (
+    _DiagnosticReadGateway,
+    _assessment_summary,
+    _assessor_failure_summary,
+    _read_failure_summary,
+)
+''',
+          )
+          test_path = Path(diagnostic_test)
+          test_path.write_text(
+              test_path.read_text(encoding="utf-8")
+              + '''
+
+
+def test_assessor_failure_summary_splits_safe_compact_domains() -> None:
+    summary = _assessor_failure_summary(
+        [
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentRelevanceCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentSourceRoleCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentGainSignalCodeError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentGainSignalDuplicateError"},
+            {"purpose": "research_candidate_assessment", "error_type": "CompactAssessmentDomainError"},
+            {"purpose": "research_candidate_assessment", "error_type": "TimeoutError"},
+            {"purpose": "research_evidence_extraction", "error_type": "CompactAssessmentRelevanceCodeError"},
+        ]
+    )
+
+    assert summary == {
+        "failure_category_counts": {
+            "compact_code_duplicate": 1,
+            "compact_code_gain_signal": 1,
+            "compact_code_relevance": 1,
+            "compact_code_source_role": 1,
+            "expanded_domain": 1,
+        },
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+    }
+
+
+class _ReaderStub:
+    def read(self, url: str, *, max_chars: int = 6000):
+        del max_chars
+        if url.endswith("exception"):
+            raise TimeoutError("private timeout detail")
+        if url.endswith("empty"):
+            return {"ok": True, "content": "   ", "url": "private-empty"}
+        if url.endswith("known-negative"):
+            return {
+                "ok": False,
+                "error": "private upstream detail",
+                "error_code": "timeout",
+                "url": "private-known",
+            }
+        return {
+            "ok": False,
+            "error": "private upstream detail",
+            "error_code": "private-upstream-code",
+            "url": "private-unknown",
+        }
+
+
+def test_diagnostic_reader_classifies_failures_without_storing_content_or_identity() -> None:
+    reader = _DiagnosticReadGateway(_ReaderStub())
+
+    with pytest.raises(TimeoutError):
+        reader.read("https://secret.example/exception")
+    assert reader.read("https://secret.example/empty")["ok"] is True
+    assert reader.read("https://secret.example/known-negative")["ok"] is False
+    assert reader.read("https://secret.example/unknown-negative")["ok"] is False
+
+    summary = reader.summary()
+    assert summary == {
+        "failure_category_counts": {
+            "empty_content": 1,
+            "exception": 1,
+            "gateway_negative_result": 2,
+        },
+        "provider_code_counts": {"other": 1, "timeout": 1},
+        "stores_candidate_identity": False,
+        "stores_failure_detail": False,
+        "stores_page_content": False,
+    }
+    serialized = str(summary)
+    assert "secret.example" not in serialized
+    assert "private upstream detail" not in serialized
+    assert "private-upstream-code" not in serialized
+''',
+              encoding="utf-8",
+          )
+          PY
+          python /tmp/rq1c_live14_patch.py
+          rm -f .github/workflows/rq1c-live14-patch.yml
+          rm -f .github/workflows/rq1c-live14-patch2.yml
+          rm -f .github/workflows/rq1c-live14-patch3.yml
+      - name: Focused tests and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_research_candidate_assessment.py tests/test_rq1c_preread_diagnostic.py
+          ruff check src/web/research/candidate_assessment.py tools/run_rq1c_preread_diagnostic.py tests/test_research_candidate_assessment.py tests/test_rq1c_preread_diagnostic.py
+          python -m py_compile src/web/research/candidate_assessment.py tools/run_rq1c_preread_diagnostic.py
+          git diff --check
+      - name: Commit tested patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/web/research/candidate_assessment.py tools/run_rq1c_preread_diagnostic.py tests/test_research_candidate_assessment.py tests/test_rq1c_preread_diagnostic.py .github/workflows/rq1c-live14-patch.yml .github/workflows/rq1c-live14-patch2.yml .github/workflows/rq1c-live14-patch3.yml
+          git diff --cached --check
+          git commit -m "test(research): refine preread safe failure classes"
+          git push origin HEAD:${GITHUB_REF_NAME}
