@@ -1,0 +1,51 @@
+name: RQ1-C Live14 Safe Classification Patch 4
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Apply safe-classification patch
+        run: python tools/tmp_rq1c_live14_patch.py
+      - name: Focused tests and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_research_candidate_assessment.py tests/test_rq1c_preread_diagnostic.py
+          ruff check src/web/research/candidate_assessment.py tools/run_rq1c_preread_diagnostic.py tests/test_research_candidate_assessment.py tests/test_rq1c_preread_diagnostic.py
+          python -m py_compile src/web/research/candidate_assessment.py tools/run_rq1c_preread_diagnostic.py
+          git diff --check
+      - name: Remove temporary patch machinery
+        shell: bash
+        run: |
+          rm -f tools/tmp_rq1c_live14_patch.py
+          rm -f .github/workflows/rq1c-live14-patch.yml
+          rm -f .github/workflows/rq1c-live14-patch2.yml
+          rm -f .github/workflows/rq1c-live14-patch3.yml
+          rm -f .github/workflows/rq1c-live14-patch4.yml
+          git diff --check
+      - name: Commit tested patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "test(research): refine preread safe failure classes"
+          git push origin HEAD:${GITHUB_REF_NAME}
