@@ -19,6 +19,9 @@ from openai import OpenAI
 
 from src.llm_client import get_client
 from src.web.research.candidate_assessment import (
+    CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES,
+    CANDIDATE_ASSESSMENT_RELEVANCE_CODES,
+    CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES,
     CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION,
     build_candidate_assessment_request,
     parse_compact_candidate_assessment_response,
@@ -42,10 +45,13 @@ CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE = 100
 CANDIDATE_ASSESSMENT_WINDOW_MAX_TOKENS = 220
 
 _ASSESSMENT_SYSTEM_PROMPT = """You classify public web search candidates for one research claim.
-Return strict compact JSON matching ca1. Return one row per input candidate, in input order;
+Return strict compact JSON matching ca2. Return one row per input candidate, in input order;
 i is its zero- or one-based array position; use one convention consistently for all rows.
-Use r=relevance, rc=relevance confidence, s=source role,
-sc=source-role confidence, and g=expected gain signals.
+Use integer codes: r relevance 0=answer_relevant 1=topic_only 2=off_target 3=unknown;
+s source role 0=unknown 1=primary 2=authoritative_secondary 3=independent_secondary
+4=community 5=aggregator; g gain signals 0=new_primary 1=new_independent_cluster
+2=new_contradiction 3=new_provenance_lead 4=freshness_update 5=claim_status_improvement.
+rc and sc are confidences from 0 to 1.
 This is pre-read lead triage: judge whether opening the candidate page could produce evidence,
 not whether the bounded search snippet already proves the claim. If title, snippet, or URL
 plausibly points to a claim-bearing page but metadata is insufficient, use topic_only or unknown
@@ -68,15 +74,6 @@ _SOURCE_ROLES = {
     "community",
     "aggregator",
 }
-_RELEVANCE_LABELS = ("answer_relevant", "topic_only", "off_target", "unknown")
-_GAIN_SIGNALS = (
-    "new_primary",
-    "new_independent_cluster",
-    "new_contradiction",
-    "new_provenance_lead",
-    "freshness_update",
-    "claim_status_improvement",
-)
 _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
@@ -109,8 +106,8 @@ _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
                         "properties": {
                             "i": {"type": "integer", "minimum": 0, "maximum": 100},
                             "r": {
-                                "type": "string",
-                                "enum": list(_RELEVANCE_LABELS),
+                                "type": "integer",
+                                "enum": list(CANDIDATE_ASSESSMENT_RELEVANCE_CODES),
                             },
                             "rc": {
                                 "type": "number",
@@ -118,8 +115,8 @@ _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
                                 "maximum": 1.0,
                             },
                             "s": {
-                                "type": "string",
-                                "enum": sorted(_SOURCE_ROLES | {"unknown"}),
+                                "type": "integer",
+                                "enum": list(CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES),
                             },
                             "sc": {
                                 "type": "number",
@@ -128,11 +125,11 @@ _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT: dict[str, Any] = {
                             },
                             "g": {
                                 "type": "array",
-                                "maxItems": len(_GAIN_SIGNALS),
+                                "maxItems": len(CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES),
                                 "uniqueItems": True,
                                 "items": {
-                                    "type": "string",
-                                    "enum": list(_GAIN_SIGNALS),
+                                    "type": "integer",
+                                    "enum": list(CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES),
                                 },
                             },
                         },

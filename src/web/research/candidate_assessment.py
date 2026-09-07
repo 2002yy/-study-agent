@@ -17,7 +17,30 @@ from src.web.research.contracts import ResearchClaim
 from src.web.research.source_cluster import CandidateClusterAssignment
 
 CANDIDATE_ASSESSMENT_SCHEMA_VERSION = "candidate-assessment-v1"
-CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION = "ca1"
+CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION = "ca2"
+
+CANDIDATE_ASSESSMENT_RELEVANCE_CODES = {
+    0: "answer_relevant",
+    1: "topic_only",
+    2: "off_target",
+    3: "unknown",
+}
+CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES = {
+    0: "unknown",
+    1: "primary",
+    2: "authoritative_secondary",
+    3: "independent_secondary",
+    4: "community",
+    5: "aggregator",
+}
+CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES = {
+    0: "new_primary",
+    1: "new_independent_cluster",
+    2: "new_contradiction",
+    3: "new_provenance_lead",
+    4: "freshness_update",
+    5: "claim_status_improvement",
+}
 
 _RELEVANCE = {"answer_relevant", "topic_only", "off_target", "unknown"}
 _SOURCE_ROLES = {
@@ -236,11 +259,19 @@ def parse_compact_candidate_assessment_response(
         assessments.append(
             {
                 "candidate_id": request.candidate_ids[index - index_base],
-                "relevance": raw.get("r"),
+                "relevance": _compact_code(
+                    raw.get("r"), CANDIDATE_ASSESSMENT_RELEVANCE_CODES, "relevance"
+                ),
                 "relevance_confidence": raw.get("rc"),
-                "source_role": raw.get("s"),
+                "source_role": _compact_code(
+                    raw.get("s"),
+                    CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES,
+                    "source role",
+                ),
                 "source_role_confidence": raw.get("sc"),
-                "expected_gain_signals": raw.get("g"),
+                "expected_gain_signals": _compact_codes(
+                    raw.get("g"), CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES
+                ),
             }
         )
     try:
@@ -258,6 +289,24 @@ def parse_compact_candidate_assessment_response(
         raise CompactAssessmentDomainError(
             "compact assessment domain validation failed"
         ) from exc
+
+
+def _compact_code(value: Any, codes: Mapping[int, str], label: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in codes:
+        raise CompactAssessmentDomainError(f"compact {label} code invalid")
+    return codes[value]
+
+
+def _compact_codes(value: Any, codes: Mapping[int, str]) -> list[str]:
+    if not isinstance(value, list):
+        raise CompactAssessmentDomainError("compact gain signal codes invalid")
+    result: list[str] = []
+    for item in value:
+        decoded = _compact_code(item, codes, "gain signal")
+        if decoded in result:
+            raise CompactAssessmentDomainError("compact gain signal codes duplicate")
+        result.append(decoded)
+    return result
 
 
 def _bounded_text(value: Any, limit: int, *, required: bool = False) -> str:
@@ -308,6 +357,9 @@ def _positive_float(value: Any, label: str) -> float:
 __all__ = [
     "CANDIDATE_ASSESSMENT_SCHEMA_VERSION",
     "CANDIDATE_ASSESSMENT_WIRE_SCHEMA_VERSION",
+    "CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES",
+    "CANDIDATE_ASSESSMENT_RELEVANCE_CODES",
+    "CANDIDATE_ASSESSMENT_SOURCE_ROLE_CODES",
     "CompactAssessmentCoverageError",
     "CompactAssessmentDomainError",
     "CompactAssessmentEnvelopeError",

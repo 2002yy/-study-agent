@@ -126,19 +126,19 @@ def test_compact_parser_restores_server_owned_candidate_identity() -> None:
             "a": [
                 {
                     "i": 0,
-                    "r": "answer_relevant",
+                    "r": 0,
                     "rc": 0.8,
-                    "s": "primary",
+                    "s": 1,
                     "sc": 0.9,
-                    "g": ["new_primary"],
+                    "g": [0],
                 },
                 {
                     "i": 1,
-                    "r": "topic_only",
+                    "r": 1,
                     "rc": 0.7,
-                    "s": "unknown",
+                    "s": 0,
                     "sc": 0.6,
-                    "g": ["new_provenance_lead"],
+                    "g": [3],
                 },
             ],
         },
@@ -148,6 +148,8 @@ def test_compact_parser_restores_server_owned_candidate_identity() -> None:
 
     assert tuple(parsed) == ("a", "b")
     assert parsed["a"].candidate_id == "a"
+    assert parsed["a"].relevance == "answer_relevant"
+    assert parsed["a"].expected_gain_signals == ("new_primary",)
     assert parsed["b"].cluster_id == "cluster-b"
 
 
@@ -161,19 +163,19 @@ def test_compact_parser_normalizes_one_based_candidate_indexes() -> None:
             "a": [
                 {
                     "i": 1,
-                    "r": "answer_relevant",
+                    "r": 0,
                     "rc": 0.8,
-                    "s": "primary",
+                    "s": 1,
                     "sc": 0.9,
-                    "g": ["new_primary"],
+                    "g": [0],
                 },
                 {
                     "i": 2,
-                    "r": "topic_only",
+                    "r": 1,
                     "rc": 0.7,
-                    "s": "unknown",
+                    "s": 0,
                     "sc": 0.6,
-                    "g": ["new_provenance_lead"],
+                    "g": [3],
                 },
             ],
         },
@@ -193,11 +195,11 @@ def test_compact_parser_fails_closed_on_order_or_coverage(indexes: tuple[int, ..
     rows = [
         {
             "i": index,
-            "r": "topic_only",
+            "r": 1,
             "rc": 0.8,
-            "s": "primary",
+            "s": 1,
             "sc": 0.9,
-            "g": ["new_provenance_lead"],
+            "g": [3],
         }
         for index in indexes
     ]
@@ -254,7 +256,7 @@ class _AssessmentClient:
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content='{"v":"ca1","a":[{"i":0,"r":"answer_relevant","rc":0.8,"s":"primary","sc":0.9,"g":["new_primary"]}]}'),
+                    message=SimpleNamespace(content='{"v":"ca2","a":[{"i":0,"r":0,"rc":0.8,"s":1,"sc":0.9,"g":[0]}]}'),
                     finish_reason="stop",
                 )
             ],
@@ -383,6 +385,10 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
         "sc",
         "g",
     }
+    assert assessment_schema["properties"]["r"]["type"] == "integer"
+    assert assessment_schema["properties"]["r"]["enum"] == [0, 1, 2, 3]
+    assert assessment_schema["properties"]["s"]["enum"] == [0, 1, 2, 3, 4, 5]
+    assert assessment_schema["properties"]["g"]["items"]["type"] == "integer"
     assert shared.calls == []
 
 

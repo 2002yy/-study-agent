@@ -190,19 +190,15 @@ class _StructuredClient:
             }
         elif "search candidates" in system:
             payload = {
-                "v": "ca1",
+                "v": "ca2",
                 "a": [
                     {
                         "i": index,
-                        "r": "answer_relevant",
+                        "r": 0,
                         "rc": 0.98,
-                        "s": (
-                            "primary" if index == 0 else "independent_secondary"
-                        ),
+                        "s": 1 if index == 0 else 3,
                         "sc": 0.95,
-                        "g": [
-                            "new_primary" if index == 0 else "new_independent_cluster"
-                        ],
+                        "g": [0 if index == 0 else 1],
                     }
                     for index, _item in enumerate(request["candidates"])
                 ],
@@ -445,15 +441,15 @@ class _PrimaryRoleClient(_StructuredClient):
         if "search candidates" in system:
             request = loads(str(kwargs["messages"][1]["content"]))
             payload = {
-                "v": "ca1",
+                "v": "ca2",
                 "a": [
                     {
                         "i": index,
-                        "r": "answer_relevant",
+                        "r": 0,
                         "rc": 0.98,
-                        "s": "primary",
+                        "s": 1,
                         "sc": 0.95,
-                        "g": ["new_primary"],
+                        "g": [0],
                     }
                     for index, _item in enumerate(request["candidates"])
                 ],
