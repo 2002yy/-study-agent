@@ -1,0 +1,45 @@
+name: RQ1-C Live14 Status Patch
+
+on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  patch-status:
+    if: "${{ github.event.head_commit.message == 'chore: apply RQ1-C live14 status handoff' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch authoritative status
+        run: python tools/tmp_rq1c_live14_status_patch.py
+      - name: Validate and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F '34127107622' docs/PROJECT_STATUS.md
+          grep -F '34127112379' docs/PROJECT_STATUS.md
+          grep -F '34127107728' docs/PROJECT_STATUS.md
+          grep -F 'compact_code_duplicate' docs/PROJECT_STATUS.md
+          grep -F 'gateway_negative_result' docs/PROJECT_STATUS.md
+          rm -f tools/tmp_rq1c_live14_status_patch.py
+          rm -f .github/workflows/rq1c-live14-status-patch.yml
+          git diff --check
+      - name: Commit status handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "docs(status): record RQ1-C live14 classification evidence"
+          git push origin HEAD:${GITHUB_REF_NAME}
