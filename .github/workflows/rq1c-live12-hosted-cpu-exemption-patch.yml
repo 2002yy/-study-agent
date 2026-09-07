@@ -1,0 +1,355 @@
+name: RQ1-C Live12 Hosted CPU Exemption Patch
+
+on:
+  push:
+    branches: [codex/rq1c-bounded-qualification]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "${{ github.event.head_commit.message == 'ci: stage rq1c live12 hosted cpu exemption patch' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/rq1c-bounded-qualification
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Apply qualification-only wallclock exemption seam
+        shell: python
+        run: |
+          from pathlib import Path
+
+          core_path = Path('tools/run_rq1c_bounded_qualification_core.py')
+          core = core_path.read_text(encoding='utf-8')
+          core = core.replace('import json\nimport re\n', 'import json\nimport os\nimport re\n', 1)
+          core = core.replace(
+              'from src.web.research.state import attach_claim_engine_state  # noqa: E402\n',
+              'from src.web.research.state import attach_claim_engine_state  # noqa: E402\nfrom src.web.research.model_gateway import ResearchModelGateway  # noqa: E402\n',
+              1,
+          )
+          anchor = '_ANSWER_PHASES = ("answer_generation", "answer_claim_binding")\n\n\ndef _utc_now() -> str:\n'
+          replacement = '''_ANSWER_PHASES = ("answer_generation", "answer_claim_binding")
+_HOSTED_CPU_WALLCLOCK_ENV = "RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT"
+_HOSTED_CPU_SOFT_TIMEOUT_SECONDS = 240
+_HOSTED_CPU_HARD_TIMEOUT_SECONDS = 300
+_HOSTED_CPU_MODEL_TIMEOUT_SECONDS = 120.0
+
+
+def _hosted_cpu_wallclock_exempt() -> bool:
+    return str(os.getenv(_HOSTED_CPU_WALLCLOCK_ENV) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _utc_now() -> str:
+'''
+          if anchor not in core:
+              raise SystemExit('constants anchor missing')
+          core = core.replace(anchor, replacement, 1)
+
+          old_context = '''def _active_context(reference_date: str) -> dict[str, Any]:
+    state = build_research_state(
+        mode="active",
+        questions=(),
+        claims=(),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
+            max_total_chars=16000,
+        ),
+'''
+          new_context = '''def _active_context(reference_date: str) -> dict[str, Any]:
+    wallclock_exempt = _hosted_cpu_wallclock_exempt()
+    state = build_research_state(
+        mode="active",
+        questions=(),
+        claims=(),
+        evidence=(),
+        evidence_links=(),
+        source_clusters=(),
+        gaps=(),
+        conflict_gaps=(),
+        budget=ResearchBudget(
+            max_candidates=20,
+            max_reads=8,
+            soft_timeout_seconds=(
+                _HOSTED_CPU_SOFT_TIMEOUT_SECONDS if wallclock_exempt else 45
+            ),
+            hard_timeout_seconds=(
+                _HOSTED_CPU_HARD_TIMEOUT_SECONDS if wallclock_exempt else 60
+            ),
+            max_total_chars=16000,
+        ),
+'''
+          if old_context not in core:
+              raise SystemExit('active context anchor missing')
+          core = core.replace(old_context, new_context, 1)
+
+          old_violation = '    if elapsed > 60:\n        violations.append("hard_timeout_exceeded")\n'
+          new_violation = '''    if elapsed > 60 and not _hosted_cpu_wallclock_exempt():
+        violations.append("hard_timeout_exceeded")
+'''
+          if old_violation not in core:
+              raise SystemExit('elapsed violation anchor missing')
+          core = core.replace(old_violation, new_violation, 1)
+
+          service_anchor = '''_run_case = make_guarded_run_case(
+    raw_run_case=_run_case,
+    build_chat_service=_build_chat_service,
+    binding_rows_provider=research_binding_rows,
+    answer_stage_model_calls=_answer_stage_model_calls,
+    exact_git_check=_git_sha,
+)
+
+
+def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
+'''
+          service_replacement = '''_run_case = make_guarded_run_case(
+    raw_run_case=_run_case,
+    build_chat_service=_build_chat_service,
+    binding_rows_provider=research_binding_rows,
+    answer_stage_model_calls=_answer_stage_model_calls,
+    exact_git_check=_git_sha,
+)
+
+
+def _qualification_active_runtime_factory(
+    repository: WebLookupRepository,
+    gateway: Any,
+) -> ActiveResearchRuntimeExecutor:
+    if not _hosted_cpu_wallclock_exempt():
+        return ActiveResearchRuntimeExecutor(repository, gateway)
+    model_gateway = ResearchModelGateway(
+        timeout_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS
+    )
+    return ActiveResearchRuntimeExecutor(
+        repository,
+        gateway,
+        model_gateway=model_gateway,
+        model_timeout_cap_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS,
+        candidate_assessment_timeout_cap_seconds=_HOSTED_CPU_MODEL_TIMEOUT_SECONDS,
+    )
+
+
+def run_qualification(*, manifest_path: Path, output_path: Path) -> dict[str, Any]:
+'''
+          if service_anchor not in core:
+              raise SystemExit('service factory anchor missing')
+          core = core.replace(service_anchor, service_replacement, 1)
+
+          artifact_anchor = '''        "leakage_contract": {
+            "runtime_case_keys": sorted(_ALLOWED_CASE_KEYS),
+            "rubric_loaded_by_runner": False,
+            "stores_page_bodies": False,
+            "stores_research_query_text": False,
+            "captures_production_final_answer": True,
+            "second_web_acquisition_during_synthesis": False,
+        },
+        "configured_budget": {
+'''
+          artifact_replacement = '''        "leakage_contract": {
+            "runtime_case_keys": sorted(_ALLOWED_CASE_KEYS),
+            "rubric_loaded_by_runner": False,
+            "stores_page_bodies": False,
+            "stores_research_query_text": False,
+            "captures_production_final_answer": True,
+            "second_web_acquisition_during_synthesis": False,
+        },
+        "wallclock_contract": {
+            "product_soft_timeout_seconds": 45,
+            "product_hard_timeout_seconds": 60,
+            "hosted_cpu_exempt": _hosted_cpu_wallclock_exempt(),
+            "reason": (
+                "github_hosted_local_model_cpu"
+                if _hosted_cpu_wallclock_exempt()
+                else ""
+            ),
+        },
+        "configured_budget": {
+'''
+          if artifact_anchor not in core:
+              raise SystemExit('artifact anchor missing')
+          core = core.replace(artifact_anchor, artifact_replacement, 1)
+
+          old_service = '        service = ClaimEngineDispatchWebLookupService(repository)\n'
+          new_service = '''        service = ClaimEngineDispatchWebLookupService(
+            repository,
+            active_runtime_factory=_qualification_active_runtime_factory,
+        )
+'''
+          if old_service not in core:
+              raise SystemExit('service construction anchor missing')
+          core = core.replace(old_service, new_service, 1)
+          core_path.write_text(core, encoding='utf-8')
+
+          evaluator_path = Path('tools/evaluate_rq1c_bounded_qualification.py')
+          evaluator = evaluator_path.read_text(encoding='utf-8')
+          old_budget_sig = '''def _runtime_budget_is_valid(record: Mapping[str, Any], gate: Mapping[str, int]) -> bool:
+'''
+          new_budget_sig = '''def _runtime_budget_is_valid(
+    record: Mapping[str, Any],
+    gate: Mapping[str, int],
+    *,
+    wallclock_applicable: bool,
+) -> bool:
+'''
+          if old_budget_sig not in evaluator:
+              raise SystemExit('evaluator budget signature anchor missing')
+          evaluator = evaluator.replace(old_budget_sig, new_budget_sig, 1)
+          old_return = '''        and model_calls <= gate["max_model_calls"]
+        and elapsed_seconds <= gate["hard_timeout_seconds"]
+    )
+
+
+def _validate_runtime(
+'''
+          new_return = '''        and model_calls <= gate["max_model_calls"]
+        and (
+            not wallclock_applicable
+            or elapsed_seconds <= gate["hard_timeout_seconds"]
+        )
+    )
+
+
+def _runtime_wallclock_applicable(runtime: Mapping[str, Any]) -> bool:
+    contract = runtime.get("wallclock_contract")
+    if contract is None:
+        return True
+    if not isinstance(contract, Mapping):
+        raise ValueError("runtime wallclock contract must be an object")
+    if contract.get("product_soft_timeout_seconds") != 45:
+        raise ValueError("runtime wallclock contract changed product soft timeout")
+    if contract.get("product_hard_timeout_seconds") != 60:
+        raise ValueError("runtime wallclock contract changed product hard timeout")
+    exempt = contract.get("hosted_cpu_exempt")
+    if not isinstance(exempt, bool):
+        raise ValueError("runtime hosted-cpu wallclock exemption must be boolean")
+    reason = str(contract.get("reason") or "")
+    if exempt and reason != "github_hosted_local_model_cpu":
+        raise ValueError("runtime hosted-cpu wallclock exemption reason invalid")
+    if not exempt and reason:
+        raise ValueError("runtime wallclock reason requires hosted-cpu exemption")
+    return not exempt
+
+
+def _validate_runtime(
+'''
+          if old_return not in evaluator:
+              raise SystemExit('evaluator return anchor missing')
+          evaluator = evaluator.replace(old_return, new_return, 1)
+          validate_anchor = '''    records = runtime.get("cases")
+    runtime_ids = set(_case_ids(records))
+'''
+          validate_replace = '''    wallclock_applicable = _runtime_wallclock_applicable(runtime)
+    records = runtime.get("cases")
+    runtime_ids = set(_case_ids(records))
+'''
+          if validate_anchor not in evaluator:
+              raise SystemExit('evaluator validate anchor missing')
+          evaluator = evaluator.replace(validate_anchor, validate_replace, 1)
+          call_anchor = '        if marker_violation or not _runtime_budget_is_valid(record, gate):\n'
+          call_replace = '''        if marker_violation or not _runtime_budget_is_valid(
+            record,
+            gate,
+            wallclock_applicable=wallclock_applicable,
+        ):
+'''
+          if call_anchor not in evaluator:
+              raise SystemExit('evaluator call anchor missing')
+          evaluator = evaluator.replace(call_anchor, call_replace, 1)
+          evaluator_path.write_text(evaluator, encoding='utf-8')
+
+          tests_path = Path('tests/test_rq1c_bounded_qualification.py')
+          tests = tests_path.read_text(encoding='utf-8')
+          insert_anchor = '''def test_failed_protocol_probe_forces_no_go(tmp_path: Path) -> None:
+'''
+          new_tests = '''def test_wallclock_budget_is_enforced_by_default(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["cases"][0]["budget_observed"]["elapsed_seconds"] = 61.0  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "NO-GO"
+    assert report["checks"]["runtime_budget"] is False  # type: ignore[index]
+
+
+def test_hosted_cpu_exemption_skips_only_wallclock_budget(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["wallclock_contract"] = {
+        "product_soft_timeout_seconds": 45,
+        "product_hard_timeout_seconds": 60,
+        "hosted_cpu_exempt": True,
+        "reason": "github_hosted_local_model_cpu",
+    }
+    runtime["cases"][0]["budget_observed"]["elapsed_seconds"] = 240.0  # type: ignore[index]
+
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+    assert report["decision"] == "GO"
+    assert report["checks"]["runtime_budget"] is True  # type: ignore[index]
+
+    runtime["cases"][0]["budget_observed"]["candidate_count"] = 21  # type: ignore[index]
+    report = _evaluate_fixture_set(tmp_path, runtime=runtime)
+    assert report["decision"] == "NO-GO"
+    assert report["checks"]["runtime_budget"] is False  # type: ignore[index]
+
+
+def test_hosted_cpu_exemption_requires_exact_bounded_contract(tmp_path: Path) -> None:
+    rubric = _rubric()
+    case_ids = [str(case["id"]) for case in rubric["cases"]]  # type: ignore[index]
+    runtime = _runtime(case_ids)
+    runtime["wallclock_contract"] = {
+        "product_soft_timeout_seconds": 45,
+        "product_hard_timeout_seconds": 60,
+        "hosted_cpu_exempt": True,
+        "reason": "anything-else",
+    }
+
+    with pytest.raises(ValueError, match="exemption reason invalid"):
+        _evaluate_fixture_set(tmp_path, runtime=runtime)
+
+
+def test_failed_protocol_probe_forces_no_go(tmp_path: Path) -> None:
+'''
+          if insert_anchor not in tests:
+              raise SystemExit('test insertion anchor missing')
+          tests = tests.replace(insert_anchor, new_tests, 1)
+          tests_path.write_text(tests, encoding='utf-8')
+      - name: Focused qualification regression gate
+        run: |
+          python -m pytest -q tests/test_rq1c_bounded_qualification.py tests/test_active_research_runtime.py
+          python -m ruff check tools/run_rq1c_bounded_qualification_core.py tools/evaluate_rq1c_bounded_qualification.py tests/test_rq1c_bounded_qualification.py
+          python -m py_compile tools/run_rq1c_bounded_qualification_core.py tools/evaluate_rq1c_bounded_qualification.py
+          git diff --check
+      - name: Commit source-only qualification harness fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tools/run_rq1c_bounded_qualification_core.py tools/evaluate_rq1c_bounded_qualification.py tests/test_rq1c_bounded_qualification.py
+          git commit -m 'test(qualification): exempt hosted cpu inference wallclock'
+          git push origin HEAD:codex/rq1c-bounded-qualification
