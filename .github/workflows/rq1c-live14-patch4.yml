@@ -27,7 +27,9 @@ jobs:
           python -m pip install --disable-pip-version-check --timeout 30 --retries 5 --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt --disable-pip-version-check --timeout 30 --retries 5
       - name: Apply safe-classification patch
-        run: python tools/tmp_rq1c_live14_patch.py
+        run: |
+          python tools/tmp_rq1c_live14_patch.py
+          python tools/tmp_rq1c_live14_stubfix.py
       - name: Focused tests and static checks
         shell: bash
         run: |
@@ -40,6 +42,7 @@ jobs:
         shell: bash
         run: |
           rm -f tools/tmp_rq1c_live14_patch.py
+          rm -f tools/tmp_rq1c_live14_stubfix.py
           rm -f .github/workflows/rq1c-live14-patch.yml
           rm -f .github/workflows/rq1c-live14-patch2.yml
           rm -f .github/workflows/rq1c-live14-patch3.yml
