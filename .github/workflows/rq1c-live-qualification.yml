@@ -21,48 +21,428 @@ jobs:
       PYTHONPATH: .
       LLM_PROVIDER_PROFILE: local
       LOCAL_API_KEY: local
-      LOCAL_BASE_URL: †ÛiÿývïM5óM4þýBˆÐÐSÓSÑSÑ“TÒÓSQNˆœLXË\]Ù[ŒËM‹Z[œÝXÝLLË\MÛBˆÐÐSÓSÑSÔ“×ÓSQNœœLXË\]Ù[ŒËM‹Z[œÝXÝLLË\MÛBˆÐÐSÑQUSÓSÑSÔ“Ñ’SNˆ›\ÚˆQUSÓSÑSÔ“Ñ’SNˆ›\ÚˆÐÐSÓPVÔ‘U’QTÎˆ	Ì	ÂˆWÓPVÔ‘U’QTÎˆ	Ì	ÂˆÐÐSÕSQSÕUÔÑPÓÓ‘Îˆ	ÌŒ	ÂˆSWÕSQSÕUÔÑPÓÓ‘Îˆ	ÌŒ	Âˆ‘TÑPTÒÐÓRSWÔS“‘T—ÐTÑWÕT“ˆ‹ËÌLËŒŒŒNŽKÝŒBˆ‘TÑPTÒÐÓRSWÔS“‘T—ÓSÑSÓSQNˆœLXË\]Ù[ŒKLMX‹Z[œÝXÝ\MÛBˆ‘TÑPTÒÐÓRSWÔS“‘T—ÐTWÒÑVNˆØØ[ˆ‘TÑPTÒÐÐS‘QUWÐTÔÑTÔÓÔ—ÐTÑWÕT“ˆ‹ËÌLËŒŒŒNŽÝŒBˆ‘TÑPTÒÐÐS‘QUWÐTÔÑTÔÓÔ—ÓSÑSÓSQNˆœLXË\]Ù[ŒËM‹Z[œÝXÝLLË\MÛBˆ‘TÑPTÒÐÐS‘QUWÐTÔÑTÔÓÔ—ÐTWÒÑVNˆØØ[ˆ”LP×ÒÔÕQÐÔWÕÐSÓÐÒ×ÑVSTˆ	ÝYIÂˆÑP—ÕÓÓÑSP“Qˆ	ÝYIÂˆÑP—ÑSP“WÑPÒÑPÒÑÓÎˆ	ÝYIÂˆÑP—ÑSP“WÔÑPT–‘Îˆ	Ù˜[ÙIÂˆÑP—ÑSP“WÐ’S‘×Ô”ÔÎˆ	ÝYIÂˆÑP—ÔÑPTÒÔ“Õ’QT—ÕSQSÕUÔÑPÓÓ‘Îˆ	Í‰ÂˆÑP—ÔÑPTÒÕÕSÕSQSÕUÔÑPÓÓ‘Îˆ	Î	Âˆ‘UÔ×ÑSP“WÑ’T‘PÔUÓT—Ô‘PQTŽˆ	Ù˜[ÙIÂˆ‘UÔ×ÑSP“WÒ’SWÔ‘PQTŽˆ	Ù˜[ÙIÂˆSPWÐÔÕQÎˆŒLBˆSPWÐÔÐTÒU‘WÔÒLMŽˆYLÍÍÍ™ØÙMNÌŒXY™Œ™XMMÎLØMÌ™™ÙLŽLÌ™™YMŽMHÈ˜YÛXNˆ[ÝÛ\ÝÙXÜ™]ˆ—ÓSÑSÔ‘TÎˆ[œÛÝÔ]Ù[ŒËM‹R[œÝXÝLLËQÑÕQ‚ˆ—ÓSÑSÑ’SNˆ]Ù[ŒËM‹R[œÝXÝLLËTMÒ×ÓK™ÙÝY‚ˆSÑSÐSPTÎˆœLXË\]Ù[ŒËM‹Z[œÝXÝLLË\MÛBˆS“‘T—Ò—ÓSÑSÔ‘TÎˆ]Ù[‹Ô]Ù[Œ‹KLKP‹R[œÝXÝQÑÕQ‚ˆS“‘T—Ò—ÓSÑSÑ’SNˆ]Ù[Œ‹KLKX‹Z[œÝXÝ\MÚ×ÛK™ÙÝY‚ˆS“‘T—ÓSÑSÔÒLM—ÑVPÕQˆ˜LXL™X™MMŒŒ˜™ŒØÎMŽMÌŒŒÍLX˜NMÙLXYŒM˜ÌÌØMÍYLÎMÌMÍNMÙHÈ˜YÛXNˆ[ÝÛ\ÝÙXÜ™]ˆS“‘T—ÓSÑSÐSPTÎˆœLXË\]Ù[ŒKLMX‹Z[œÝXÝ\MÛB‚ˆÝ\Î‚ˆH˜[YNˆÚXÚÈÝ]^XÝ]X[YšXØ][ÛˆXYˆ\Ù\ÎˆXÝ[ÛœËØÚXÚÛÝ]‚ˆH˜[YNˆÙ]\]Û‚ˆ\Ù\ÎˆXÝ[ÛœËÜÙ]\\]ÛBˆÚ]‚ˆ]Û‹]™\œÚ[ÛŽˆ	ÌËŒL‰ÂˆØXÚNˆ\‚ˆH˜[YNˆ[œÝ[ÝYHYÙ[\[™[˜ÚY\Âˆ[Žˆ\[œÝ[\ˆ™\]Z\™[Y[Ë\ˆ™\]Z\™[Y[ËY]‹‚ˆH˜[YNˆ[œÝ[[›™Y[XK˜ÜÔHÙ\™\‚ˆÚ[ˆ˜\Úˆ[ŽˆˆÙ]Y][È\Y˜Z[ˆZÙ\ˆ\›ØØ[[[XHÝ]]ˆ\˜Ú]™OK›ØØ[[[XKÛ[XK\‹™Þ‚ˆÝ\›Y“K\™]žHK\™]žKY[^HˆˆšÎ‹ËÙÚ]X‹˜ÛÛKÙÙÛ[[Ü™ËÛ[XK˜ÜÜ™[X\Ù\ËÙÝÛ›ØYÉÓSPWÐÔÕQßKÛ[XKIÓSPWÐÔÕQßKXš[‹]X[K^\‹™Þˆˆˆ[È‰\˜Ú]™H‚ˆXÚÈ‰ÓSPWÐÔÐTÒU‘WÔÒLMŸH	\˜Ú]™HˆÚLMœÝ[HXÈBˆ\ˆ^™ˆ‰\˜Ú]™HˆPÈ›ØØ[[[XBˆÙ\™\H‰
-š[™›ØØ[[[XH]\Hˆ[˜[YH[XK\Ù\™\ˆ\š[\]Z]
-H‚ˆ\Ý[ˆ‰Ù\™\ˆ‚ˆÚ[Ù
-Þ‰Ù\™\ˆ‚ˆXÚÈ“SPWÔÑT•‘TIÙ\™\ˆˆˆ‰ÒUP—ÑS•ˆ‚ˆ‰Ù\™\ˆˆK]™\œÚ[ÛˆYHÝ]]Û[XK\Ù\™\‹]™\œÚ[Û‹›ÙÂ‚ˆH˜[YNˆÝÛ›ØY[›™Y]Ù[ŒÈˆÑÕQ‚ˆÚ[ˆ˜\Úˆ[ŽˆˆÙ]Y][È\Y˜Z[ˆZÙ\ˆ\›ØØ[[[Ù[Ý]]ˆ[Ù[K›ØØ[[[Ù[ÉÒ—ÓSÑSÑ’S_BˆÝ\›Y“K\™]žHHK\™]žKY[^HÈˆšÎ‹ËÚYÙÚ[™Ù˜XÙK˜ÛËÉÒ—ÓSÑSÔ‘TßKÜ™\ÛÛ™KÛXZ[‹ÉÒ—ÓSÑSÑ’S_OÙÝÛ›ØY]YHˆˆ[È‰[Ù[‚ˆ\Ý\È‰[Ù[‚ˆ[Ù[ÜÚOH‰
-ÚLMœÝ[H‰[Ù[ˆ]ÚÈ	ÞÜš[	_IÊH‚ˆ[Ù[Øž]\ÏH‰
-Ý]XÈ	É\ÉÈ‰[Ù[ŠH‚ˆXÚÈ“SÑSÔUI[Ù[ˆˆ‰ÒUP—ÑS•ˆ‚ˆXÚÈ“SÑSÔÒLMI[Ù[ÜÚHˆˆ‰ÒUP—ÑS•ˆ‚ˆXÚÈ“SÑSÐ–UTÏI[Ù[Øž]\Èˆˆ‰ÒUP—ÑS•ˆ‚ˆš[ˆ	É\È	\×‰È‰[Ù[ÜÚHˆ‰—ÓSÑSÑ’SHˆYHÝ]]Û[Ù[\ÚLM‹‚ˆH˜[YNˆÝÛ›ØY[›™Y]Ù[Œ‹HKPˆ[›™\ˆÑÕQ‚ˆÚ[ˆ˜\Úˆ[ŽˆˆÙ]Y][È\Y˜Z[ˆZÙ\ˆ\›ØØ[[[Ù[Ý]]ˆ[Ù[K›ØØ[[[Ù[ÉÔS“‘T—Ò—ÓSÑSÑ’S_BˆÝ\›Y“K\™]žHHK\™]žKY[^HÈˆšÎ‹ËÚYÙÚ[™Ù˜XÙK˜ÛËÉÔS“‘T—Ò—ÓSÑSÔ‘TßKÜ™\ÛÛ™KÛXZ[‹ÉÔS“‘T—Ò—ÓSÑSÑ’S_OÙÝÛ›ØY]YHˆˆ[È‰[Ù[‚ˆ\Ý\È‰[Ù[‚ˆ[Ù[ÜÚOH‰
-ÚLMœÝ[H‰[Ù[ˆ]ÚÈ	ÞÜš[	_IÊH‚ˆ\Ý‰[Ù[ÜÚHˆH‰S“‘T—ÓSÑSÔÒLM—ÑVPÕQ‚ˆ[Ù[Øž]\ÏH‰
-Ý]XÈ	É\ÉÈ‰[Ù[ŠH‚ˆXÚÈ”S“‘T—ÓSÑSÔUI[Ù[ˆˆ‰ÒUP—ÑS•ˆ‚ˆXÚÈ”S“‘T—ÓSÑSÔÒLMI[Ù[ÜÚHˆˆ‰ÒUP—ÑS•ˆ‚ˆXÚÈ”S“‘T—ÓSÑSÐ–UTÏI[Ù[Øž]\Èˆˆ‰ÒUP—ÑS•ˆ‚ˆš[ˆ	É\È	\×‰È‰[Ù[ÜÚHˆ‰S“‘T—Ò—ÓSÑSÑ’SHˆYHÝ]]Ü[›™\‹[[Ù[\ÚLM‹‚ˆH˜[YNˆÝ\ØØ[]Ù[ŒÈˆÜ[RKXÛÛ\]X›HÙ\™\‚ˆÚ[ˆ˜\Úˆ[ŽˆˆÙ]Y][È\Y˜Z[ˆ‰SPWÔÑT•‘Tˆˆˆ[H‰SÑSÔUˆˆKX[X\È‰SÑSÐSPTÈˆˆKZÜÝLËŒŒŒHˆK\ÜˆXÈNLˆˆ]‰
-œ›ØÊHˆˆKZš[š˜HˆˆÝ]]Û[XK\Ù\™\‹›ÙÈ‰ŒH	‚ˆXÚÈ	HˆÝ]]Û[XK\Ù\™\‹œYˆ›Üˆ][\[ˆ	
-Ù\HHL
-NÈÂˆYˆÝ\›YœÔÈ‹ËÌLËŒŒŒNŽÚX[ˆÝ]]Û[XKZX[šœÛÛˆ‹Ù]‹Û[È[‚ˆ^]ˆšBˆYˆHÚ[L‰
-Ø]Ý]]Û[XK\Ù\™\‹œY
-Hˆ‹Ù]‹Û[È[‚ˆØ]Ý]]Û[XK\Ù\™\‹›ÙÈ‰Œ‚ˆ^]BˆšBˆÛY\‚ˆÛ™BˆØ]Ý]]Û[XK\Ù\™\‹›ÙÈ‰Œ‚ˆ^]B‚ˆH˜[YNˆÝ\ØØ[]Ù[Œ‹HKPˆ[›™\ˆÙ\™\‚ˆÚ[ˆ˜\Úˆ[ŽˆˆÙ]Y][È\Y˜Z[ˆ‰SPWÔÑT•‘Tˆˆˆ[H‰S“‘T—ÓSÑSÔUˆˆKX[X\È‰S“‘T—ÓSÑSÐSPTÈˆˆKZÜÝLËŒŒŒHˆK\ÜHˆXÈMˆˆ]‰
-œ›ØÊHˆˆKZš[š˜HˆˆÝ]]Ü[›™\‹[[XK\Ù\™\‹›ÙÈ‰ŒH	‚ˆXÚÈ	HˆÝ]]Ü[›™\‹[[XK\Ù\™\‹œYˆ›Üˆ][\[ˆ	
-Ù\HHL
-NÈÂˆYˆÝ\›YœÔÈ‹ËÌLËŒŒŒNŽKÚX[ˆÝ]]Ü[›™\‹[[XKZX[šœÛÛˆ‹Ù]‹Û[È[‚ˆ^]ˆšBˆYˆHÚ[L‰
-Ø]Ý]]Ü[›™\‹[[XK\Ù\™\‹œY
-Hˆ‹Ù]‹Û[È[‚ˆØ]Ý]]Ü[›™\‹[[XK\Ù\™\‹›ÙÈ‰Œ‚ˆ^]BˆšBˆÛY\‚ˆÛ™BˆØ]Ý]]Ü[›™\‹[[XK\Ù\™\‹›ÙÈ‰Œ‚ˆ^]B‚ˆH˜[YNˆ[ˆ›ÙXÝ[ÛˆÛZ[K\[›™\ˆÛ[ÚÙBˆÚ[ˆ]Û‚ˆ[Žˆˆ[\ÜœÛÛ‚ˆ[\Ü[YBˆœ›ÛH]Xˆ[\Ü]‚ˆœ›ÛHÜ˜ËÙX‹œ™\ÙX\˜Ú˜ÛZ[WÜ[›™\ˆ[\Ü[[YPÛZ[T[›™\‚ˆœ›ÛHÜ˜ËÙX‹œ™\ÙX\˜Ú˜ÛÛ˜XÝÈ[\Ü™\ÙX\˜ÚYÙ]ˆœ›ÛHÜ˜ËÙX‹œ™\ÙX\˜Ú›[Ù[ÙØ]]Ø^H[\Ü™\ÙX\˜Ú[Ù[Ø]]Ø^B‚ˆYÙ]H™\ÙX\˜ÚYÙ]
-ˆX^ØØ[™Y]\ÏLŒˆX^Ü™XYÏNˆÛÙÝ[Y[Ý]ÜÙXÛÛ™ÏMKˆ\™Ý[Y[Ý]ÜÙXÛÛ™ÏMŒˆX^ÝÝ[ØÚ\œÏLMŒˆ
-BˆØ\Ù\ÈHÂˆ	ÕÚ]\ÈHÝ\œ™[ÝX›H]Ûˆ™[X\ÙOÉËˆ	ÐÛÛ\\™HHÝ\œ™[Ù™šXÚX[Ý\ÜÝ]\ÈÙˆÛÈÛÙØ\™H™[X\Ù\Ë‰Ëˆ	ÕÚ]Ø[ˆ™H™\šYšYYX›Ý][ˆ[››Ý[˜ÙY™X]\™HYˆ[™\[™[ÛÛ™š\›X][Ûˆ\È[Z]YÉËˆBˆ™XÛÜ™ÈH×Bˆ›Üˆ[™^]Y\Ý[Ûˆ[ˆ[[Y\˜]JØ\Ù\ËÝ\LJN‚ˆ[›™\ˆH[[YPÛZ[T[›™\Š™\ÙX\˜Ú[Ù[Ø]]Ø^J[Y[Ý]ÜÙXÛÛ™ÏLŒŒ
-JBˆÝ\YH[YK›[Û›ÝÛšXÊ
-Bˆ™\Ý[H[›™\‹œ[Šˆ[—ÚYY‰Ü[›™\—ÜÛ[ÚÙWÞÚ[™^IËˆ]Y\Ý[Û\]Y\Ý[Û‹ˆ™Y™\™[˜ÙWÙ]OIÌŒ‹LKLIËˆYÙ]XYÙ]ˆ[ÙOIØXÝ]™IËˆ[Y[Ý]ÜÙXÛÛ™ÏLŒŒˆ
-Bˆ[\ÙYH[YK›[Û›ÝÛšXÊ
-HHÝ\Yˆ™XÛÜ™HÂˆ	ØØ\ÙIÎˆ[™^ˆ	ØÛÛ\]Y	Îˆ™\Ý[˜ÛÛ\]Yˆ	Ù[\ÙYÜÙXÛÛ™ÉÎˆ›Ý[™
-[\ÙYŠKˆ	Ø]Y]ØÛÝ[	Îˆ[Š™\Ý[˜]Y]ÊKˆ	Ü™X\ÛÛ‰Îˆ™\Ý[œ™X\ÛÛ‹ˆ	Û[Ù[Û˜[YIÎˆ™\Ý[˜]Y]ÖÌK›[Ù[Û˜[YHYˆ™\Ý[˜]Y]È[ÙH	ÉËˆ	ÛÝ]]ÝÚÙ[œÉÎˆ™\Ý[˜]Y]ÖÌK›Ý]]ÝÚÙ[œÈYˆ™\Ý[˜]Y]È[ÙH›Û™KˆBˆ™XÛÜ™Ë˜\[™
-™XÛÜ™
-BˆYˆ›Ý™\Ý[˜ÛÛ\]Y‚ˆ˜Z\ÙHÞ\Ý[Q^]
-‰Ü›ÙXÝ[Ûˆ[›™\ˆÛ[ÚÙH[˜]˜Z[X›NˆÜ™XÛÜ™IÊBˆYˆ[\ÙYHŒŒ‚ˆ˜Z\ÙHÞ\Ý[Q^]
-‰Ü›ÙXÝ[Ûˆ[›™\ˆÛ[ÚÙH^ÙYYYŒÎˆÜ™XÛÜ™IÊBˆYˆ[Š™\Ý[˜]Y]ÊHOHN‚ˆ˜Z\ÙHÞ\Ý[Q^]
-‰Ü[›™\ˆÛ[ÚÙHÜ[[™^XÝY][\ÎˆÜ™XÛÜ™IÊBˆ]
-	ÛÝ]]ÜœLXËXÛZ[K\[›™\‹\Û[ÚÙKšœÛÛ‰ÊKÜš]WÝ^
-ˆœÛÛ‹™[\Ê™XÛÜ™Ë[™[L‹ÛÜÚÙ^\ÏUYJH
-È	×‰Ë[˜ÛÙ[™ÏIÝ]‹N	Âˆ
-Bˆš[
-œÛÛ‹™[\Ê™XÛÜ™ËÛÜÚÙ^\ÏUYJJB‚ˆH˜[YNˆ[ˆ›Û‹\]X[YšXØ][Ûˆ]Ù[ŒÈˆÛ[ÚÙBˆÚ[ˆ]Û‚ˆ[Žˆˆ[\ÜœÛÛ‚ˆ[\Ü[YBˆœ›ÛH]Xˆ[\Ü]ˆœ›ÛHÜ[˜ZH[\ÜÜ[RB‚ˆÛY[HÜ[RJˆ\WÚÙ^OIÛØØ[	Ëˆ˜\ÙWÝ\›IÚ‹ËÌLËŒŒŒNŽÝŒIËˆ[Y[Ý]MŒˆX^Ü™]šY\ÏLˆ
-Bˆ]šY[˜ÙHH
-ˆ	ÐH›Ý[™Y™\ÙX\˜ÚÞ\Ý[H]\Ý\Ý[™ÝZ\Ú™]šY]™YØ[™Y]\ËÝXØÙ\ÜÙ[™XYË	Âˆ	Ù[YÚX›H]šY[˜ÙK[™š[˜[Ý\ÜYÛZ[\Ëˆ]]\Ý›Ý\Ü˜YH[œ™XYÛš\]È[È	Âˆ	Ù]šY[˜ÙK[™]]\Ý™\Ü[˜Ù\Z[HÚ[ˆÝ\Ü\È[œÝY™šXÚY[ˆ	Âˆ
-H
-ˆL‚ˆÝ\YH[YK›[Û›ÝÛšXÊ
-Bˆ™\ÜÛœÙHHÛY[˜Ú]˜ÛÛ\][ÛœË˜Ü™X]Jˆ[Ù[IÜœLXË\]Ù[ŒËM‹Z[œÝXÝLLË\MÛIËˆY\ÜØYÙ\ÏVÂˆÂˆ	Ü›ÛIÎˆ	ÜÞ\Ý[IËˆ	ØÛÛ[	Îˆ	Ô™]\›ˆÛ™H”ÓÓˆØš™XÝÛ›HÚ]Ù^\ÈÝ[[X\žKš\ÚÜË™XYK‰ËˆKˆÂˆ	Ü›ÛIÎˆ	Ý\Ù\‰Ëˆ	ØÛÛ[	Îˆ]šY[˜ÙH
-È	×ÛÛ\\™H\È[ÈÛÛ˜Ú\ÙHš\ÚÜÈ[™Ù]™XYO]YK‰ËˆKˆKˆ[\\˜]\™OLˆX^ÝÚÙ[œÏLM‹ˆ™\ÜÛœÙWÙ›Ü›X]^ÉÝ\IÎˆ	ÚœÛÛ—ÛØš™XÝ	ßKˆ
-Bˆ[\ÙYH[YK›[Û›ÝÛšXÊ
-HHÝ\Yˆ^H™\ÜÛœÙK˜ÚÚXÙ\ÖÌK›Y\ÜØYÙK˜ÛÛ[Üˆ	ÉÂˆ\œÙYHœÛÛ‹›ØYÊ^
-BˆYˆ\œÙY™Ù]
-	Ü™XYIÈ¢—2æ÷BG'VS ¢&—6R7—7FVÔW†—B‚vÆö6ÂÖöFVÂ6Öö¶RF–Bæ÷B&WGW&â&VG“×G'VRr¢–bVÆ6VBãÒcã ¢&—6R7—7FVÔW†—B†bvÆö6ÂÖöFVÂ6Öö¶RW†6VVFVBc3¢¶VÆ6VC¢ã6g×2r¢W6vRÒ&W7öç6RçW6vP¢&V6÷&BÒ°¢v¶–æBs¢væöå÷VÆ–f–6F–öåöÆö6ÅöÖöFVÅ÷6Öö¶RrÀ¢vVÆ6VE÷6V6öæG2s¢&÷VæB†VÆ6VBÂb’À¢w&ö×E÷Fö¶Vç2s¢vWFGG"‡W6vRÂw&ö×E÷Fö¶Vç2rÂæöæR’À¢v6ö×ÆWF–öå÷Fö¶Vç2s¢vWFGG"‡W6vRÂv6ö×ÆWF–öå÷Fö¶Vç2rÂæöæR’À¢wF÷FÅ÷Fö¶Vç2s¢vWFGG"‡W6vRÂwF÷FÅ÷Fö¶Vç2rÂæöæR’À¢v§6öå÷fÆ–Bs¢G'VRÀ¢w&VG’s¢G'VRÀ¢Ð¢F‚‚v÷WGWB÷'2ÖÆö6ÂÖÖöFVÂ×6Öö¶Ræ§6öâr’çw&—FU÷FW‡B€¢§6öâæGV×2‡&V6÷&BÂ–æFVçCÓ"Â6÷'Eö¶W—3ÕG'VR’²uÆârÂVæ6öF–æsÒwWFbÓ‚p¢¢&–çB†§6öâæGV×2‡&V6÷&BÂ6÷'Eö¶W—3ÕG'VR’ ¢ÒæÖS¢&V6÷&BW†7BÆö6Â×&÷f–FW"Vçf—&öæÖVç@¢6†VÆÃ¢—F†öà¢'Vã¢À¢–×÷'B§6öà¢–×÷'B÷0¢–×÷'BÆFf÷&Ð¢–×÷'B7V'&ö6W70¢g&öÒF†Æ–"–×÷'BF€ ¢†VBÒ7V'&ö6W72æ6†V6µö÷WGWB…²vv—BrÂw&Wb×'6RrÂt„TBuÒÂFW‡CÕG'VR’ç7G&—‚¢F—'G’Ò7V'&ö6W72æ6†V6µö÷WGWB€¢²vv—BrÂw7FGW2rÂrÒ×÷&6VÆ–ã×crÂrÒ×VçG&6¶VBÖf–ÆW3ÖæòuÒÂFW‡CÕG'VP¢’ç7G&—‚¢–b†VBÒ÷2æVçf—&öå²tt•D…T%õ4„uÓ ¢&—6R7—7FVÔW†—B‚v6†V6¶÷WB„TBFöW2æ÷BÖF6‚t•D…T%õ4„r¢–bF—'G“ ¢&—6R7—7FVÔW†—B‚wG&6¶VB6†V6¶÷WB—2F—'G’&Vf÷&RVÆ–f–6F–öâr¢ÖWFFFÒ°¢vv—E÷6†s¢†VBÀ¢w&÷f–FW%÷&öf–ÆRs¢vÆö6ÂrÀ¢v&6U÷W&Âs¢v‡GG¢òó#rããã£ƒ÷crÀ¢vÖöFVÅöÆ–2s¢÷2æVçf—&öå²tÔôDTÅôÄ”2uÒÀ¢vÖöFVÅ÷&Wòs¢÷2æVçf—&öå²t„eôÔôDTÅõ$UòuÒÀ¢vÖöFVÅöf–ÆRs¢÷2æVçf—&öå²t„eôÔôDTÅôd”ÄRuÒÀ¢vÖöFVÅ÷6†#Sbs¢÷2æVçf—&öå²tÔôDTÅõ4„#SbuÒÀ¢vÖöFVÅö'—FW2s¢–çB†÷2æVçf—&öå²tÔôDTÅô%•DU2uÒ’À¢wÆææW%ö&6U÷W&Âs¢÷2æVçf—&öå²u$U4T$4…ô4Ä”ÕõÄääU%ô$4UõU$ÂuÒÀ¢wÆææW%öÖöFVÅöÆ–2s¢÷2æVçf—&öå²uÄääU%ôÔôDTÅôÄ”2uÒÀ¢wÆææW%öÖöFVÅ÷&Wòs¢÷2æVçf—&öå²uÄääU%ô„eôÔôDTÅõ$UòuÒÀ¢wÆææW%öÖöFVÅöf–ÆRs¢÷2æVçf—&öå²uÄääU%ô„eôÔôDTÅôd”ÄRuÒÀ¢wÆææW%öÖöFVÅ÷6†#Sbs¢÷2æVçf—&öå²uÄääU%ôÔôDTÅõ4„#SbuÒÀ¢wÆææW%öÖöFVÅö'—FW2s¢–çB†÷2æVçf—&öå²uÄääU%ôÔôDTÅô%•DU2uÒ’À¢wÆææW%öÖ…÷Fö¶Vç2s¢3#À¢wÆææW%öÖ…öGFV×G2s¢À¢v6æF–FFUö76W76÷%ö&6U÷W&Âs¢÷2æVçf—&öå²u$U4T$4…ô4äD”DDUô54U54õ%ô$4UõU$ÂuÒÀ¢v6æF–FFUö76W76÷%öÖöFVÅöÆ–2s¢÷2æVçf—&öå²u$U4T$4…ô4äD”DDUô54U54õ%ôÔôDTÅôäÔRuÒÀ¢v6æF–FFUö76W76÷%öÖ…ö6æF–FFW5÷W%ö6Æ–Òs¢"À¢v6æF–FFUö76W76÷%öÖ…öGFV×G5÷W%ö–çfö6F–öâs¢À¢v6æF–FFUö76W76÷%öÖ…÷Fö¶Vç5÷W%÷Gvõö6æF–FFW2s¢##À¢v6æF–FFUö76W76÷%÷v—&U÷66†VÖs¢v6"rÀ¢v6æF–FFUö76W76÷%öVçVÕöVæ6öF–ærs¢v–çFVvW%ö6öFW2rÀ¢vF–væ÷7F–5öf–ÇW&Uö6FVv÷&–W2s¢²v6ö×7Eö6öFRrÂv6ö×7EöFöÖ–ârÂw&VFW"uÒÀ¢v6æF–FFUö76W76÷%ö–æFW…ö6öçfVçF–öç2s¢²w¦W&õö&6VBrÂvöæUö&6VBuÒÀ¢v6æF–FFUö76W76÷%öW†7E÷&W7öç6U÷&÷w2s¢G'VRÀ¢v6æF–FFUö76W76÷%÷&öGV7E÷F–ÖV÷WE÷6V6öæG2s¢RÀ¢wVÆ–f–6F–öåö†÷7FVEö7UöÖöFVÅ÷F–ÖV÷WEö6÷6V6öæG2s¢#À¢w&öGV7E÷6ögE÷F–ÖV÷WE÷6V6öæG2s¢CRÀ¢w&öGV7Eö†&E÷F–ÖV÷WE÷6V6öæG2s¢cÀ¢wVÆ–f–6F–öåö†÷7FVEö7U÷6ögE÷F–ÖV÷WE÷6V6öæG2s¢#CÀ¢wVÆ–f–6F–öåö†÷7FVEö7Uö†&E÷F–ÖV÷WE÷6V6öæG2s¢3À¢v†÷7FVEö7U÷vÆÆ6Æö6µöW†V×Bs¢€¢÷2æVçf—&öâævWB‚u%5ô„õ5DTEô5UõtÄÄ4Äô4µôU„TÕBr’ÓÒwG'VRp¢’À¢v†÷7FVEö7U÷vÆÆ6Æö6µöW†V×E÷&V6öâs¢vv—F‡V%ö†÷7FVEöÆö6ÅöÖöFVÅö7RrÀ¢vÆÆÖö7÷Frs¢÷2æVçf—&öå²tÄÄÔô5õDruÒÀ¢vÆÆÖö7ö&6†—fU÷6†#Sbs¢÷2æVçf—&öå²tÄÄÔô5ô$4„•dUõ4„#SbuÒÀ¢w'VææW%ö&6‚s¢ÆFf÷&ÒæÖ6†–æR‚’À¢w'VææW%ö7Uö6÷VçBs¢÷2æ7Uö6÷VçB‚’À¢w6W'fW%ö6öçFW‡E÷Fö¶Vç2s¢ƒ“"À¢wÆææW%÷6W'fW%ö6öçFW‡E÷Fö¶Vç2s¢C“bÀ¢w6FµöÖ…÷&WG&–W2s¢À¢w&÷f–FW%÷F–ÖV÷WE÷6V6öæG2s¢#À¢w6Öö¶Uö—5÷VÆ–f–6F–öåöWf–FVæ6Rs¢fÇ6RÀ¢Ð¢F‚‚v÷WGWB÷'2ÖÆ—fS"ÖVçf—&öæÖVçBæ§6öâr’çw&—FU÷FW‡B€¢§6öâæGV×2†ÖWFFFÂ–æFVçCÓ"Â6÷'Eö¶W—3ÕG'VR’²uÆârÂVæ6öF–æsÒwWFbÓ‚p¢¢&–çB†§6öâæGV×2†ÖWFFFÂ6÷'Eö¶W—3ÕG'VR’ ¢ÒæÖS¢'Vâ&÷VæFVBÆ—fR"'VçF–ÖP¢–C¢'VçF–ÖP¢6†VÆÃ¢&6€¢'Vã¢À¢6WB¶P¢—F†öâFööÇ2÷'Vå÷'5ö&÷VæFVE÷VÆ–f–6F–öâç’À¢ÒÖ÷WGWB÷WGWBõ%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öâÀ¢â÷WGWB÷'2ÖÆ—fS"×'VçF–ÖRæÆör#âc¢7FGW3ÒCð¢6WBÖP¢V6†ò&W†—Eö6öFSÒG7FGW2"ãâ"Dt•D…T%ôõUEUB ¢6B÷WGWB÷'2ÖÆ—fS"×'VçF–ÖRæÆöp¢W†—B  ¢ÒæÖS¢'VâFWFW&Ö–æ—7F–2&÷Fö6öÂ&ö&W2&÷VæBFò'VçF–ÖR'F–f7@¢–C¢&÷Fö6öÀ¢–c¢Çv—2‚¢6†VÆÃ¢&6€¢'Vã¢À¢6WB¶P¢–b²Öb÷WGWBõ%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öâÓ²F†Và¢—F†öâFööÇ2÷'Vå÷'5÷&÷Fö6öÅ÷&ö&W2ç’À¢Ò×'VçF–ÖR÷WGWBõ%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öâÀ¢ÒÖ÷WGWB÷WGWBõ%5ô$õTäDTEõ$õDô4ôÅõ$ô$U2æ§6öâÀ¢â÷WGWB÷'2ÖÆ—fS"×&÷Fö6öÂæÆör#âc¢7FGW3ÒCð¢VÇ6P¢V6†òw'VçF–ÖR'F–f7BÖ—76–æs²&÷Fö6öÂ&ö&W2æ÷B'Vârâ÷WGWB÷'2ÖÆ—fS"×&÷Fö6öÂæÆöp¢7FGW3Ó0¢f¢6WBÖP¢V6†ò&W†—Eö6öFSÒG7FGW2"ãâ"Dt•D…T%ôõUEUB ¢6B÷WGWB÷'2ÖÆ—fS"×&÷Fö6öÂæÆöp¢W†—B  ¢ÒæÖS¢w&—FR7G'V7GW&ÂW†V7WF–öâ7VÖÖ'¢–c¢Çv—2‚¢6†VÆÃ¢—F†öà¢Vçc ¢%TåD”ÔUôU„•C¢G·²7FW2ç'VçF–ÖRæ÷WGWG2æW†—Eö6öFR×Ð¢$õDô4ôÅôU„•C¢G·²7FW2ç&÷Fö6öÂæ÷WGWG2æW†—Eö6öFR×Ð¢'Vã¢À¢–×÷'B§6öà¢–×÷'B÷0¢g&öÒF†Æ–"–×÷'BF€ ¢÷WGWBÒF‚‚v÷WGWBr¢'VçF–ÖU÷F‚Ò÷WGWBòu%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öâp¢&÷Fö6öÅ÷F‚Ò÷WGWBòu%5ô$õTäDTEõ$õDô4ôÅõ$ô$U2æ§6öâp¢7VÖÖ'’Ò°¢vv—E÷6†s¢÷2æVçf—&öå²tt•D…T%õ4„uÒÀ¢w'VçF–ÖUöW†—Eö6öFRs¢÷2æVçf—&öâævWB‚u%TåD”ÔUôU„•BrÂrr’À¢w&÷Fö6öÅöW†—Eö6öFRs¢÷2æVçf—&öâævWB‚u$õDô4ôÅôU„•BrÂrr’À¢w'VçF–ÖUö'F–f7E÷&W6VçBs¢'VçF–ÖU÷F‚æ—5öf–ÆR‚’À¢w&÷Fö6öÅö'F–f7E÷&W6VçBs¢&÷Fö6öÅ÷F‚æ—5öf–ÆR‚’À¢Ð¢–b'VçF–ÖU÷F‚æ—5öf–ÆR‚“ ¢'VçF–ÖRÒ§6öâæÆöG2‡'VçF–ÖU÷F‚ç&VE÷FW‡B†Væ6öF–æsÒwWFbÓ‚r’¢7VÖÖ'•²w'VçF–ÖU÷7VÖÖ'’uÒÒ'VçF–ÖRævWB‚w7VÖÖ'’r¢–b&÷Fö6öÅ÷F‚æ—5öf–ÆR‚“ ¢&÷Fö6öÂÒ§6öâæÆöG2‡&÷Fö6öÅ÷F‚ç&VE÷FW‡B†Væ6öF–æsÒwWFbÓ‚r’¢7VÖÖ'•²w&÷Fö6öÅ÷7VÖÖ'’uÒÒ&÷Fö6öÂævWB‚w7VÖÖ'’r¢†÷WGWBòw'2ÖÆ—fS"ÖW†V7WF–öâ×7VÖÖ'’æ§6öâr’çw&—FU÷FW‡B€¢§6öâæGV×2‡7VÖÖ'’Â–æFVçCÓ"Â6÷'Eö¶W—3ÕG'VR’²uÆârÂVæ6öF–æsÒwWFbÓ‚p¢¢&–çB†§6öâæGV×2‡7VÖÖ'’Â6÷'Eö¶W—3ÕG'VR’ ¢ÒæÖS¢WÆöBÆ—fR"Wf–FVæ6P¢–c¢Çv—2‚¢W6W3¢7F–öç2÷WÆöBÖ'F–f7Dc@¢v—Fƒ ¢æÖS¢'2ÖÆ—fS"ÖWf–FVæ6P¢Fƒ¢À¢÷WGWBõ%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öà¢÷WGWBõ%5ô$õTäDTEõ$õDô4ôÅõ$ô$U2æ§6öà¢÷WGWB÷'2ÖÆ—fS"ÖVçf—&öæÖVçBæ§6öà¢÷WGWB÷'2ÖÆ—fS"ÖW†V7WF–öâ×7VÖÖ'’æ§6öà¢÷WGWB÷'2ÖÆ—fS"×'VçF–ÖRæÆöp¢÷WGWB÷'2ÖÆ—fS"×&÷Fö6öÂæÆöp¢÷WGWB÷'2Ö6Æ–Ò×ÆææW"×6Öö¶Ræ§6öà¢÷WGWB÷'2ÖÆö6ÂÖÖöFVÂ×6Öö¶Ræ§6öà¢÷WGWBöÖöFVÂ×6†#SbçG‡@¢÷WGWB÷ÆææW"ÖÖöFVÂ×6†#SbçG‡@¢÷WGWBöÆÆÖ×6W'fW"×fW'6–öâæÆöp¢÷WGWBöÆÆÖ×6W'fW"æÆöp¢÷WGWBöÆÆÖÖ†VÇF‚æ§6öà¢÷WGWB÷ÆææW"ÖÆÆÆÖ×6W'fW"æÆöp¢÷WGWB÷ÆææW"ÖÆÆÆÖÖ†VÇF‚æ§6öà¢–bÖæòÖf–ÆW2Öf÷VæC¢v&à¢&WFVçF–öâÖF—3¢@ ¢ÒæÖS¢Væf÷&6RWf–FVæ6R&W6Væ6RöæÇ¢–c¢Çv—2‚¢6†VÆÃ¢&6€¢'Vã¢À¢6WBÖWVò—Vf–À¢FW7BÖb÷WGWBõ%5ô$õTäDTEõTÄ”d”4D”ôåõ%TåD”ÔRæ§6öà¢FW7BÖb÷WGWBõ%5ô$õTäDTEõ$õDô4ôÅõ$ô$U2æ§6öà 
+      LOCAL_BASE_URL: http://127.0.0.1:8000/v1
+      LOCAL_MODEL_FLASH_NAME: rq1c-qwen3-4b-instruct-2507-q4km
+      LOCAL_MODEL_PRO_NAME: rq1c-qwen3-4b-instruct-2507-q4km
+      LOCAL_DEFAULT_MODEL_PROFILE: flash
+      DEFAULT_MODEL_PROFILE: flash
+      LOCAL_MAX_RETRIES: '0'
+      LLM_MAX_RETRIES: '0'
+      LOCAL_TIMEOUT_SECONDS: '20'
+      LLM_TIMEOUT_SECONDS: '20'
+      RESEARCH_CLAIM_PLANNER_BASE_URL: http://127.0.0.1:8001/v1
+      RESEARCH_CLAIM_PLANNER_MODEL_NAME: rq1c-qwen25-15b-instruct-q4km
+      RESEARCH_CLAIM_PLANNER_API_KEY: local
+      RESEARCH_CANDIDATE_ASSESSOR_BASE_URL: http://127.0.0.1:8001/v1
+      RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME: rq1c-qwen25-15b-instruct-q4km
+      RESEARCH_CANDIDATE_ASSESSOR_API_KEY: local
+      WEB_TOOL_ENABLED: 'true'
+      WEB_ENABLE_DUCKDUCKGO: 'true'
+      WEB_ENABLE_SEARXNG: 'false'
+      WEB_ENABLE_BING_RSS: 'true'
+      WEB_SEARCH_PROVIDER_TIMEOUT_SECONDS: '6'
+      WEB_SEARCH_TOTAL_TIMEOUT_SECONDS: '8'
+      NEWS_ENABLE_FIRECRAWL_READER: 'false'
+      NEWS_ENABLE_JINA_READER: 'false'
+      LLAMA_CPP_TAG: b10809
+      LLAMA_CPP_ARCHIVE_SHA256: 5e34434ddc6d03cd1584f403201aff0d4bd1a5793a72ff7e286532dfd1e4b941  # pragma: allowlist secret
+      HF_MODEL_REPO: unsloth/Qwen3-4B-Instruct-2507-GGUF
+      HF_MODEL_FILE: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+      MODEL_ALIAS: rq1c-qwen3-4b-instruct-2507-q4km
+      PLANNER_HF_MODEL_REPO: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+      PLANNER_HF_MODEL_FILE: qwen2.5-1.5b-instruct-q4_k_m.gguf
+      PLANNER_MODEL_SHA256_EXPECTED: 6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e  # pragma: allowlist secret
+      PLANNER_MODEL_ALIAS: rq1c-qwen25-15b-instruct-q4km
+
+    steps:
+      - name: Check out exact qualification head
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Study Agent dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install pinned llama.cpp CPU server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-llama output
+          archive=.local-llama/llama.tar.gz
+          curl -fL --retry 4 --retry-delay 2 \
+            "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-ubuntu-x64.tar.gz" \
+            -o "$archive"
+          echo "${LLAMA_CPP_ARCHIVE_SHA256}  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C .local-llama
+          server="$(find .local-llama -type f -name llama-server -print -quit)"
+          test -n "$server"
+          chmod +x "$server"
+          echo "LLAMA_SERVER=$server" >> "$GITHUB_ENV"
+          "$server" --version | tee output/llama-server-version.log
+
+      - name: Download pinned Qwen3 4B GGUF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-model output
+          model=.local-model/${HF_MODEL_FILE}
+          curl -fL --retry 5 --retry-delay 3 \
+            "https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}?download=true" \
+            -o "$model"
+          test -s "$model"
+          model_sha="$(sha256sum "$model" | awk '{print $1}')"
+          model_bytes="$(stat -c '%s' "$model")"
+          echo "MODEL_PATH=$model" >> "$GITHUB_ENV"
+          echo "MODEL_SHA256=$model_sha" >> "$GITHUB_ENV"
+          echo "MODEL_BYTES=$model_bytes" >> "$GITHUB_ENV"
+          printf '%s  %s\n' "$model_sha" "$HF_MODEL_FILE" | tee output/model-sha256.txt
+
+      - name: Download pinned Qwen2.5 1.5B planner GGUF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-model output
+          model=.local-model/${PLANNER_HF_MODEL_FILE}
+          curl -fL --retry 5 --retry-delay 3 \
+            "https://huggingface.co/${PLANNER_HF_MODEL_REPO}/resolve/main/${PLANNER_HF_MODEL_FILE}?download=true" \
+            -o "$model"
+          test -s "$model"
+          model_sha="$(sha256sum "$model" | awk '{print $1}')"
+          test "$model_sha" = "$PLANNER_MODEL_SHA256_EXPECTED"
+          model_bytes="$(stat -c '%s' "$model")"
+          echo "PLANNER_MODEL_PATH=$model" >> "$GITHUB_ENV"
+          echo "PLANNER_MODEL_SHA256=$model_sha" >> "$GITHUB_ENV"
+          echo "PLANNER_MODEL_BYTES=$model_bytes" >> "$GITHUB_ENV"
+          printf '%s  %s\n' "$model_sha" "$PLANNER_HF_MODEL_FILE" | tee output/planner-model-sha256.txt
+
+      - name: Start local Qwen3 4B OpenAI-compatible server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$LLAMA_SERVER" \
+            -m "$MODEL_PATH" \
+            --alias "$MODEL_ALIAS" \
+            --host 127.0.0.1 \
+            --port 8000 \
+            -c 8192 \
+            -t "$(nproc)" \
+            --jinja \
+            > output/llama-server.log 2>&1 &
+          echo $! > output/llama-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8000/health > output/llama-health.json 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat output/llama-server.pid)" 2>/dev/null; then
+              cat output/llama-server.log >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          cat output/llama-server.log >&2
+          exit 1
+
+      - name: Start local Qwen2.5 1.5B planner server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$LLAMA_SERVER" \
+            -m "$PLANNER_MODEL_PATH" \
+            --alias "$PLANNER_MODEL_ALIAS" \
+            --host 127.0.0.1 \
+            --port 8001 \
+            -c 4096 \
+            -t "$(nproc)" \
+            --jinja \
+            > output/planner-llama-server.log 2>&1 &
+          echo $! > output/planner-llama-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8001/health > output/planner-llama-health.json 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat output/planner-llama-server.pid)" 2>/dev/null; then
+              cat output/planner-llama-server.log >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          cat output/planner-llama-server.log >&2
+          exit 1
+
+      - name: Run production claim-planner smoke
+        shell: python
+        run: |
+          import json
+          import time
+          from pathlib import Path
+
+          from src.web.research.claim_planner import RuntimeClaimPlanner
+          from src.web.research.contracts import ResearchBudget
+          from src.web.research.model_gateway import ResearchModelGateway
+
+          budget = ResearchBudget(
+              max_candidates=20,
+              max_reads=8,
+              soft_timeout_seconds=45,
+              hard_timeout_seconds=60,
+              max_total_chars=16000,
+          )
+          cases = [
+              'What is the current stable Python release?',
+              'Compare the current official support status of two software releases.',
+              'What can be verified about an announced feature if independent confirmation is limited?',
+          ]
+          records = []
+          for index, question in enumerate(cases, start=1):
+              planner = RuntimeClaimPlanner(ResearchModelGateway(timeout_seconds=20.0))
+              started = time.monotonic()
+              result = planner.plan(
+                  run_id=f'planner_smoke_{index}',
+                  question=question,
+                  reference_date='2026-09-05',
+                  budget=budget,
+                  mode='active',
+                  timeout_seconds=20.0,
+              )
+              elapsed = time.monotonic() - started
+              record = {
+                  'case': index,
+                  'completed': result.completed,
+                  'elapsed_seconds': round(elapsed, 6),
+                  'audit_count': len(result.audits),
+                  'reason': result.reason,
+                  'model_name': result.audits[0].model_name if result.audits else '',
+                  'output_tokens': result.audits[0].output_tokens if result.audits else None,
+              }
+              records.append(record)
+              if not result.completed:
+                  raise SystemExit(f'production planner smoke unavailable: {record}')
+              if elapsed >= 20.0:
+                  raise SystemExit(f'production planner smoke exceeded 20s: {record}')
+              if len(result.audits) != 1:
+                  raise SystemExit(f'planner smoke spent unexpected attempts: {record}')
+          Path('output/rq1c-claim-planner-smoke.json').write_text(
+              json.dumps(records, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(records, sort_keys=True))
+
+      - name: Run non-qualification Qwen3 4B smoke
+        shell: python
+        run: |
+          import json
+          import time
+          from pathlib import Path
+          from openai import OpenAI
+
+          client = OpenAI(
+              api_key='local',
+              base_url='http://127.0.0.1:8000/v1',
+              timeout=60,
+              max_retries=0,
+          )
+          evidence = (
+              'A bounded research system must distinguish retrieved candidates, successful reads, '
+              'eligible evidence, and final supported claims. It must not upgrade unread snippets into '
+              'evidence, and it must report uncertainty when support is insufficient. '
+          ) * 12
+          started = time.monotonic()
+          response = client.chat.completions.create(
+              model='rq1c-qwen3-4b-instruct-2507-q4km',
+              messages=[
+                  {
+                      'role': 'system',
+                      'content': 'Return one JSON object only with keys summary, risks, ready.',
+                  },
+                  {
+                      'role': 'user',
+                      'content': evidence + '\nSummarize this into 4 concise risks and set ready=true.',
+                  },
+              ],
+              temperature=0,
+              max_tokens=256,
+              response_format={'type': 'json_object'},
+          )
+          elapsed = time.monotonic() - started
+          text = response.choices[0].message.content or ''
+          parsed = json.loads(text)
+          if parsed.get('ready') is not True:
+              raise SystemExit('local model smoke did not return ready=true')
+          if elapsed >= 60.0:
+              raise SystemExit(f'local model smoke exceeded 60s: {elapsed:.3f}s')
+          usage = response.usage
+          record = {
+              'kind': 'non_qualification_local_model_smoke',
+              'elapsed_seconds': round(elapsed, 6),
+              'prompt_tokens': getattr(usage, 'prompt_tokens', None),
+              'completion_tokens': getattr(usage, 'completion_tokens', None),
+              'total_tokens': getattr(usage, 'total_tokens', None),
+              'json_valid': True,
+              'ready': True,
+          }
+          Path('output/rq1c-local-model-smoke.json').write_text(
+              json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(record, sort_keys=True))
+
+      - name: Record exact local-provider environment
+        shell: python
+        run: |
+          import json
+          import os
+          import platform
+          import subprocess
+          from pathlib import Path
+
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          dirty = subprocess.check_output(
+              ['git', 'status', '--porcelain=v1', '--untracked-files=no'], text=True
+          ).strip()
+          if head != os.environ['GITHUB_SHA']:
+              raise SystemExit('checkout HEAD does not match GITHUB_SHA')
+          if dirty:
+              raise SystemExit('tracked checkout is dirty before qualification')
+          metadata = {
+              'git_sha': head,
+              'provider_profile': 'local',
+              'base_url': 'http://127.0.0.1:8000/v1',
+              'model_alias': os.environ['MODEL_ALIAS'],
+              'model_repo': os.environ['HF_MODEL_REPO'],
+              'model_file': os.environ['HF_MODEL_FILE'],
+              'model_sha256': os.environ['MODEL_SHA256'],
+              'model_bytes': int(os.environ['MODEL_BYTES']),
+              'planner_base_url': os.environ['RESEARCH_CLAIM_PLANNER_BASE_URL'],
+              'planner_model_alias': os.environ['PLANNER_MODEL_ALIAS'],
+              'planner_model_repo': os.environ['PLANNER_HF_MODEL_REPO'],
+              'planner_model_file': os.environ['PLANNER_HF_MODEL_FILE'],
+              'planner_model_sha256': os.environ['PLANNER_MODEL_SHA256'],
+              'planner_model_bytes': int(os.environ['PLANNER_MODEL_BYTES']),
+              'planner_max_tokens': 320,
+              'planner_max_attempts': 1,
+              'candidate_assessor_base_url': os.environ['RESEARCH_CANDIDATE_ASSESSOR_BASE_URL'],
+              'candidate_assessor_model_alias': os.environ['RESEARCH_CANDIDATE_ASSESSOR_MODEL_NAME'],
+              'candidate_assessor_max_candidates_per_claim': 2,
+              'candidate_assessor_max_attempts_per_invocation': 1,
+              'candidate_assessor_max_tokens_per_two_candidates': 220,
+              'candidate_assessor_wire_schema': 'ca2',
+              'candidate_assessor_enum_encoding': 'integer_codes',
+              'diagnostic_failure_categories': ['compact_code', 'compact_domain', 'reader'],
+              'candidate_assessor_index_conventions': ['zero_based', 'one_based'],
+              'candidate_assessor_exact_response_rows': True,
+              'candidate_assessor_timeout_seconds': 15,
+              'llama_cpp_tag': os.environ['LLAMA_CPP_TAG'],
+              'llama_cpp_archive_sha256': os.environ['LLAMA_CPP_ARCHIVE_SHA256'],
+              'runner_arch': platform.machine(),
+              'runner_cpu_count': os.cpu_count(),
+              'server_context_tokens': 8192,
+              'planner_server_context_tokens': 4096,
+              'sdk_max_retries': 0,
+              'provider_timeout_seconds': 20,
+              'smoke_is_qualification_evidence': False,
+          }
+          Path('output/rq1c-live12-environment.json').write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(metadata, sort_keys=True))
+
+      - name: Run bounded live 12 runtime
+        id: runtime
+        shell: bash
+        run: |
+          set +e
+          python tools/run_rq1c_bounded_qualification.py \
+            --output output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+            > output/rq1c-live12-runtime.log 2>&1
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-live12-runtime.log
+          exit 0
+
+      - name: Run deterministic protocol probes bound to runtime artifact
+        id: protocol
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json ]; then
+            python tools/run_rq1c_protocol_probes.py \
+              --runtime output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+              --output output/RQ1C_BOUNDED_PROTOCOL_PROBES.json \
+              > output/rq1c-live12-protocol.log 2>&1
+            status=$?
+          else
+            echo 'runtime artifact missing; protocol probes not run' > output/rq1c-live12-protocol.log
+            status=3
+          fi
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-live12-protocol.log
+          exit 0
+
+      - name: Write structural execution summary
+        if: always()
+        shell: python
+        env:
+          RUNTIME_EXIT: ${{ steps.runtime.outputs.exit_code }}
+          PROTOCOL_EXIT: ${{ steps.protocol.outputs.exit_code }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path('output')
+          runtime_path = output / 'RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json'
+          protocol_path = output / 'RQ1C_BOUNDED_PROTOCOL_PROBES.json'
+          summary = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'runtime_exit_code': os.environ.get('RUNTIME_EXIT', ''),
+              'protocol_exit_code': os.environ.get('PROTOCOL_EXIT', ''),
+              'runtime_artifact_present': runtime_path.is_file(),
+              'protocol_artifact_present': protocol_path.is_file(),
+          }
+          if runtime_path.is_file():
+              runtime = json.loads(runtime_path.read_text(encoding='utf-8'))
+              summary['runtime_summary'] = runtime.get('summary')
+          if protocol_path.is_file():
+              protocol = json.loads(protocol_path.read_text(encoding='utf-8'))
+              summary['protocol_summary'] = protocol.get('summary')
+          (output / 'rq1c-live12-execution-summary.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(summary, sort_keys=True))
+
+      - name: Upload live 12 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rq1c-live12-evidence
+          path: |
+            output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+            output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
+            output/rq1c-live12-environment.json
+            output/rq1c-live12-execution-summary.json
+            output/rq1c-live12-runtime.log
+            output/rq1c-live12-protocol.log
+            output/rq1c-claim-planner-smoke.json
+            output/rq1c-local-model-smoke.json
+            output/model-sha256.txt
+            output/planner-model-sha256.txt
+            output/llama-server-version.log
+            output/llama-server.log
+            output/llama-health.json
+            output/planner-llama-server.log
+            output/planner-llama-health.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce evidence presence only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+          test -f output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
