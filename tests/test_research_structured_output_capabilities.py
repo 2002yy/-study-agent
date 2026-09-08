@@ -200,6 +200,7 @@ def test_gateway_extra_body_passthrough_is_transparent_by_default() -> None:
         provider_profile="openai",
         client=_FakeClient(_ok_response()),
         model_name="shared-model",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     gateway.complete_structured(
@@ -217,6 +218,7 @@ def test_gateway_extra_body_passthrough_is_transparent_by_default() -> None:
         provider_profile="openai",
         client=_FakeClient(_ok_response()),
         model_name="shared-model",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     gateway.complete_structured(
@@ -274,6 +276,7 @@ def test_evidence_extractor_deepseek_sends_thinking_off_and_keeps_budget() -> No
         provider_profile="deepseek",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     extractor = RuntimeEvidenceExtractor(gateway)
@@ -298,6 +301,7 @@ def test_evidence_extractor_deepseek_carries_output_contract_in_prompt() -> None
         provider_profile="deepseek",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     RuntimeEvidenceExtractor(gateway).extract(
@@ -338,6 +342,7 @@ def test_evidence_extractor_openai_prompt_unchanged() -> None:
         provider_profile="openai",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     RuntimeEvidenceExtractor(gateway).extract(
@@ -389,6 +394,7 @@ def test_runtime_assessor_deepseek_pipeline_still_reaches_parser(
         provider_profile="deepseek",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     assessor = RuntimeCandidateAssessor(shared)
@@ -425,6 +431,7 @@ def test_runtime_planner_deepseek_pipeline_still_reaches_parser(
         provider_profile="deepseek",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     planner = RuntimeClaimPlanner(shared)
@@ -450,6 +457,7 @@ def test_runtime_planner_openai_pipeline_keeps_json_schema(
         provider_profile="openai",
         client=client,
         model_name="m",
+        timeout_seconds=20.0,
         max_attempts=1,
     )
     planner = RuntimeClaimPlanner(shared)
