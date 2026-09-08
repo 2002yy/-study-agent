@@ -17,7 +17,10 @@ from typing import Any, Mapping
 
 from openai import OpenAI
 
-from src.llm_client import get_client
+from src.llm_client import (
+    get_client,
+    research_structured_output_capabilities,
+)
 from src.web.research.candidate_assessment import (
     CANDIDATE_ASSESSMENT_GAIN_SIGNAL_CODES,
     CANDIDATE_ASSESSMENT_RELEVANCE_CODES,
@@ -34,6 +37,8 @@ from src.web.research.model_gateway import (
     AttemptStartedHook,
     ResearchModelCallAudit,
     ResearchModelGateway,
+    merge_research_extra_body,
+    with_json_object_contract,
 )
 from src.web.research.source_cluster import CandidateClusterAssignment
 
@@ -185,11 +190,23 @@ class EvidenceExtractionResult:
 
 
 class _CandidateAssessorCompletions:
-    def __init__(self, inner: Any) -> None:
+    """Inject the assessment structured-output transport per provider capability.
+
+    Wire-level ``json_schema`` providers keep the strict schema response_format.
+    ``json_object``-only providers (e.g. DeepSeek) carry the same dynamic schema
+    (rows pinned to the candidate count) as a system-prompt contract and disable
+    provider-side thinking; ``parse_compact_candidate_assessment_response`` keeps
+    final authority either way.
+    """
+
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
         self._inner = inner
+        self._provider_profile = provider_profile
+        mode, thinking_off = research_structured_output_capabilities(provider_profile)
+        self._wire_json_schema = mode == "json_schema"
+        self._thinking_off_extra_body = thinking_off
 
     def create(self, **kwargs: Any) -> Any:
-        response_format = deepcopy(_CANDIDATE_ASSESSMENT_RESPONSE_FORMAT)
         messages = kwargs.get("messages")
         if (
             not isinstance(messages, list)
@@ -204,16 +221,31 @@ class _CandidateAssessorCompletions:
             raise ValueError("candidate assessment request envelope invalid") from exc
         if not 1 <= candidate_count <= 100:
             raise ValueError("candidate assessment request count invalid")
-        rows_schema = response_format["json_schema"]["schema"]["properties"]["a"]
+        if self._wire_json_schema:
+            response_format = deepcopy(_CANDIDATE_ASSESSMENT_RESPONSE_FORMAT)
+            rows_schema = response_format["json_schema"]["schema"]["properties"]["a"]
+            rows_schema["minItems"] = candidate_count
+            rows_schema["maxItems"] = candidate_count
+            kwargs["response_format"] = response_format
+            return self._inner.create(**kwargs)
+        schema = deepcopy(_CANDIDATE_ASSESSMENT_RESPONSE_FORMAT["json_schema"]["schema"])
+        rows_schema = schema["properties"]["a"]
         rows_schema["minItems"] = candidate_count
         rows_schema["maxItems"] = candidate_count
-        kwargs["response_format"] = response_format
+        kwargs["messages"] = with_json_object_contract(messages, schema)
+        merged = merge_research_extra_body(
+            kwargs.get("extra_body"), self._thinking_off_extra_body
+        )
+        if merged is not None:
+            kwargs["extra_body"] = merged
         return self._inner.create(**kwargs)
 
 
 class _CandidateAssessorChat:
-    def __init__(self, inner: Any) -> None:
-        self.completions = _CandidateAssessorCompletions(inner.completions)
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
+        self.completions = _CandidateAssessorCompletions(
+            inner.completions, provider_profile=provider_profile
+        )
 
 
 class _CandidateAssessorClient:
@@ -225,7 +257,9 @@ class _CandidateAssessorClient:
 
     @property
     def chat(self) -> _CandidateAssessorChat:
-        return _CandidateAssessorChat(self._resolved_inner().chat)
+        return _CandidateAssessorChat(
+            self._resolved_inner().chat, provider_profile=self._provider_profile
+        )
 
     def with_options(self, **kwargs: Any) -> _CandidateAssessorClient:
         return _CandidateAssessorClient(
@@ -437,6 +471,11 @@ class RuntimeEvidenceExtractor:
                 "excerpt": excerpt,
             },
         }
+        # Transport stays json_object for every provider; thinking-off is a
+        # provider capability so reasoning cannot consume the bounded budget.
+        _, thinking_off_extra_body = research_structured_output_capabilities(
+            self.model_gateway.provider_profile
+        )
         result = self.model_gateway.complete_structured(
             logical_call_id=(
                 f"research_evidence_extract:{run_id}:{claim.id}:{candidate.id}:1"
@@ -473,6 +512,7 @@ class RuntimeEvidenceExtractor:
             on_attempt_started=on_attempt_started,
             on_attempt_finished=on_attempt_finished,
             attempt_start=attempt_start,
+            extra_body=thinking_off_extra_body,
         )
         return EvidenceExtractionResult(
             status=result.status,

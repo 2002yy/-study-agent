@@ -99,6 +99,7 @@ def _plan(planner: RuntimeClaimPlanner, *, attempt_start: int = 1) -> Any:
 def test_planner_has_small_anchored_schema_and_does_not_mutate_shared_retry_budget() -> None:
     client = _StructuredClient(_valid_plan(fenced=True))
     shared = ResearchModelGateway(
+        provider_profile="openai",
         client=client,
         model_name="shared-model",
         timeout_seconds=20,
@@ -378,6 +379,7 @@ def test_dedicated_planner_endpoint_routes_only_planner_model(
 
     shared_client = _FailIfCalledClient(_valid_plan())
     shared = ResearchModelGateway(
+        provider_profile="openai",
         client=shared_client,
         model_name="shared-4b",
         timeout_seconds=20,

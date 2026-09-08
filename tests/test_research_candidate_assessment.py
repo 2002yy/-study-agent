@@ -390,6 +390,7 @@ def test_runtime_assessor_caps_two_candidate_window_at_220_tokens() -> None:
     client = _AssessmentClient()
     assessor = RuntimeCandidateAssessor(
         ResearchModelGateway(
+            provider_profile="openai",
             client=client,
             model_name="shared",
             max_attempts=2,
@@ -434,6 +435,7 @@ def test_dedicated_assessor_endpoint_routes_only_assessment_model(
     shared = _AssessmentClient(fail=True)
     assessor = RuntimeCandidateAssessor(
         ResearchModelGateway(
+            provider_profile="openai",
             client=shared,
             model_name="shared",
             max_attempts=2,

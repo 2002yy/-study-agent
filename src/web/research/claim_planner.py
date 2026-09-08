@@ -17,7 +17,7 @@ from typing import Any, Mapping
 
 from openai import OpenAI
 
-from src.llm_client import get_client
+from src.llm_client import get_client, research_structured_output_capabilities
 from src.web.research.contracts import (
     EvidenceGap,
     EvidenceRequirement,
@@ -34,6 +34,8 @@ from src.web.research.model_gateway import (
     AttemptStartedHook,
     ResearchModelCallAudit,
     ResearchModelGateway,
+    merge_research_extra_body,
+    with_json_object_contract,
 )
 from src.web.research.policy import evidence_policy_for_claim
 
@@ -171,19 +173,50 @@ class ClaimBootstrapResult:
 
 
 class _ClaimPlannerCompletions:
-    """Inject planner-only JSON Schema without changing the shared gateway API."""
+    """Inject planner-only structured-output transport without changing the shared gateway API.
 
-    def __init__(self, inner: Any) -> None:
+    Providers with wire-level ``json_schema`` support keep the strict schema
+    response_format. Providers restricted to ``json_object`` carry the same
+    schema as a system-prompt contract and disable provider-side thinking so
+    reasoning cannot consume the bounded output budget before the JSON lands.
+    The strict parser (``_parse_claim_plan``) keeps final authority in both cases.
+    """
+
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
         self._inner = inner
+        self._provider_profile = provider_profile
+        mode, thinking_off = research_structured_output_capabilities(provider_profile)
+        self._wire_json_schema = mode == "json_schema"
+        self._thinking_off_extra_body = thinking_off
 
     def create(self, **kwargs: Any) -> Any:
-        kwargs["response_format"] = _CLAIM_PLAN_RESPONSE_FORMAT
+        if self._wire_json_schema:
+            kwargs["response_format"] = _CLAIM_PLAN_RESPONSE_FORMAT
+            return self._inner.create(**kwargs)
+        messages = kwargs.get("messages")
+        if (
+            not isinstance(messages, list)
+            or not messages
+            or not isinstance(messages[-1], Mapping)
+        ):
+            raise ValueError("claim planner request messages invalid")
+        kwargs["messages"] = with_json_object_contract(
+            messages,
+            _CLAIM_PLAN_RESPONSE_FORMAT["json_schema"]["schema"],
+        )
+        merged = merge_research_extra_body(
+            kwargs.get("extra_body"), self._thinking_off_extra_body
+        )
+        if merged is not None:
+            kwargs["extra_body"] = merged
         return self._inner.create(**kwargs)
 
 
 class _ClaimPlannerChat:
-    def __init__(self, inner: Any) -> None:
-        self.completions = _ClaimPlannerCompletions(inner.completions)
+    def __init__(self, inner: Any, *, provider_profile: str) -> None:
+        self.completions = _ClaimPlannerCompletions(
+            inner.completions, provider_profile=provider_profile
+        )
 
 
 class _ClaimPlannerClient:
@@ -195,7 +228,9 @@ class _ClaimPlannerClient:
 
     @property
     def chat(self) -> _ClaimPlannerChat:
-        return _ClaimPlannerChat(self._resolved_inner().chat)
+        return _ClaimPlannerChat(
+            self._resolved_inner().chat, provider_profile=self._provider_profile
+        )
 
     def with_options(self, **kwargs: Any) -> _ClaimPlannerClient:
         return _ClaimPlannerClient(
