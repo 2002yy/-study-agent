@@ -27,6 +27,7 @@ from src.llm_client import research_structured_output_capabilities
 from src.web.research.active_semantics import (
     _CANDIDATE_ASSESSMENT_RESPONSE_FORMAT,
     _CandidateAssessorCompletions,
+    _EXTRACTION_SYSTEM_PROMPT,
     CANDIDATE_ASSESSMENT_BASE_MAX_TOKENS,
     CANDIDATE_ASSESSMENT_MAX_TOKENS_PER_CANDIDATE,
     CANDIDATE_ASSESSMENT_WINDOW_MAX_TOKENS,
@@ -289,6 +290,67 @@ def test_evidence_extractor_deepseek_sends_thinking_off_and_keeps_budget() -> No
     assert call["response_format"] == {"type": "json_object"}
     assert call["extra_body"] == _THINKING_OFF
     assert call["max_tokens"] == 900
+
+
+def test_evidence_extractor_deepseek_carries_output_contract_in_prompt() -> None:
+    client = _FakeClient(_ok_response(content="not json"))
+    gateway = ResearchModelGateway(
+        provider_profile="deepseek",
+        client=client,
+        model_name="m",
+        max_attempts=1,
+    )
+    RuntimeEvidenceExtractor(gateway).extract(
+        run_id="run-1",
+        claim=_claim(),
+        candidate=_candidate("a"),
+        source_role="primary",
+        source_cluster_id="cluster-a",
+        content="bounded page text",
+    )
+    system_content = client.chat.completions.calls[0]["messages"][0]["content"]
+    assert system_content.startswith(_EXTRACTION_SYSTEM_PROMPT)
+    assert "Output contract (STRICT" in system_content
+    # The exact field set is enumerated and input-envelope keys are excluded.
+    assert json.dumps(
+        sorted(
+            {
+                "schema_version",
+                "candidate_id",
+                "claim_id",
+                "source_role",
+                "source_cluster_id",
+                "relation",
+                "strength",
+                "locator",
+                "anchored_spans",
+                "caveats",
+                "published_at",
+            }
+        )
+    ) in system_content
+    assert "claim_text or page" in system_content
+
+
+def test_evidence_extractor_openai_prompt_unchanged() -> None:
+    client = _FakeClient(_ok_response(content="not json"))
+    gateway = ResearchModelGateway(
+        provider_profile="openai",
+        client=client,
+        model_name="m",
+        max_attempts=1,
+    )
+    RuntimeEvidenceExtractor(gateway).extract(
+        run_id="run-1",
+        claim=_claim(),
+        candidate=_candidate("a"),
+        source_role="primary",
+        source_cluster_id="cluster-a",
+        content="bounded page text",
+    )
+    call = client.chat.completions.calls[0]
+    assert call["messages"][0]["content"] == _EXTRACTION_SYSTEM_PROMPT
+    assert "extra_body" not in call
 
 
 def test_frozen_research_budgets_unchanged() -> None:

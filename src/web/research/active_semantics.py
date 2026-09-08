@@ -72,6 +72,7 @@ anchored_spans must be short verbatim anchors present in the supplied excerpt. I
 does not bear on the claim, use relation=lead with low strength; never invent evidence."""
 
 _RELATIONS = {"supports", "contradicts", "qualifies", "background", "lead"}
+
 _SOURCE_ROLES = {
     "primary",
     "authoritative_secondary",
@@ -157,6 +158,27 @@ _EXTRACTION_FIELDS = {
     "caveats",
     "published_at",
 }
+
+# For providers without wire-level json_schema (e.g. DeepSeek), the extraction
+# call runs on json_object transport, so the exact output contract must be
+# carried in the prompt. Derived from the real field set/enums to avoid drift.
+# The strict _parse_extraction keeps final authority in all transports.
+_JSON_OBJECT_EXTRACTION_CONTRACT = (
+    "\n\nOutput contract (STRICT, must match exactly):\n"
+    "Return ONE JSON object with EXACTLY these top-level keys and no others:\n"
+    + json.dumps(sorted(_EXTRACTION_FIELDS), ensure_ascii=False)
+    + "\n"
+    + f'- "schema_version" must be exactly "{EVIDENCE_EXTRACTION_SCHEMA_VERSION}".\n'
+    + "- Echo candidate_id, claim_id, source_role, source_cluster_id, and "
+    "published_at exactly as supplied.\n"
+    + f'- "relation" must be one of {json.dumps(sorted(_RELATIONS))}.\n'
+    + '- "strength" is a number between 0 and 1.\n'
+    + '- "locator" and every entry of "anchored_spans" must be short verbatim '
+    "substrings of the supplied page excerpt.\n"
+    + '- "caveats" is an array of strings (use an empty array when there are none).\n'
+    + "Never add keys from the input envelope (such as claim_text or page) and "
+    "never omit any listed key."
+)
 
 
 @dataclass(frozen=True)
@@ -473,8 +495,11 @@ class RuntimeEvidenceExtractor:
         }
         # Transport stays json_object for every provider; thinking-off is a
         # provider capability so reasoning cannot consume the bounded budget.
-        _, thinking_off_extra_body = research_structured_output_capabilities(
+        extraction_mode, thinking_off_extra_body = research_structured_output_capabilities(
             self.model_gateway.provider_profile
+        )
+        extraction_system_prompt = _EXTRACTION_SYSTEM_PROMPT + (
+            _JSON_OBJECT_EXTRACTION_CONTRACT if extraction_mode == "json_object" else ""
         )
         result = self.model_gateway.complete_structured(
             logical_call_id=(
@@ -483,7 +508,7 @@ class RuntimeEvidenceExtractor:
             ),
             purpose="research_evidence_extraction",
             messages=[
-                {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
+                {"role": "system", "content": extraction_system_prompt},
                 {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
             ],
             audit_payload=request,
