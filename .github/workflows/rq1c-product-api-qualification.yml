@@ -1,6 +1,9 @@
 name: RQ1-C Product API Qualification
 
 on:
+  push:
+    branches:
+      - codex/rq1c-bounded-qualification
   workflow_dispatch:
     inputs:
       provider_profile:
@@ -42,15 +45,22 @@ concurrency:
 
 jobs:
   product-api-live12:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.head_commit.message == 'rq1c-product-api-live12' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       PYTHONPATH: .
-      LLM_PROVIDER_PROFILE: ${{ inputs.provider_profile }}
-      DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      LLM_PROVIDER_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.provider_profile || vars.RQ1C_PRODUCT_PROVIDER_PROFILE }}
+      DEFAULT_MODEL_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.default_model_profile || vars.RQ1C_PRODUCT_DEFAULT_MODEL_PROFILE }}
       LLM_MAX_RETRIES: '0'
       LLM_TIMEOUT_SECONDS: '30'
       RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT: 'false'
+      RQ1C_PRODUCT_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
+      RQ1C_PRODUCT_BASE_URL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || vars.RQ1C_PRODUCT_BASE_URL }}
+      RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.flash_model || vars.RQ1C_PRODUCT_FLASH_MODEL }}
+      RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.pro_model || vars.RQ1C_PRODUCT_PRO_MODEL }}
       WEB_TOOL_ENABLED: 'true'
       WEB_ENABLE_DUCKDUCKGO: 'true'
       WEB_ENABLE_SEARXNG: 'false'
@@ -59,42 +69,6 @@ jobs:
       WEB_SEARCH_TOTAL_TIMEOUT_SECONDS: '8'
       NEWS_ENABLE_FIRECRAWL_READER: 'false'
       NEWS_ENABLE_JINA_READER: 'false'
-
-      # One qualification-only repository secret is deliberately projected to
-      # every supported provider namespace. src.llm_client reads only the
-      # namespace selected by LLM_PROVIDER_PROFILE. This avoids dynamic secret
-      # lookup and, critically, provides no local-model fallback.
-      OPENAI_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
-      OPENAI_BASE_URL: ${{ inputs.base_url }}
-      OPENAI_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
-      OPENAI_MODEL_PRO_NAME: ${{ inputs.pro_model }}
-      OPENAI_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
-      OPENAI_MAX_RETRIES: '0'
-      OPENAI_TIMEOUT_SECONDS: '30'
-
-      DEEPSEEK_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
-      DEEPSEEK_BASE_URL: ${{ inputs.base_url }}
-      DEEPSEEK_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
-      DEEPSEEK_MODEL_PRO_NAME: ${{ inputs.pro_model }}
-      DEEPSEEK_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
-      DEEPSEEK_MAX_RETRIES: '0'
-      DEEPSEEK_TIMEOUT_SECONDS: '30'
-
-      OPENROUTER_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
-      OPENROUTER_BASE_URL: ${{ inputs.base_url }}
-      OPENROUTER_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
-      OPENROUTER_MODEL_PRO_NAME: ${{ inputs.pro_model }}
-      OPENROUTER_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
-      OPENROUTER_MAX_RETRIES: '0'
-      OPENROUTER_TIMEOUT_SECONDS: '30'
-
-      SILICONFLOW_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
-      SILICONFLOW_BASE_URL: ${{ inputs.base_url }}
-      SILICONFLOW_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
-      SILICONFLOW_MODEL_PRO_NAME: ${{ inputs.pro_model }}
-      SILICONFLOW_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
-      SILICONFLOW_MAX_RETRIES: '0'
-      SILICONFLOW_TIMEOUT_SECONDS: '30'
 
     steps:
       - name: Check out exact product qualification head
@@ -109,6 +83,44 @@ jobs:
       - name: Install Study Agent dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Configure selected product provider without fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider="$(printf '%s' "$LLM_PROVIDER_PROFILE" | tr '[:upper:]' '[:lower:]')"
+          case "$provider" in
+            openai) prefix=OPENAI ;;
+            deepseek) prefix=DEEPSEEK ;;
+            openrouter) prefix=OPENROUTER ;;
+            siliconflow) prefix=SILICONFLOW ;;
+            *) echo "unsupported product provider profile: $provider" >&2; exit 1 ;;
+          esac
+          test -n "$RQ1C_PRODUCT_API_KEY" || {
+            echo 'RQ1C_PRODUCT_API_KEY repository secret is missing; refusing local fallback' >&2
+            exit 1
+          }
+          test -n "$RQ1C_PRODUCT_BASE_URL_EFFECTIVE" || {
+            echo 'product API base URL is missing' >&2
+            exit 1
+          }
+          test -n "$RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE" || {
+            echo 'production flash model is missing' >&2
+            exit 1
+          }
+          test -n "$RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE" || {
+            echo 'production pro model is missing' >&2
+            exit 1
+          }
+          {
+            echo "${prefix}_API_KEY=${RQ1C_PRODUCT_API_KEY}"
+            echo "${prefix}_BASE_URL=${RQ1C_PRODUCT_BASE_URL_EFFECTIVE}"
+            echo "${prefix}_MODEL_FLASH_NAME=${RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE}"
+            echo "${prefix}_MODEL_PRO_NAME=${RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE}"
+            echo "${prefix}_DEFAULT_MODEL_PROFILE=${DEFAULT_MODEL_PROFILE}"
+            echo "${prefix}_MAX_RETRIES=0"
+            echo "${prefix}_TIMEOUT_SECONDS=30"
+          } >> "$GITHUB_ENV"
+
       - name: Validate product API contract before model calls
         shell: python
         run: |
@@ -116,34 +128,26 @@ jobs:
           import subprocess
           from urllib.parse import urlparse
 
+          from src.llm_client import get_provider_settings
+
           allowed = {'openai', 'deepseek', 'openrouter', 'siliconflow'}
           provider = (os.environ.get('LLM_PROVIDER_PROFILE') or '').strip().lower()
           if provider not in allowed:
               raise SystemExit(f'unsupported product provider profile: {provider!r}')
+          if (os.environ.get('RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT') or '').strip().lower() != 'false':
+              raise SystemExit('product API qualification must not use hosted-CPU exemption')
 
-          prefix = {
-              'openai': 'OPENAI',
-              'deepseek': 'DEEPSEEK',
-              'openrouter': 'OPENROUTER',
-              'siliconflow': 'SILICONFLOW',
-          }[provider]
-          api_key = (os.environ.get(f'{prefix}_API_KEY') or '').strip()
-          base_url = (os.environ.get(f'{prefix}_BASE_URL') or '').strip()
-          flash_model = (os.environ.get(f'{prefix}_MODEL_FLASH_NAME') or '').strip()
-          pro_model = (os.environ.get(f'{prefix}_MODEL_PRO_NAME') or '').strip()
-          if not api_key:
-              raise SystemExit(
-                  'RQ1C_PRODUCT_API_KEY repository secret is missing; '
-                  'product qualification refuses to fall back to a local provider'
-              )
-          parsed = urlparse(base_url)
+          settings = get_provider_settings(provider)
+          parsed = urlparse(settings.base_url)
           host = (parsed.hostname or '').lower()
           if parsed.scheme != 'https' or not host:
               raise SystemExit('product API base_url must be an absolute https URL')
           if host in {'localhost', '127.0.0.1', '::1'} or host.endswith('.localhost'):
               raise SystemExit('local/loopback provider is forbidden in product API qualification')
-          if not flash_model or not pro_model:
+          if not settings.flash_model or not settings.pro_model:
               raise SystemExit('both production model names are required')
+          if settings.max_retries != 0:
+              raise SystemExit('product qualification requires provider-hidden retries disabled')
 
           head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           dirty = subprocess.check_output(
@@ -161,6 +165,7 @@ jobs:
           import os
           import time
           from pathlib import Path
+          from urllib.parse import urlparse
 
           from src.llm_client import chat, get_model_name, get_provider_settings
 
@@ -185,7 +190,7 @@ jobs:
           record = {
               'git_sha': os.environ['GITHUB_SHA'],
               'provider_profile': provider,
-              'base_url_host': __import__('urllib.parse').parse.urlparse(settings.base_url).hostname,
+              'base_url_host': urlparse(settings.base_url).hostname,
               'model_name': model,
               'elapsed_seconds': round(elapsed, 6),
               'response_nonempty': True,
