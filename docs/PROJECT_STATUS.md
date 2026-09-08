@@ -26,6 +26,13 @@
 - **OpenCode 小批施工协议：**[`RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md`](RESEARCH_QUALITY_OPENCODE_EXECUTION_PLAN.md)。
 - **状态读取规则：**若本文件历史段落中的旧 HEAD、旧“下一步”或旧 LOCAL/REMOTE 状态与本节冲突，以本节 + Git/GitHub 当前事实为准；实现者应修正文档，不得自行重开已冻结架构选择。
 
+### 0.0 RQ1-C 一次性 qualification 资产收口（2026-09-08）
+
+- **收口动作：**本 commit 退役 13 个一次性 RQ1-C qualification 资产，PR #142 diff 由 43 changed files 收窄为仅长期资产 + 本清理：6 个 GitHub Actions workflow（`rq1c-live-qualification` / `rq1c-planner-benchmark` / `rq1c-planner-diagnostic` / `rq1c-preread-diagnostic` / `rq1c-product-api-qualification` / `rq1c-secret-allowlist`）、3 份触发说明（`docs/research_quality/RQ1C_LIVE12_EXECUTION_TRIGGER.md` / `RQ1C_PLANNER_DIAGNOSTIC_TRIGGER.md` / `RQ1C_PREREAD_DIAGNOSTIC_TRIGGER.md`）、2 个 diagnostic 工具（`tools/run_rq1c_planner_diagnostic.py` / `tools/run_rq1c_preread_diagnostic.py`）、2 个 diagnostic-only 测试（`tests/test_rq1c_preread_diagnostic.py` / `tests/test_rq1c_product_api_workflow.py`）。
+- **资格认定执行位置：**RQ1-C 生产 API qualification 改为**本地 / 手动**执行；仓库与 GitHub CI **不持有任何 provider / key / endpoint**，也不再由 GitHub Actions 跑一次性 12-case live qualification。
+- **GO / NO-GO 不变：**RQ1-C 仍 **FROZEN / NO-GO** —— 直到本地真实 API 12-case 通过冻结门，才允许 untouched live12 与 default activation 决策；本清理不改变任何 production 行为、合同或冻结边界。
+- **保留资产：**长期 runner / rubric / 6+2 reservation / git identity / protocol / evaluator / guardrail / runtime core 等 90 commits 真实修复全部保留，不被本清理覆盖。
+
 ### 0.1 RQCE-P1 B5 frozen execution contract（2026-08-27）
 
 1. **单轮纵向切片：**只接通 `Gap → query batch → CandidatePool → semantic assessment → role-aware rank → cluster-diverse read → strict extraction → Evidence Gate → durable continuation`；不做多轮饱和或独立 synthesis。

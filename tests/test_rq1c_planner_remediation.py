@@ -10,7 +10,6 @@ from src.web.research.claim_planner import (
     _parse_claim_plan,
 )
 from tools.rq1c_qualification_guardrails import _planner_observability
-from tools.run_rq1c_planner_diagnostic import classify_planner_failure
 
 
 def _claim(anchor: str, *, kind: str = "factual", profile: str = "current_fact") -> dict:
@@ -87,24 +86,6 @@ def test_planner_observability_handles_missing_runtime() -> None:
         "attempts": [],
         "stores_raw_model_text": False,
     }
-
-
-@pytest.mark.parametrize(
-    ("exc", "expected"),
-    [
-        (json.JSONDecodeError("bad", "{", 0), "json_decode"),
-        (TimeoutError("timed out"), "timeout"),
-        (ValueError("question anchor must be copied from user question"), "anchor_not_verbatim"),
-        (ValueError("runtime claim plan contains duplicate anchors"), "duplicate_anchor"),
-        (ValueError("invalid claim kind"), "invalid_kind"),
-        (ValueError("invalid evidence policy profile"), "invalid_policy_profile"),
-        (TypeError("runtime claim must be an object"), "semantic_schema"),
-    ],
-)
-def test_classify_planner_failure_uses_stable_safe_taxonomy(
-    exc: BaseException, expected: str
-) -> None:
-    assert classify_planner_failure(exc) == expected
 
 
 def test_duplicate_optional_supporting_anchor_is_discarded() -> None:
