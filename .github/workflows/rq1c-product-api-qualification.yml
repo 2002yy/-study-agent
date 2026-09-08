@@ -83,44 +83,88 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Configure selected product provider without fallback
-        shell: bash
+        shell: python
         env:
           RQ1C_PRODUCT_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
         run: |
-          set -euo pipefail
-          provider="$(printf '%s' "$LLM_PROVIDER_PROFILE" | tr '[:upper:]' '[:lower:]')"
-          case "$provider" in
-            openai) prefix=OPENAI ;;
-            deepseek) prefix=DEEPSEEK ;;
-            openrouter) prefix=OPENROUTER ;;
-            siliconflow) prefix=SILICONFLOW ;;
-            *) echo "unsupported product provider profile: $provider" >&2; exit 1 ;;
-          esac
-          test -n "$RQ1C_PRODUCT_API_KEY" || {
-            echo 'RQ1C_PRODUCT_API_KEY repository secret is missing; refusing local fallback' >&2
-            exit 1
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path('output')
+          output.mkdir(exist_ok=True)
+          provider = (os.environ.get('LLM_PROVIDER_PROFILE') or '').strip().lower()
+          default_profile = (os.environ.get('DEFAULT_MODEL_PROFILE') or '').strip().lower()
+          api_key = (os.environ.get('RQ1C_PRODUCT_API_KEY') or '').strip()
+          base_url = (os.environ.get('RQ1C_PRODUCT_BASE_URL_EFFECTIVE') or '').strip()
+          flash_model = (os.environ.get('RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE') or '').strip()
+          pro_model = (os.environ.get('RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE') or '').strip()
+
+          missing = []
+          if not provider:
+              missing.append('RQ1C_PRODUCT_PROVIDER_PROFILE')
+          if not default_profile:
+              missing.append('RQ1C_PRODUCT_DEFAULT_MODEL_PROFILE')
+          if not api_key:
+              missing.append('RQ1C_PRODUCT_API_KEY')
+          if not base_url:
+              missing.append('RQ1C_PRODUCT_BASE_URL')
+          if not flash_model:
+              missing.append('RQ1C_PRODUCT_FLASH_MODEL')
+          if not pro_model:
+              missing.append('RQ1C_PRODUCT_PRO_MODEL')
+
+          allowed = {
+              'openai': 'OPENAI',
+              'deepseek': 'DEEPSEEK',
+              'openrouter': 'OPENROUTER',
+              'siliconflow': 'SILICONFLOW',
           }
-          test -n "$RQ1C_PRODUCT_BASE_URL_EFFECTIVE" || {
-            echo 'product API base URL is missing' >&2
-            exit 1
+          errors = []
+          if provider and provider not in allowed:
+              errors.append(f'unsupported provider profile: {provider}')
+          if default_profile and default_profile not in {'flash', 'pro'}:
+              errors.append(f'unsupported default model profile: {default_profile}')
+
+          record = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'qualification_kind': 'production_api',
+              'configuration_complete': not missing and not errors,
+              'provider_profile': provider,
+              'default_model_profile': default_profile,
+              'api_key_present': bool(api_key),
+              'base_url_present': bool(base_url),
+              'flash_model_present': bool(flash_model),
+              'pro_model_present': bool(pro_model),
+              'missing': missing,
+              'errors': errors,
+              'secret_value_stored': False,
           }
-          test -n "$RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE" || {
-            echo 'production flash model is missing' >&2
-            exit 1
-          }
-          test -n "$RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE" || {
-            echo 'production pro model is missing' >&2
-            exit 1
-          }
-          {
-            echo "${prefix}_API_KEY=${RQ1C_PRODUCT_API_KEY}"
-            echo "${prefix}_BASE_URL=${RQ1C_PRODUCT_BASE_URL_EFFECTIVE}"
-            echo "${prefix}_MODEL_FLASH_NAME=${RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE}"
-            echo "${prefix}_MODEL_PRO_NAME=${RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE}"
-            echo "${prefix}_DEFAULT_MODEL_PROFILE=${DEFAULT_MODEL_PROFILE}"
-            echo "${prefix}_MAX_RETRIES=0"
-            echo "${prefix}_TIMEOUT_SECONDS=30"
-          } >> "$GITHUB_ENV"
+          (output / 'rq1c-product-api-config.json').write_text(
+              json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          if missing or errors:
+              details = []
+              if missing:
+                  details.append('missing=' + ','.join(missing))
+              if errors:
+                  details.append('errors=' + ';'.join(errors))
+              raise SystemExit(
+                  'product API qualification configuration invalid; '
+                  + ' '.join(details)
+                  + '; refusing local fallback and making zero model calls'
+              )
+
+          prefix = allowed[provider]
+          github_env = Path(os.environ['GITHUB_ENV'])
+          with github_env.open('a', encoding='utf-8') as stream:
+              stream.write(f'{prefix}_API_KEY={api_key}\n')
+              stream.write(f'{prefix}_BASE_URL={base_url}\n')
+              stream.write(f'{prefix}_MODEL_FLASH_NAME={flash_model}\n')
+              stream.write(f'{prefix}_MODEL_PRO_NAME={pro_model}\n')
+              stream.write(f'{prefix}_DEFAULT_MODEL_PROFILE={default_profile}\n')
+              stream.write(f'{prefix}_MAX_RETRIES=0\n')
+              stream.write(f'{prefix}_TIMEOUT_SECONDS=30\n')
 
       - name: Validate product API contract before model calls
         shell: python
@@ -198,7 +242,6 @@ jobs:
               'response_text_stored': False,
               'max_retries': settings.max_retries,
           }
-          Path('output').mkdir(exist_ok=True)
           Path('output/rq1c-product-api-smoke.json').write_text(
               json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
@@ -267,7 +310,7 @@ jobs:
             deepseek) prefix=DEEPSEEK ;;
             openrouter) prefix=OPENROUTER ;;
             siliconflow) prefix=SILICONFLOW ;;
-            *) prefix=UNKNOWN ;;
+            *) exit 0 ;;
           esac
           echo "${prefix}_API_KEY=" >> "$GITHUB_ENV"
 
@@ -304,6 +347,7 @@ jobs:
           from pathlib import Path
 
           output = Path('output')
+          output.mkdir(exist_ok=True)
           runtime_path = output / 'RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json'
           protocol_path = output / 'RQ1C_BOUNDED_PROTOCOL_PROBES.json'
           summary = {
@@ -336,6 +380,7 @@ jobs:
           path: |
             output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
             output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
+            output/rq1c-product-api-config.json
             output/rq1c-product-api-environment.json
             output/rq1c-product-api-execution-summary.json
             output/rq1c-product-api-runtime.log
