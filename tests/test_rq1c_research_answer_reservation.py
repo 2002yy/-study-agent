@@ -45,7 +45,6 @@ def _call(gateway: ResearchModelGateway, index: int):
         response_schema_version="test-v1",
         parse=lambda raw: raw,
         max_tokens=20,
-        max_tokens=20,
         attempt_start=1,
     )
 
