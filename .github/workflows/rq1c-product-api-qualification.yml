@@ -1,0 +1,332 @@
+name: RQ1-C Product API Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider_profile:
+        description: OpenAI-compatible production provider profile
+        required: true
+        type: choice
+        options:
+          - deepseek
+          - openai
+          - openrouter
+          - siliconflow
+      base_url:
+        description: Production OpenAI-compatible API base URL (must be https)
+        required: true
+        type: string
+      flash_model:
+        description: Exact production flash model name
+        required: true
+        type: string
+      pro_model:
+        description: Exact production pro model name
+        required: true
+        type: string
+      default_model_profile:
+        description: Production default model profile
+        required: true
+        type: choice
+        default: flash
+        options:
+          - flash
+          - pro
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rq1c-product-api-qualification
+  cancel-in-progress: false
+
+jobs:
+  product-api-live12:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: .
+      LLM_PROVIDER_PROFILE: ${{ inputs.provider_profile }}
+      DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      LLM_MAX_RETRIES: '0'
+      LLM_TIMEOUT_SECONDS: '30'
+      RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT: 'false'
+      WEB_TOOL_ENABLED: 'true'
+      WEB_ENABLE_DUCKDUCKGO: 'true'
+      WEB_ENABLE_SEARXNG: 'false'
+      WEB_ENABLE_BING_RSS: 'true'
+      WEB_SEARCH_PROVIDER_TIMEOUT_SECONDS: '6'
+      WEB_SEARCH_TOTAL_TIMEOUT_SECONDS: '8'
+      NEWS_ENABLE_FIRECRAWL_READER: 'false'
+      NEWS_ENABLE_JINA_READER: 'false'
+
+      # One qualification-only repository secret is deliberately projected to
+      # every supported provider namespace. src.llm_client reads only the
+      # namespace selected by LLM_PROVIDER_PROFILE. This avoids dynamic secret
+      # lookup and, critically, provides no local-model fallback.
+      OPENAI_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
+      OPENAI_BASE_URL: ${{ inputs.base_url }}
+      OPENAI_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
+      OPENAI_MODEL_PRO_NAME: ${{ inputs.pro_model }}
+      OPENAI_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      OPENAI_MAX_RETRIES: '0'
+      OPENAI_TIMEOUT_SECONDS: '30'
+
+      DEEPSEEK_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ inputs.base_url }}
+      DEEPSEEK_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
+      DEEPSEEK_MODEL_PRO_NAME: ${{ inputs.pro_model }}
+      DEEPSEEK_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      DEEPSEEK_MAX_RETRIES: '0'
+      DEEPSEEK_TIMEOUT_SECONDS: '30'
+
+      OPENROUTER_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
+      OPENROUTER_BASE_URL: ${{ inputs.base_url }}
+      OPENROUTER_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
+      OPENROUTER_MODEL_PRO_NAME: ${{ inputs.pro_model }}
+      OPENROUTER_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      OPENROUTER_MAX_RETRIES: '0'
+      OPENROUTER_TIMEOUT_SECONDS: '30'
+
+      SILICONFLOW_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
+      SILICONFLOW_BASE_URL: ${{ inputs.base_url }}
+      SILICONFLOW_MODEL_FLASH_NAME: ${{ inputs.flash_model }}
+      SILICONFLOW_MODEL_PRO_NAME: ${{ inputs.pro_model }}
+      SILICONFLOW_DEFAULT_MODEL_PROFILE: ${{ inputs.default_model_profile }}
+      SILICONFLOW_MAX_RETRIES: '0'
+      SILICONFLOW_TIMEOUT_SECONDS: '30'
+
+    steps:
+      - name: Check out exact product qualification head
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Study Agent dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Validate product API contract before model calls
+        shell: python
+        run: |
+          import os
+          import subprocess
+          from urllib.parse import urlparse
+
+          allowed = {'openai', 'deepseek', 'openrouter', 'siliconflow'}
+          provider = (os.environ.get('LLM_PROVIDER_PROFILE') or '').strip().lower()
+          if provider not in allowed:
+              raise SystemExit(f'unsupported product provider profile: {provider!r}')
+
+          prefix = {
+              'openai': 'OPENAI',
+              'deepseek': 'DEEPSEEK',
+              'openrouter': 'OPENROUTER',
+              'siliconflow': 'SILICONFLOW',
+          }[provider]
+          api_key = (os.environ.get(f'{prefix}_API_KEY') or '').strip()
+          base_url = (os.environ.get(f'{prefix}_BASE_URL') or '').strip()
+          flash_model = (os.environ.get(f'{prefix}_MODEL_FLASH_NAME') or '').strip()
+          pro_model = (os.environ.get(f'{prefix}_MODEL_PRO_NAME') or '').strip()
+          if not api_key:
+              raise SystemExit(
+                  'RQ1C_PRODUCT_API_KEY repository secret is missing; '
+                  'product qualification refuses to fall back to a local provider'
+              )
+          parsed = urlparse(base_url)
+          host = (parsed.hostname or '').lower()
+          if parsed.scheme != 'https' or not host:
+              raise SystemExit('product API base_url must be an absolute https URL')
+          if host in {'localhost', '127.0.0.1', '::1'} or host.endswith('.localhost'):
+              raise SystemExit('local/loopback provider is forbidden in product API qualification')
+          if not flash_model or not pro_model:
+              raise SystemExit('both production model names are required')
+
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          dirty = subprocess.check_output(
+              ['git', 'status', '--porcelain=v1', '--untracked-files=no'], text=True
+          ).strip()
+          if head != os.environ['GITHUB_SHA']:
+              raise SystemExit('checkout HEAD does not match GITHUB_SHA')
+          if dirty:
+              raise SystemExit('tracked checkout is dirty before product qualification')
+
+      - name: Smoke exact production provider
+        shell: python
+        run: |
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          from src.llm_client import chat, get_model_name, get_provider_settings
+
+          provider = os.environ['LLM_PROVIDER_PROFILE']
+          settings = get_provider_settings(provider)
+          model = get_model_name(provider_profile=provider)
+          started = time.monotonic()
+          text = chat(
+              [
+                  {'role': 'system', 'content': 'Answer with exactly RQ1C_API_OK.'},
+                  {'role': 'user', 'content': 'Connectivity check.'},
+              ],
+              provider_profile=provider,
+              task_name='single_chat',
+              temperature=0,
+              max_tokens=16,
+              timeout=30,
+          )
+          elapsed = time.monotonic() - started
+          if not text.strip():
+              raise SystemExit('production provider smoke returned an empty answer')
+          record = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'provider_profile': provider,
+              'base_url_host': __import__('urllib.parse').parse.urlparse(settings.base_url).hostname,
+              'model_name': model,
+              'elapsed_seconds': round(elapsed, 6),
+              'response_nonempty': True,
+              'response_text_stored': False,
+              'max_retries': settings.max_retries,
+          }
+          Path('output').mkdir(exist_ok=True)
+          Path('output/rq1c-product-api-smoke.json').write_text(
+              json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(record, sort_keys=True))
+
+      - name: Record product qualification environment
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          from src.llm_client import get_provider_settings
+
+          provider = os.environ['LLM_PROVIDER_PROFILE']
+          settings = get_provider_settings(provider)
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          metadata = {
+              'git_sha': head,
+              'qualification_kind': 'production_api',
+              'provider_profile': provider,
+              'base_url_scheme': urlparse(settings.base_url).scheme,
+              'base_url_host': urlparse(settings.base_url).hostname,
+              'flash_model_name': settings.flash_model,
+              'pro_model_name': settings.pro_model,
+              'default_model_profile': settings.default_profile,
+              'sdk_max_retries': settings.max_retries,
+              'provider_timeout_seconds': settings.timeout_seconds,
+              'product_soft_timeout_seconds': 45,
+              'product_hard_timeout_seconds': 60,
+              'hosted_cpu_wallclock_exempt': False,
+              'api_key_present': bool(settings.api_key),
+              'api_key_stored': False,
+              'runtime_manifest_frozen': True,
+              'rubric_loaded_by_runtime': False,
+          }
+          Path('output/rq1c-product-api-environment.json').write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(metadata, sort_keys=True))
+
+      - name: Run bounded product API live 12 runtime
+        id: runtime
+        shell: bash
+        run: |
+          set +e
+          python tools/run_rq1c_bounded_qualification.py \
+            --output output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+            > output/rq1c-product-api-runtime.log 2>&1
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-product-api-runtime.log
+          exit 0
+
+      - name: Run deterministic protocol probes bound to product runtime artifact
+        id: protocol
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json ]; then
+            python tools/run_rq1c_protocol_probes.py \
+              --runtime output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json \
+              --output output/RQ1C_BOUNDED_PROTOCOL_PROBES.json \
+              > output/rq1c-product-api-protocol.log 2>&1
+            status=$?
+          else
+            echo 'runtime artifact missing; protocol probes not run' > output/rq1c-product-api-protocol.log
+            status=3
+          fi
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat output/rq1c-product-api-protocol.log
+          exit 0
+
+      - name: Write structural execution summary
+        if: always()
+        shell: python
+        env:
+          RUNTIME_EXIT: ${{ steps.runtime.outputs.exit_code }}
+          PROTOCOL_EXIT: ${{ steps.protocol.outputs.exit_code }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path('output')
+          runtime_path = output / 'RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json'
+          protocol_path = output / 'RQ1C_BOUNDED_PROTOCOL_PROBES.json'
+          summary = {
+              'git_sha': os.environ['GITHUB_SHA'],
+              'qualification_kind': 'production_api',
+              'runtime_exit_code': os.environ.get('RUNTIME_EXIT', ''),
+              'protocol_exit_code': os.environ.get('PROTOCOL_EXIT', ''),
+              'runtime_artifact_present': runtime_path.is_file(),
+              'protocol_artifact_present': protocol_path.is_file(),
+          }
+          if runtime_path.is_file():
+              runtime = json.loads(runtime_path.read_text(encoding='utf-8'))
+              summary['runtime_summary'] = runtime.get('summary')
+              wallclock = runtime.get('wallclock_contract') or {}
+              if wallclock.get('hosted_cpu_exempt'):
+                  raise SystemExit('product API qualification must not use hosted-CPU exemption')
+          if protocol_path.is_file():
+              protocol = json.loads(protocol_path.read_text(encoding='utf-8'))
+              summary['protocol_summary'] = protocol.get('summary')
+          (output / 'rq1c-product-api-execution-summary.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(summary, sort_keys=True))
+
+      - name: Upload product API evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rq1c-product-api-evidence
+          path: |
+            output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+            output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
+            output/rq1c-product-api-environment.json
+            output/rq1c-product-api-execution-summary.json
+            output/rq1c-product-api-runtime.log
+            output/rq1c-product-api-protocol.log
+            output/rq1c-product-api-smoke.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce product evidence presence only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f output/RQ1C_BOUNDED_QUALIFICATION_RUNTIME.json
+          test -f output/RQ1C_BOUNDED_PROTOCOL_PROBES.json
