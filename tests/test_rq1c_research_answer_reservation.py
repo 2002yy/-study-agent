@@ -36,6 +36,15 @@ class _FakeClient:
         return self
 
 
+def _gateway(client: _FakeClient, *, max_attempts: int) -> ResearchModelGateway:
+    return ResearchModelGateway(
+        client=client,
+        model_name="rq1c-test-model",
+        timeout_seconds=5.0,
+        max_attempts=max_attempts,
+    )
+
+
 def _call(gateway: ResearchModelGateway, index: int):
     return gateway.complete_structured(
         logical_call_id=f"logical:{index}",
@@ -51,7 +60,7 @@ def _call(gateway: ResearchModelGateway, index: int):
 
 def test_reservation_caps_research_before_answer_capacity(monkeypatch) -> None:
     client = _FakeClient()
-    gateway = ResearchModelGateway(client=client, max_attempts=1)
+    gateway = _gateway(client, max_attempts=1)
     original = ResearchModelGateway.complete_structured
     monkeypatch.setattr(guardrails, "MAX_RESEARCH_MODEL_CALLS", 2)
 
@@ -69,7 +78,7 @@ def test_reservation_caps_research_before_answer_capacity(monkeypatch) -> None:
 
 def test_reservation_bounds_retry_to_remaining_physical_capacity(monkeypatch) -> None:
     client = _FakeClient()
-    gateway = ResearchModelGateway(client=client, max_attempts=2)
+    gateway = _gateway(client, max_attempts=2)
     monkeypatch.setattr(guardrails, "MAX_RESEARCH_MODEL_CALLS", 1)
 
     with guardrails._reserve_answer_model_capacity():
