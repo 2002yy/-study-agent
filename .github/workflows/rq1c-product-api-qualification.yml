@@ -57,7 +57,6 @@ jobs:
       LLM_MAX_RETRIES: '0'
       LLM_TIMEOUT_SECONDS: '30'
       RQ1C_HOSTED_CPU_WALLCLOCK_EXEMPT: 'false'
-      RQ1C_PRODUCT_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
       RQ1C_PRODUCT_BASE_URL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || vars.RQ1C_PRODUCT_BASE_URL }}
       RQ1C_PRODUCT_FLASH_MODEL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.flash_model || vars.RQ1C_PRODUCT_FLASH_MODEL }}
       RQ1C_PRODUCT_PRO_MODEL_EFFECTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.pro_model || vars.RQ1C_PRODUCT_PRO_MODEL }}
@@ -85,6 +84,8 @@ jobs:
 
       - name: Configure selected product provider without fallback
         shell: bash
+        env:
+          RQ1C_PRODUCT_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}
         run: |
           set -euo pipefail
           provider="$(printf '%s' "$LLM_PROVIDER_PROFILE" | tr '[:upper:]' '[:lower:]')"
@@ -254,6 +255,21 @@ jobs:
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           cat output/rq1c-product-api-runtime.log
           exit 0
+
+      - name: Clear product API credentials before evidence processing
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider="$(printf '%s' "$LLM_PROVIDER_PROFILE" | tr '[:upper:]' '[:lower:]')"
+          case "$provider" in
+            openai) prefix=OPENAI ;;
+            deepseek) prefix=DEEPSEEK ;;
+            openrouter) prefix=OPENROUTER ;;
+            siliconflow) prefix=SILICONFLOW ;;
+            *) prefix=UNKNOWN ;;
+          esac
+          echo "${prefix}_API_KEY=" >> "$GITHUB_ENV"
 
       - name: Run deterministic protocol probes bound to product runtime artifact
         id: protocol
