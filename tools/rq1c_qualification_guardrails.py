@@ -5,12 +5,17 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
+from copy import copy
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from src.llm_client import _resolve_timeout, chat as _production_chat
+from src.web.research.model_gateway import ResearchModelGateway, ResearchModelResult
 
 MAX_MODEL_CALLS = 8
+RESERVED_ANSWER_MODEL_CALLS = 2
+MAX_RESEARCH_MODEL_CALLS = MAX_MODEL_CALLS - RESERVED_ANSWER_MODEL_CALLS
 HARD_TIMEOUT_SECONDS = 60.0
 HOSTED_CPU_CASE_HARD_TIMEOUT_SECONDS = 540.0
 HOSTED_CPU_ANSWER_TIMEOUT_SECONDS = 120.0
@@ -25,7 +30,7 @@ _default_binding_rows_provider: Callable[[Any], Any] = _empty_binding_rows_provi
 
 
 class QualificationModelBudgetExhausted(RuntimeError):
-    """Raised before dispatch when the six-call case budget is exhausted."""
+    """Raised before dispatch when the eight-call case budget is exhausted."""
 
 
 class QualificationHardDeadlineReached(TimeoutError):
@@ -119,6 +124,57 @@ def _planner_observability(run: Any) -> dict[str, Any]:
         "attempts": attempts,
         "stores_raw_model_text": False,
     }
+
+
+@contextmanager
+def _reserve_answer_model_capacity() -> Any:
+    """Cap qualification research at six physical calls and reserve two for answers.
+
+    The production ResearchModelGateway remains unchanged outside this guarded
+    context. Qualification executes cases serially, so a case-local temporary
+    method wrapper can count physical attempts across planner/assessor/extractor
+    gateway instances (including shallow copies) without changing product
+    defaults or introducing a second research implementation.
+    """
+
+    original = ResearchModelGateway.complete_structured
+    research_calls_started = 0
+
+    def bounded_complete_structured(
+        gateway: ResearchModelGateway,
+        *args: Any,
+        **kwargs: Any,
+    ) -> ResearchModelResult[Any]:
+        nonlocal research_calls_started
+        remaining = MAX_RESEARCH_MODEL_CALLS - research_calls_started
+        if remaining <= 0:
+            return ResearchModelResult(
+                status="unavailable",
+                value=None,
+                audits=(),
+                reason="qualification_research_model_budget_exhausted",
+            )
+
+        raw_attempt_start = kwargs.get("attempt_start", 1)
+        attempt_start = (
+            raw_attempt_start
+            if isinstance(raw_attempt_start, int) and not isinstance(raw_attempt_start, bool)
+            else 1
+        )
+        bounded_gateway = copy(gateway)
+        bounded_gateway.max_attempts = min(
+            gateway.max_attempts,
+            attempt_start + remaining - 1,
+        )
+        result = original(bounded_gateway, *args, **kwargs)
+        research_calls_started += len(result.audits)
+        return result
+
+    ResearchModelGateway.complete_structured = bounded_complete_structured
+    try:
+        yield
+    finally:
+        ResearchModelGateway.complete_structured = original
 
 
 @dataclass
@@ -240,7 +296,8 @@ class _ResearchBudgetProxy:
         return getattr(self._delegate, name)
 
     def execute(self, *args: Any, **kwargs: Any) -> Any:
-        completed = self._delegate.execute(*args, **kwargs)
+        with _reserve_answer_model_capacity():
+            completed = self._delegate.execute(*args, **kwargs)
         self._budget.set_research_truth(completed)
         return completed
 
