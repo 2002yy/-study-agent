@@ -28,8 +28,8 @@ def test_product_api_workflow_fails_closed_without_api_secret_or_https_endpoint(
     text = _workflow_text()
 
     assert "secrets.RQ1C_PRODUCT_API_KEY" in text
-    assert "RQ1C_PRODUCT_API_KEY repository secret is missing" in text
-    assert "refusing local fallback" in text
+    assert "missing.append('RQ1C_PRODUCT_API_KEY')" in text
+    assert "refusing local fallback and making zero model calls" in text
     assert "product API base_url must be an absolute https URL" in text
     assert "local/loopback provider is forbidden" in text
 
@@ -47,6 +47,21 @@ def test_product_api_secret_is_not_exposed_to_checkout_or_dependency_install() -
     assert clear < protocol
     assert text.count("secrets.RQ1C_PRODUCT_API_KEY") == 1
     assert 'echo "${prefix}_API_KEY=" >> "$GITHUB_ENV"' in text
+
+
+def test_product_api_config_failure_produces_sanitized_evidence() -> None:
+    text = _workflow_text()
+
+    assert "output.mkdir(exist_ok=True)" in text
+    assert "rq1c-product-api-config.json" in text
+    assert "'configuration_complete': not missing and not errors" in text
+    assert "'secret_value_stored': False" in text
+    assert "'api_key_present': bool(api_key)" in text
+    assert "missing.append('RQ1C_PRODUCT_PROVIDER_PROFILE')" in text
+    assert "missing.append('RQ1C_PRODUCT_DEFAULT_MODEL_PROFILE')" in text
+    assert "missing.append('RQ1C_PRODUCT_BASE_URL')" in text
+    assert "missing.append('RQ1C_PRODUCT_FLASH_MODEL')" in text
+    assert "missing.append('RQ1C_PRODUCT_PRO_MODEL')" in text
 
 
 def test_product_api_workflow_keeps_product_deadlines_and_disables_hosted_cpu_exemption() -> None:
