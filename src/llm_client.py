@@ -66,6 +66,41 @@ class ProviderSettings:
     default_profile: str
     timeout_seconds: float
     max_retries: int
+    # Structured-output capability boundary (see research_structured_output_capabilities).
+    structured_output_mode: str = "json_schema"
+    research_disable_thinking: bool = False
+
+
+# Provider capability boundary for strict structured outputs on bounded research
+# semantic calls. Wire-level ``json_schema`` response_format is only assumed for
+# providers that document OpenAI-style structured outputs. Providers in
+# ``_JSON_OBJECT_ONLY_PROFILES`` reject that transport, so research adapters use
+# ``json_object`` plus a prompt-carried contract; the strict Python parsers keep
+# final authority either way (fail-closed is unchanged).
+_JSON_OBJECT_ONLY_PROFILES = frozenset({"deepseek"})
+# Providers whose chat API supports explicitly disabling reasoning/thinking via
+# extra_body for bounded semantic calls (DeepSeek V4 defaults thinking to high,
+# which can consume the entire output-token budget before any JSON is emitted).
+_THINKING_CONTROLLABLE_PROFILES = frozenset({"deepseek"})
+_THINKING_OFF_EXTRA_BODY: dict[str, Any] = {"thinking": {"type": "disabled"}}
+
+
+def research_structured_output_capabilities(
+    provider_profile: str | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Return ``(structured_output_mode, thinking_off_extra_body)`` for a profile.
+
+    This lookup is key-free: it only normalizes the profile name, so callers may
+    probe capabilities without provider credentials being configured.
+    """
+    profile_name = _normalize_provider_profile(provider_profile)
+    mode = "json_object" if profile_name in _JSON_OBJECT_ONLY_PROFILES else "json_schema"
+    extra_body = (
+        dict(_THINKING_OFF_EXTRA_BODY)
+        if profile_name in _THINKING_CONTROLLABLE_PROFILES
+        else None
+    )
+    return mode, extra_body
 
 
 def _classify_error(e: Exception) -> str:
@@ -200,6 +235,7 @@ def get_provider_settings(provider_profile: str | None = None) -> ProviderSettin
             f"{_provider_env_name(profile_name, 'MODEL_PRO_NAME')} is missing."
         )
 
+    structured_mode, thinking_off = research_structured_output_capabilities(profile_name)
     return ProviderSettings(
         profile_name=profile_name,
         api_key=api_key,
@@ -209,6 +245,8 @@ def get_provider_settings(provider_profile: str | None = None) -> ProviderSettin
         default_profile=default_profile,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
+        structured_output_mode=structured_mode,
+        research_disable_thinking=thinking_off is not None,
     )
 
 

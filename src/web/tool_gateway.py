@@ -133,6 +133,22 @@ def _snapshot_search_results(
     return results
 
 
+_READ_ERROR_CODE_BY_REASON = {
+    "unsafe_or_empty_url": "invalid_url",
+    "empty_cache_entry": "fetch_failed",
+    "unsafe_redirect_target": "blocked",
+    "non_html_resource": "unsupported",
+    "all_backends_failed": "provider_failed",
+}
+
+
+def _canonical_read_error_code(reason: str) -> str:
+    value = str(reason or "").strip()
+    if value.startswith("exception:"):
+        return "provider_failed"
+    return _READ_ERROR_CODE_BY_REASON.get(value, "other")
+
+
 class GeneralWebGateway:
     """Expose bounded search, page reading, and GitHub browsing to model tools."""
 
@@ -371,6 +387,7 @@ class GeneralWebGateway:
                 "ok": False,
                 "url": result.requested_url,
                 "error": result.reason or "page_read_failed",
+                "error_code": _canonical_read_error_code(result.reason),
             }
         return {
             "ok": True,

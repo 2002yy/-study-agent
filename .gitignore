@@ -53,3 +53,5 @@ visual_assets_preview*.jpg
 .claude/
 frontend/playwright-g12-report/
 pytest_full.log
+.local-llama/
+.local-model/

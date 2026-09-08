@@ -12,7 +12,7 @@ import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
-from math import ceil
+from math import ceil, isfinite
 import time
 from typing import Any, cast
 
@@ -21,6 +21,7 @@ from src.domain.runtime_entities import WebLookupRun, new_id
 from src.repositories.web_lookup_repository import WebLookupRepository
 from src.web.research.active_adapter import ActiveResearchGateway
 from src.web.research.active_semantics import (
+    CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS,
     RuntimeCandidateAssessor,
     RuntimeEvidenceExtractor,
 )
@@ -91,7 +92,10 @@ from src.web.research.scheduler import (
     is_schedulable_candidate,
     plan_read_wave,
 )
-from src.web.research.source_cluster import cluster_candidate_sources
+from src.web.research.source_cluster import (
+    CandidateClusterAssignment,
+    cluster_candidate_sources,
+)
 from src.web.research.state import attach_claim_engine_state
 from src.web.research.steering import (
     ACTIVE_RESEARCH_STEERING_KEY,
@@ -111,6 +115,7 @@ ACTIVE_RESEARCH_COVERED_CLUSTERS_KEY = "claim_engine_covered_clusters"
 ACTIVE_RESEARCH_BRIEF_KEY = "claim_engine_evidence_brief"
 ACTIVE_RESEARCH_METRICS_KEY = "claim_engine_metrics"
 ACTIVE_RESEARCH_POLICY_AUDITS_KEY = "claim_engine_policy_audits"
+CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES = 2
 
 PolicyCheck = Callable[[Mapping[str, Any], str], bool]
 
@@ -142,12 +147,28 @@ class ActiveResearchRuntimeExecutor:
         policy_check: PolicyCheck | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         utc_now: Callable[[], str] | None = None,
+        model_timeout_cap_seconds: float = 20.0,
+        candidate_assessment_timeout_cap_seconds: float = (
+            CANDIDATE_ASSESSMENT_TIMEOUT_SECONDS
+        ),
     ) -> None:
         self.repository = repository
         self.gateway = gateway
+        if isinstance(model_timeout_cap_seconds, bool):
+            raise ValueError("model timeout cap must be positive")
+        try:
+            model_timeout_cap = float(model_timeout_cap_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("model timeout cap must be positive") from exc
+        if not isfinite(model_timeout_cap) or model_timeout_cap <= 0:
+            raise ValueError("model timeout cap must be positive")
+        self.model_timeout_cap_seconds = model_timeout_cap
         shared_model = model_gateway or ResearchModelGateway(timeout_seconds=20.0)
         self.claim_planner = claim_planner or RuntimeClaimPlanner(shared_model)
-        self.candidate_assessor = candidate_assessor or RuntimeCandidateAssessor(shared_model)
+        self.candidate_assessor = candidate_assessor or RuntimeCandidateAssessor(
+        shared_model,
+        timeout_cap_seconds=candidate_assessment_timeout_cap_seconds,
+    )
         self.evidence_extractor = evidence_extractor or RuntimeEvidenceExtractor(shared_model)
         self.policy_check = policy_check or _default_policy_check
         self.monotonic = monotonic
@@ -279,7 +300,13 @@ class ActiveResearchRuntimeExecutor:
             return late_ids
 
         def remaining_timeout() -> float:
-            return max(1.0, min(20.0, state.budget.hard_timeout_seconds - elapsed()))
+            return max(
+        1.0,
+        min(
+            self.model_timeout_cap_seconds,
+            state.budget.hard_timeout_seconds - elapsed(),
+        ),
+    )
 
         def ensure_budget() -> None:
             if elapsed() >= state.budget.hard_timeout_seconds:
@@ -798,24 +825,41 @@ class ActiveResearchRuntimeExecutor:
                 assessed_inputs = _assessment_inputs_store(context)
                 claim_rankings: dict[str, tuple[RankedCandidate, ...]] = {}
                 for claim in _ordered_claims(state):
-                    candidates = _candidates_for_claim(cursor, claim.id)
-                    if not candidates:
+                    claim_candidates = _candidates_for_claim(cursor, claim.id)
+                    if not claim_candidates:
                         continue
                     saved = stored_assessments.get(claim.id)
-                    candidate_ids = tuple(sorted(item.id for item in candidates))
-                    # P1-C batch 2: a later wave re-assesses a claim only when new
-                    # candidates appeared for it; unchanged candidate sets reuse
-                    # the durable rankings instead of burning model budget again.
-                    if (
-                        isinstance(saved, list)
-                        and saved
-                        and assessed_inputs.get(claim.id) == list(candidate_ids)
-                    ):
-                        claim_rankings[claim.id] = tuple(_ranked_from_dict(item) for item in saved)
-                        continue
-                    ensure_budget()
-                    clusters = cluster_candidate_sources(candidates)
+                    saved_ranked = (
+                        tuple(_ranked_from_dict(item) for item in saved)
+                        if isinstance(saved, list) and saved
+                        else ()
+                    )
+                    if saved_ranked:
+                        claim_rankings[claim.id] = saved_ranked
+                    saved_candidate_ids = {
+                        item.candidate.id for item in saved_ranked
+                    }
+                    clusters = cluster_candidate_sources(claim_candidates)
                     assignments = {item.candidate_id: item for item in clusters.assignments}
+                    candidates = _bounded_assessment_candidates(
+                        claim_candidates,
+                        assignments=assignments,
+                        max_reads=state.budget.max_reads,
+                        excluded_candidate_ids=frozenset(
+                            {*cursor.completed_read_ids, *saved_candidate_ids}
+                        ),
+                    )
+                    if not candidates:
+                        continue
+                    assessment_assignments = {
+                        item.id: assignments[item.id] for item in candidates
+                    }
+                    candidate_ids = tuple(sorted(item.id for item in candidates))
+                    # Assess only a new, unread cluster-diverse window. Prior
+                    # rankings remain durable inputs for scheduling and crash
+                    # recovery; successful later windows are merged and
+                    # reranked instead of replacing those bindings.
+                    ensure_budget()
                     categories = ("public_research_claim", "public_candidate_metadata")
                     assessment_logical_call_id = (
                         f"research_candidate_assessment:{run_id}:{claim.id}:1"
@@ -855,7 +899,7 @@ class ActiveResearchRuntimeExecutor:
                         run_id=run_id,
                         claim=claim,
                         candidates=candidates,
-                        assignments=assignments,
+                        assignments=assessment_assignments,
                         reference_date=state.reference_date,
                         timeout_seconds=remaining_timeout(),
                         on_attempt_started=on_model_started,
@@ -884,14 +928,23 @@ class ActiveResearchRuntimeExecutor:
                         )
                         checkpoint()
                         continue
+                    merged_assessments = {
+                        item.candidate.id: item.assessment for item in saved_ranked
+                    }
+                    merged_assessments.update(assessed.assessments)
+                    ranked_candidates = tuple(
+                        item
+                        for item in claim_candidates
+                        if item.id in merged_assessments
+                    )
                     ranked = rank_candidate_pool(
-                        candidates,
+                        ranked_candidates,
                         claim=claim,
-                        assessments=assessed.assessments,
+                        assessments=merged_assessments,
                     )
                     claim_rankings[claim.id] = ranked
                     stored_assessments[claim.id] = [item.to_dict() for item in ranked]
-                    assessed_inputs[claim.id] = list(candidate_ids)
+                    assessed_inputs[claim.id] = sorted(merged_assessments)
                     context[ACTIVE_RESEARCH_ASSESSMENTS_KEY] = stored_assessments
                     context[ACTIVE_RESEARCH_ASSESSMENT_INPUTS_KEY] = assessed_inputs
                     checkpoint()
@@ -1848,6 +1901,51 @@ def _candidates_for_claim(cursor: ResearchRuntimeCursor, claim_id: str) -> tuple
         for item in cursor.candidates
         if query_ids.intersection(item.query_ids)
     )
+
+
+def _bounded_assessment_candidates(
+    candidates: tuple[CandidatePoolItem, ...],
+    *,
+    assignments: Mapping[str, CandidateClusterAssignment],
+    max_reads: int,
+    excluded_candidate_ids: frozenset[str] = frozenset(),
+) -> tuple[CandidatePoolItem, ...]:
+    """Select a stable, cluster-diverse semantic-assessment window.
+
+    The candidate pool remains frozen at its existing cap. This window only
+    bounds model input to candidates that could still become physical reads in
+    the run, preferring one candidate per server-owned source cluster before
+    filling remaining slots in discovery order.
+    """
+    unread = tuple(
+        item for item in candidates if item.id not in excluded_candidate_ids
+    )
+    limit = max(
+        0,
+        min(
+            len(unread),
+            int(max_reads),
+            CANDIDATE_ASSESSMENT_WINDOW_MAX_CANDIDATES,
+        ),
+    )
+    if limit == 0:
+        return ()
+    ordered = tuple(sorted(unread, key=lambda item: (item.first_seen_rank, item.id)))
+    selected: list[CandidatePoolItem] = []
+    deferred: list[CandidatePoolItem] = []
+    seen_clusters: set[str] = set()
+    for candidate in ordered:
+        assignment = assignments.get(candidate.id)
+        cluster_id = str(getattr(assignment, "cluster_id", "") or candidate.id)
+        if cluster_id in seen_clusters:
+            deferred.append(candidate)
+            continue
+        seen_clusters.add(cluster_id)
+        selected.append(candidate)
+        if len(selected) == limit:
+            return tuple(selected)
+    selected.extend(deferred[: limit - len(selected)])
+    return tuple(selected)
 
 
 def _assessment_store(context: dict[str, Any]) -> dict[str, Any]:
