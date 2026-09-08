@@ -34,6 +34,21 @@ def test_product_api_workflow_fails_closed_without_api_secret_or_https_endpoint(
     assert "local/loopback provider is forbidden" in text
 
 
+def test_product_api_secret_is_not_exposed_to_checkout_or_dependency_install() -> None:
+    text = _workflow_text()
+    configure = text.index("- name: Configure selected product provider without fallback")
+    checkout = text.index("- name: Check out exact product qualification head")
+    install = text.index("- name: Install Study Agent dependencies")
+    secret = text.index("RQ1C_PRODUCT_API_KEY: ${{ secrets.RQ1C_PRODUCT_API_KEY }}")
+    clear = text.index("- name: Clear product API credentials before evidence processing")
+    protocol = text.index("- name: Run deterministic protocol probes bound to product runtime artifact")
+
+    assert checkout < install < configure <= secret
+    assert clear < protocol
+    assert text.count("secrets.RQ1C_PRODUCT_API_KEY") == 1
+    assert 'echo "${prefix}_API_KEY=" >> "$GITHUB_ENV"' in text
+
+
 def test_product_api_workflow_keeps_product_deadlines_and_disables_hosted_cpu_exemption() -> None:
     text = _workflow_text()
 
